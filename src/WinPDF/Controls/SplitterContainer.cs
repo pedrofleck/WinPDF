@@ -14,5 +14,9 @@ public sealed class SplitterContainer : ContentControl
     public SplitterContainer()
     {
         ProtectedCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeWestEast);
+        HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch;
+        VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Stretch;
+        HorizontalContentAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch;
+        VerticalContentAlignment = Microsoft.UI.Xaml.VerticalAlignment.Stretch;
     }
 }

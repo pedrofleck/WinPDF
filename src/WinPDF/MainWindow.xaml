@@ -340,137 +340,137 @@
         </Grid>
 
         <!-- ================================================================= -->
-        <!-- Layout Principal: Barra Lateral Redimensionável + Splitter + Main -->
-        <!-- Sem ChildrenTransitions para evitar flicker visual no resize      -->
         <!-- ================================================================= -->
-        <Grid Grid.Row="1" Background="Transparent">
-            <Grid.ColumnDefinitions>
-                <!-- Coluna 0: Barra Lateral Mica Redimensionável (220 a 480 DIPs) -->
-                <ColumnDefinition
-                    x:Name="SidebarColumn"
-                    Width="260"
-                    MinWidth="220"
-                    MaxWidth="480" />
-                <!-- Coluna 1: Divisória / Splitter Arrastável (6 DIPs) -->
-                <ColumnDefinition x:Name="SplitterColumn" Width="Auto" />
-                <!-- Coluna 2: Container Arredondado Principal -->
-                <ColumnDefinition x:Name="MainContentColumn" Width="*" />
-            </Grid.ColumnDefinitions>
+        <!-- Layout Principal: SplitView com Animação Nativa de GPU no Pane    -->
+        <!-- + Splitter Arrastável de 8 DIPs em toda a altura vertical         -->
+        <!-- ================================================================= -->
+        <SplitView
+            x:Name="MainSplitView"
+            Grid.Row="1"
+            DisplayMode="Inline"
+            IsPaneOpen="{x:Bind ViewModel.IsSidebarOpen, Mode=OneWay}"
+            OpenPaneLength="260"
+            PaneBackground="Transparent"
+            PanePlacement="Left">
+            <SplitView.Pane>
+                <Grid Background="Transparent">
+                    <Grid.ColumnDefinitions>
+                        <!-- Conteúdo da Barra Lateral (Abas + Rodapé) -->
+                        <ColumnDefinition Width="*" />
+                        <!-- Splitter de Redimensionamento acoplado na borda direita do Pane -->
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
 
-            <!-- ============================================================= -->
-            <!-- COLUNA 0: Barra Lateral Mica com Frame de Conteúdo + Rodapé   -->
-            <!-- ============================================================= -->
-            <Grid
-                x:Name="SidebarContainer"
-                Grid.Column="0"
-                Background="Transparent"
-                RowDefinitions="*,Auto"
-                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsSidebarOpen), Mode=OneWay}">
+                    <!-- Conteúdo da Barra Lateral (Frame de Conteúdo + Rodapé) -->
+                    <Grid Grid.Column="0" Background="Transparent" RowDefinitions="*,Auto">
+                        <!-- Frame de Conteúdo das Abas da Barra Lateral (Navegação Direcional) -->
+                        <Frame
+                            x:Name="SidebarContentFrame"
+                            Grid.Row="0"
+                            Background="Transparent"
+                            IsNavigationStackEnabled="False" />
 
-                <!-- Frame de Conteúdo das Abas da Barra Lateral (Navegação Direcional) -->
-                <Frame
-                    x:Name="SidebarContentFrame"
-                    Grid.Row="0"
-                    Background="Transparent"
-                    IsNavigationStackEnabled="False" />
+                        <!-- Rodapé com SelectorBar Nativo sem Bordas (Ícones Maiores de 20px) -->
+                        <Border
+                            Grid.Row="1"
+                            Padding="4,6,4,6"
+                            Background="Transparent"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="0,1,0,0">
+                            <SelectorBar
+                                x:Name="SidebarFooterSelectorBar"
+                                HorizontalAlignment="Center"
+                                SelectionChanged="OnSidebarFooterSelectionChanged">
+                                <SelectorBarItem
+                                    x:Name="ThumbnailsSelectorItem"
+                                    x:Uid="Sidebar_Thumbnails"
+                                    Margin="4,0"
+                                    Padding="8,6">
+                                    <SelectorBarItem.Icon>
+                                        <FontIcon FontSize="20" Glyph="&#xF0E2;" />
+                                    </SelectorBarItem.Icon>
+                                </SelectorBarItem>
+                                <SelectorBarItem
+                                    x:Name="OutlineSelectorItem"
+                                    x:Uid="Sidebar_Outline"
+                                    Margin="4,0"
+                                    Padding="8,6">
+                                    <SelectorBarItem.Icon>
+                                        <FontIcon FontSize="20" Glyph="&#xE8FD;" />
+                                    </SelectorBarItem.Icon>
+                                </SelectorBarItem>
+                                <SelectorBarItem
+                                    x:Name="AnnotationsSelectorItem"
+                                    x:Uid="Sidebar_Annotations"
+                                    Margin="4,0"
+                                    Padding="8,6">
+                                    <SelectorBarItem.Icon>
+                                        <FontIcon FontSize="20" Glyph="&#xE8F2;" />
+                                    </SelectorBarItem.Icon>
+                                </SelectorBarItem>
+                                <SelectorBarItem
+                                    x:Name="BookmarksSelectorItem"
+                                    x:Uid="Sidebar_Bookmarks"
+                                    Margin="4,0"
+                                    Padding="8,6">
+                                    <SelectorBarItem.Icon>
+                                        <FontIcon FontSize="20" Glyph="&#xE8A4;" />
+                                    </SelectorBarItem.Icon>
+                                </SelectorBarItem>
+                                <SelectorBarItem
+                                    x:Name="AttachmentsSelectorItem"
+                                    x:Uid="Sidebar_Attachments"
+                                    Margin="4,0"
+                                    Padding="8,6">
+                                    <SelectorBarItem.Icon>
+                                        <FontIcon FontSize="20" Glyph="&#xE723;" />
+                                    </SelectorBarItem.Icon>
+                                </SelectorBarItem>
+                            </SelectorBar>
+                        </Border>
+                    </Grid>
 
-                <!-- Rodapé com SelectorBar Nativo sem Bordas (Ícones Maiores de 20px) -->
-                <Border
-                    Grid.Row="1"
-                    Padding="4,6,4,6"
-                    Background="Transparent"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="0,1,0,0">
-                    <SelectorBar
-                        x:Name="SidebarFooterSelectorBar"
-                        HorizontalAlignment="Center"
-                        SelectionChanged="OnSidebarFooterSelectionChanged">
-                        <SelectorBarItem
-                            x:Name="ThumbnailsSelectorItem"
-                            x:Uid="Sidebar_Thumbnails"
-                            Margin="4,0"
-                            Padding="8,6">
-                            <SelectorBarItem.Icon>
-                                <FontIcon FontSize="20" Glyph="&#xF0E2;" />
-                            </SelectorBarItem.Icon>
-                        </SelectorBarItem>
-                        <SelectorBarItem
-                            x:Name="OutlineSelectorItem"
-                            x:Uid="Sidebar_Outline"
-                            Margin="4,0"
-                            Padding="8,6">
-                            <SelectorBarItem.Icon>
-                                <FontIcon FontSize="20" Glyph="&#xE8FD;" />
-                            </SelectorBarItem.Icon>
-                        </SelectorBarItem>
-                        <SelectorBarItem
-                            x:Name="AnnotationsSelectorItem"
-                            x:Uid="Sidebar_Annotations"
-                            Margin="4,0"
-                            Padding="8,6">
-                            <SelectorBarItem.Icon>
-                                <FontIcon FontSize="20" Glyph="&#xE8F2;" />
-                            </SelectorBarItem.Icon>
-                        </SelectorBarItem>
-                        <SelectorBarItem
-                            x:Name="BookmarksSelectorItem"
-                            x:Uid="Sidebar_Bookmarks"
-                            Margin="4,0"
-                            Padding="8,6">
-                            <SelectorBarItem.Icon>
-                                <FontIcon FontSize="20" Glyph="&#xE8A4;" />
-                            </SelectorBarItem.Icon>
-                        </SelectorBarItem>
-                        <SelectorBarItem
-                            x:Name="AttachmentsSelectorItem"
-                            x:Uid="Sidebar_Attachments"
-                            Margin="4,0"
-                            Padding="8,6">
-                            <SelectorBarItem.Icon>
-                                <FontIcon FontSize="20" Glyph="&#xE723;" />
-                            </SelectorBarItem.Icon>
-                        </SelectorBarItem>
-                    </SelectorBar>
-                </Border>
-            </Grid>
+                    <!-- Splitter Arrastável (8 DIPs) em TODA a Altura Vertical -->
+                    <controls:SplitterContainer
+                        Grid.Column="1"
+                        Width="8"
+                        HorizontalAlignment="Stretch"
+                        VerticalAlignment="Stretch"
+                        HorizontalContentAlignment="Stretch"
+                        VerticalContentAlignment="Stretch"
+                        Background="Transparent">
+                        <Thumb
+                            x:Name="SidebarSplitter"
+                            Width="8"
+                            HorizontalAlignment="Stretch"
+                            VerticalAlignment="Stretch"
+                            Background="Transparent"
+                            DragDelta="OnSidebarSplitterDragDelta">
+                            <Thumb.Template>
+                                <ControlTemplate TargetType="Thumb">
+                                    <Grid
+                                        Background="Transparent"
+                                        HorizontalAlignment="Stretch"
+                                        VerticalAlignment="Stretch">
+                                        <!-- Pílula visual central discreta (4×32 DIPs) -->
+                                        <Border
+                                            Width="4"
+                                            Height="32"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
+                                            CornerRadius="2" />
+                                    </Grid>
+                                </ControlTemplate>
+                            </Thumb.Template>
+                        </Thumb>
+                    </controls:SplitterContainer>
+                </Grid>
+            </SplitView.Pane>
 
-            <!-- ============================================================= -->
-            <!-- COLUNA 1: Splitter Arrastável Estilo Windows 11 Fotos         -->
-            <!-- ============================================================= -->
-            <controls:SplitterContainer
-                Grid.Column="1"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Stretch"
-                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsSidebarOpen), Mode=OneWay}">
-                <Thumb
-                    x:Name="SidebarSplitter"
-                    Width="6"
-                    HorizontalAlignment="Center"
-                    Background="Transparent"
-                    DragDelta="OnSidebarSplitterDragDelta">
-                    <Thumb.Template>
-                        <ControlTemplate TargetType="Thumb">
-                            <Grid Background="Transparent">
-                                <!-- Indicador visual central discreto (||) -->
-                                <Border
-                                    Width="2"
-                                    Height="24"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
-                                    CornerRadius="1" />
-                            </Grid>
-                        </ControlTemplate>
-                    </Thumb.Template>
-                </Thumb>
-            </controls:SplitterContainer>
-
-            <!-- ============================================================= -->
-            <!-- COLUNA 2: Container Arredondado com Frame Principal           -->
-            <!-- ============================================================= -->
+            <!-- Container Arredondado Principal -->
             <Border
                 x:Name="MainContentContainer"
-                Grid.Column="2"
                 Background="{ThemeResource LayerFillColorDefaultBrush}"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 BorderThickness="{x:Bind converters:UiHelpers.MainContainerBorderThickness(ViewModel.IsSidebarOpen), Mode=OneWay}"
@@ -482,6 +482,6 @@
                     Background="Transparent"
                     IsNavigationStackEnabled="False" />
             </Border>
-        </Grid>
+        </SplitView>
     </Grid>
 </Window>

@@ -49,19 +49,31 @@ public sealed partial class SettingsView : Page
 
         if (width >= ResponsiveBreakpoint)
         {
+            CardsColumn.MaxWidth = 760;
+            SpacerColumn.Width = new GridLength(1, GridUnitType.Star);
+            SpacerColumn.MinWidth = 48;
+            AboutColumn.Width = GridLength.Auto;
+
             Grid.SetRow(AboutPanel, 0);
-            Grid.SetColumn(AboutPanel, 1);
-            AboutPanel.Margin = new Thickness(48, 0, 0, 0);
+            Grid.SetColumn(AboutPanel, 2);
+            AboutPanel.HorizontalAlignment = HorizontalAlignment.Right;
+            AboutPanel.Margin = new Thickness(0);
             AboutPanel.Width = 280;
             AboutPanel.MaxWidth = 280;
         }
         else
         {
+            CardsColumn.MaxWidth = double.PositiveInfinity;
+            SpacerColumn.Width = new GridLength(0);
+            SpacerColumn.MinWidth = 0;
+            AboutColumn.Width = new GridLength(0);
+
             Grid.SetRow(AboutPanel, 1);
             Grid.SetColumn(AboutPanel, 0);
+            AboutPanel.HorizontalAlignment = HorizontalAlignment.Left;
             AboutPanel.Margin = new Thickness(0, 32, 0, 0);
             AboutPanel.Width = double.NaN;
-            AboutPanel.MaxWidth = 720;
+            AboutPanel.MaxWidth = 760;
         }
     }
 

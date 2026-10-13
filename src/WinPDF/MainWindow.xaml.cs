@@ -71,6 +71,21 @@ public sealed partial class MainWindow : Window
         AppTitleBar.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
         SettingsBackBtn.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
 
+        MainSplitView.OpenPaneLength = _savedSidebarWidth;
+        MainSplitView.PaneOpening += (_, _) =>
+        {
+            if (!ViewModel.IsSettingsOpen)
+            {
+                MainContentContainer.CornerRadius = new CornerRadius(8, 0, 0, 0);
+                MainContentContainer.BorderThickness = new Thickness(1, 1, 0, 0);
+            }
+        };
+        MainSplitView.PaneClosing += (_, _) =>
+        {
+            MainContentContainer.CornerRadius = new CornerRadius(0);
+            MainContentContainer.BorderThickness = new Thickness(0, 1, 0, 0);
+        };
+
         if (Content is FrameworkElement root)
         {
             root.Loaded += (_, _) =>
@@ -96,8 +111,17 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private Windows.Foundation.Size _lastWindowSize;
+
     private void OnMainWindowSizeChanged(object sender, WindowSizeChangedEventArgs args)
     {
+        if (args.Size.Width == _lastWindowSize.Width && args.Size.Height == _lastWindowSize.Height)
+        {
+            return;
+        }
+
+        _lastWindowSize = args.Size;
+
         UpdateTitleBarInsets();
         UpdateTitleBarNonClientRegions();
 
@@ -146,46 +170,32 @@ public sealed partial class MainWindow : Window
 
     private void OnSidebarSplitterDragDelta(object sender, DragDeltaEventArgs e)
     {
-        double currentWidth = SidebarColumn.ActualWidth > 0 ? SidebarColumn.ActualWidth : _savedSidebarWidth;
+        double currentWidth = MainSplitView.OpenPaneLength > 0 ? MainSplitView.OpenPaneLength : _savedSidebarWidth;
         double newWidth = Math.Clamp(currentWidth + e.HorizontalChange, MinSidebarWidth, MaxSidebarWidth);
         _savedSidebarWidth = newWidth;
-        SidebarColumn.Width = new GridLength(newWidth);
+        MainSplitView.OpenPaneLength = newWidth;
     }
 
     private void UpdateSidebarLayout()
     {
         if (ViewModel.IsSettingsOpen)
         {
-            SidebarColumn.MinWidth = 0;
-            SidebarColumn.Width = new GridLength(0);
-            SidebarSplitter.Visibility = Visibility.Collapsed;
-            SidebarContainer.Visibility = Visibility.Collapsed;
+            MainSplitView.IsPaneOpen = false;
             MainContentContainer.CornerRadius = new CornerRadius(0);
             MainContentContainer.BorderThickness = new Thickness(0, 1, 0, 0);
         }
         else
         {
-            if (ViewModel.IsSidebarOpen)
-            {
-                SidebarColumn.MinWidth = MinSidebarWidth;
-                SidebarColumn.MaxWidth = MaxSidebarWidth;
-                SidebarColumn.Width = new GridLength(_savedSidebarWidth);
-                SidebarSplitter.Visibility = Visibility.Visible;
-                SidebarContainer.Visibility = Visibility.Visible;
-                MainContentContainer.CornerRadius = new CornerRadius(8, 0, 0, 0);
-                MainContentContainer.BorderThickness = new Thickness(1, 1, 0, 0);
-            }
-            else
-            {
-                SidebarColumn.MinWidth = 0;
-                SidebarColumn.Width = new GridLength(0);
-                SidebarSplitter.Visibility = Visibility.Collapsed;
-                SidebarContainer.Visibility = Visibility.Collapsed;
-                MainContentContainer.CornerRadius = new CornerRadius(0);
-                MainContentContainer.BorderThickness = new Thickness(0, 1, 0, 0);
-            }
+            MainSplitView.IsPaneOpen = ViewModel.IsSidebarOpen;
+            MainContentContainer.CornerRadius = ViewModel.IsSidebarOpen ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
+            MainContentContainer.BorderThickness = ViewModel.IsSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0);
         }
     }
+
+    private double _lastRightInsetDip = -1;
+    private FrameworkElement[]? _documentInteractiveElements;
+    private FrameworkElement[]? _settingsInteractiveElements;
+    private readonly List<RectInt32> _reusablePassthroughRects = new(8);
 
     private void UpdateTitleBarInsets()
     {
@@ -193,13 +203,17 @@ public sealed partial class MainWindow : Window
         {
             double scale = Content?.XamlRoot?.RasterizationScale ?? 1.0;
             double rightInsetDip = AppWindow.TitleBar.RightInset / scale;
-            AppTitleBar.Padding = new Thickness(12, 0, Math.Max(140, rightInsetDip), 0);
+            if (Math.Abs(_lastRightInsetDip - rightInsetDip) > 0.5)
+            {
+                _lastRightInsetDip = rightInsetDip;
+                AppTitleBar.Padding = new Thickness(12, 0, Math.Max(140, rightInsetDip), 0);
+            }
         }
     }
 
-    private static bool AreRectsEqual(RectInt32[] a, RectInt32[] b)
+    private static bool AreRectsEqualList(RectInt32[] a, List<RectInt32> b)
     {
-        if (a.Length != b.Length)
+        if (a.Length != b.Count)
         {
             return false;
         }
@@ -223,11 +237,11 @@ public sealed partial class MainWindow : Window
         }
 
         double scale = Content.XamlRoot.RasterizationScale;
-        List<RectInt32> passthroughRects = new();
+        _reusablePassthroughRects.Clear();
 
         FrameworkElement[] interactiveElements = ViewModel.IsSettingsOpen
-            ? [SettingsBackBtn]
-            :
+            ? (_settingsInteractiveElements ??= [SettingsBackBtn])
+            : (_documentInteractiveElements ??=
             [
                 SidebarToggleButton,
                 OpenFileBtn,
@@ -236,7 +250,7 @@ public sealed partial class MainWindow : Window
                 AnnotationToolsToggleBtn,
                 DocumentMenuBtn,
                 SettingsBtn
-            ];
+            ]);
 
         foreach (var element in interactiveElements)
         {
@@ -244,7 +258,7 @@ public sealed partial class MainWindow : Window
             {
                 var transform = element.TransformToVisual(null);
                 var bounds = transform.TransformBounds(new Windows.Foundation.Rect(0, 0, element.ActualWidth, element.ActualHeight));
-                passthroughRects.Add(new RectInt32(
+                _reusablePassthroughRects.Add(new RectInt32(
                     (int)Math.Round(bounds.X * scale),
                     (int)Math.Round(bounds.Y * scale),
                     (int)Math.Round(bounds.Width * scale),
@@ -252,12 +266,12 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        var newRects = passthroughRects.ToArray();
-        if (_lastPassthroughRects is not null && AreRectsEqual(_lastPassthroughRects, newRects))
+        if (_lastPassthroughRects is not null && AreRectsEqualList(_lastPassthroughRects, _reusablePassthroughRects))
         {
             return;
         }
 
+        var newRects = _reusablePassthroughRects.ToArray();
         try
         {
             var nonClientInput = InputNonClientPointerSource.GetForWindowId(AppWindow.Id);

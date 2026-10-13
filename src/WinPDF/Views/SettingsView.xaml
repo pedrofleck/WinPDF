@@ -9,26 +9,28 @@
     Background="{ThemeResource LayerFillColorDefaultBrush}"
     mc:Ignorable="d">
 
-    <ScrollViewer>
+    <ScrollViewer HorizontalAlignment="Stretch" HorizontalScrollBarVisibility="Disabled">
         <Grid
             x:Name="SettingsRootGrid"
             Margin="36,24,36,36"
-            HorizontalAlignment="Left">
+            HorizontalAlignment="Stretch">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" MaxWidth="720" />
-                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition x:Name="CardsColumn" Width="*" MaxWidth="760" />
+                <ColumnDefinition x:Name="SpacerColumn" Width="*" MinWidth="48" />
+                <ColumnDefinition x:Name="AboutColumn" Width="Auto" />
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- Coluna 0 (Width="*", MaxWidth="720"): Cartões de Configuração -->
+            <!-- Coluna 0 (Width="*", MaxWidth="760"): Cartões de Configuração -->
             <StackPanel
                 x:Name="CardsPanel"
                 Grid.Row="0"
                 Grid.Column="0"
-                MaxWidth="720"
+                MaxWidth="760"
+                HorizontalAlignment="Stretch"
                 Spacing="24">
 
                 <!-- Cabeçalho Principal das Configurações -->
@@ -210,14 +212,14 @@
             </StackPanel>
 
             <!-- ========================================================= -->
-            <!-- Seção 4: SOBRE O WINPDF (Coluna 1, Estilo MS Paint)       -->
+            <!-- Seção 4: SOBRE O WINPDF (Coluna 2, Estilo MS Paint)       -->
             <!-- ========================================================= -->
             <StackPanel
                 x:Name="AboutPanel"
                 Grid.Row="0"
-                Grid.Column="1"
+                Grid.Column="2"
                 Width="280"
-                Margin="48,0,0,0"
+                HorizontalAlignment="Right"
                 VerticalAlignment="Top"
                 Spacing="16">
 

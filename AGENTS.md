@@ -32,8 +32,11 @@ Sections marked **(design)** describe the agreed target design not yet implement
    PDF engine = **PDFium** (`bblanchon.PDFium.Win32` binaries + hand-written P/Invoke).
    GPU drawing = **Win2D** (`Microsoft.Graphics.Win2D`).
 3. **MVVM** with `CommunityToolkit.Mvvm` (source generators: `[ObservableProperty]`, `[RelayCommand]`).
-4. **Touch performance is priority #1.** Never do synchronous PDF rendering on the UI thread, and
-   never re-render during an active gesture. See §4.
+4. **Strict Performance & Engineering Hierarchy:**
+   - **PRIORITY #1 — Zero Idle Consumption (0.0% CPU / 0% GPU when stationary):** Mandatory for mobile battery life and PSR.
+   - **PRIORITY #2 — Minimum CPU Usage during Scroll/Zoom:** Always trade controlled RAM (page/bitmap caches) to avoid CPU display list re-traversals.
+   - **PRIORITY #3 — Controlled RAM & Zero-LOH:** Predictable LRU limits; never allocate buffers in the Large Object Heap (> 85 KB).
+   - **NON-NEGOTIABLE UI PRESERVATION (UI Freeze):** Never degrade or simplify current native WinUI 3 shell layout (Mica Base, 48 DIPs TitleBar, frame navigation, resizable sidebar, 2-column SettingsView).
 5. **Zero hardcoded user-visible strings** in XAML or C#. See §6.
 6. **All code, identifiers, comments and commit messages in English.** XML docs (`/// <summary>`)
    on every public/protected type and member (the build emits CS1591 warnings for gaps).
@@ -140,13 +143,13 @@ Rules:
 
 ## 4. Rendering pipeline, GPU and touch **(design)**
 
-### 4.1 Threads
+### 4.1 Threads & Idle State
 
 | Thread | Does | Never does |
 |--------|------|-----------|
 | **UI thread** | Layout, XAML, Win2D draw callbacks (only *blits* cached bitmaps), pointer events | Call PDFium, decode, allocate large bitmaps |
 | **Compositor / DManip thread** (system) | Applies pan/zoom transforms to the visual tree on the GPU at display refresh rate | — (not under our control, that is the point) |
-| **PDFium render thread** (1, dedicated) | *All* `FPDF_*` calls, rasterization into BGRA buffers, annotation edits, save | Touch UI objects |
+| **PDFium render thread** (1, dedicated) | *All* `FPDF_*` calls, rasterization into BGRA buffers, annotation edits, save | Touch UI objects, spin-wait, sleep |
 | **Thread pool** | `CanvasBitmap.CreateFromBytes` upload to GPU, cache eviction bookkeeping | Call PDFium |
 
 PDFium is **not thread-safe**. `PdfiumService` owns a single long-running thread that consumes a
@@ -154,13 +157,25 @@ priority `Channel<RenderJob>`. Every public `IPdfService` method enqueues a job 
 `Task`. Jobs carry a `CancellationToken`; jobs for pages that scrolled out of view are cancelled
 before execution (and checked between pages/tiles).
 
-### 4.2 Two-level LOD (level of detail)
+**Idle 0.0% CPU & 0% GPU (Priority #1):**
+- Prohibited: `CanvasAnimatedControl`, `DispatcherTimer`, polling loops, infinite XAML animations.
+- When stationary on screen, `Invalidate()` is **never** called. This allows the CPU to enter Deep
+  C-States (C8/C10) and the display panel to activate Panel Self-Refresh (PSR).
+- The dedicated `PdfiumService` thread blocks asynchronously via `ChannelReader.WaitToReadAsync()`.
 
-1. **Level 0 – base bitmap (always available):** each page that becomes near-visible gets a
-   low-resolution bitmap rendered at `zoom = 1.0` (96 DPI × `RasterizationScale`), capped by a max
-   pixel budget. Thumbnails reuse a smaller variant.
-2. **Level 1 – sharp tiles (on demand):** once interaction settles, the visible region is rendered
-   at the *quantized* current zoom in 512×512 px tiles.
+### 4.2 Hybrid Full-Page vs. Tiles Rendering (CPU Preservation)
+
+In PDFium, each call to `FPDF_RenderPageBitmap` traverses the entire page display list (vectors,
+fonts, raster objects) on the CPU. Indiscriminate tiling at regular zoom multiplies CPU load.
+
+1. **Standard Reading (`ZoomFactor <= 1.5`):**
+   - **Do NOT split into tiles.** Render the complete page in **a single rasterization call** at
+     quantized zoom `Zq`.
+   - **At `Zq == 1.0`:** The Level 0 base bitmap is already the final sharp representation.
+     Do **not** re-render after the 150 ms gesture debounce.
+2. **High Zoom / Magnification (`ZoomFactor > 1.5`):**
+   - Switch to 512×512 tiles using `CanvasVirtualControl.RegionsInvalidated`.
+   - Rasterize only dirty tiles intersecting the visible viewport.
 
 **During a gesture** (pinch, pan, inertia, swipe):
 DirectManipulation scales/translates the `ScrollViewer` content on the compositor. The UI thread
@@ -173,26 +188,31 @@ by any new `ViewChanging`). When it fires:
 
 1. Compute `Z = ScrollViewer.ZoomFactor`, quantize to `Zq` (steps of √2: …, 0.71, 1, 1.41, 2, 2.83, 4…)
    to maximize tile reuse.
-2. For each visible page: set `PdfPageCanvas.DpiScale = Zq` (Win2D `CanvasVirtualControl` property),
-   so its backing surface has `Zq × RasterizationScale` physical pixels per DIP.
-3. `CanvasVirtualControl.RegionsInvalidated` provides the dirty regions → map to tile keys
-   `(page, Zq, tileX, tileY)` → draw from `TileCache` if present, otherwise draw Level 0 stretched
-   and enqueue a tile job.
-4. When the job completes, `CanvasBitmap` is created off-thread and the UI thread calls
-   `Invalidate(tileRectDip)` — only that rectangle is redrawn.
+2. If `Zq <= 1.5`:
+   - If `Zq == 1.0` and Level 0 bitmap exists: do nothing (already sharp, save CPU).
+   - Otherwise, render full page at `Zq` in a single job.
+3. If `Zq > 1.5`:
+   - For each visible page: set `PdfPageCanvas.DpiScale = Zq` (`CanvasVirtualControl` property).
+   - `CanvasVirtualControl.RegionsInvalidated` provides dirty regions → map to tile keys
+     `(page, Zq, tileX, tileY)` → draw from `TileCache` if present, otherwise draw Level 0 stretched
+     and enqueue tile jobs.
+4. When jobs complete, `CanvasBitmap` is created off-thread and the UI thread calls
+   `Invalidate(dirtyRectDip)`.
 
-`CanvasVirtualControl` is chosen over `CanvasControl` because at high zoom a page can exceed the
-maximum texture size (`CanvasDevice.MaximumBitmapSizeInPixels`, typically 16384); virtual surfaces
-only allocate the visible regions.
+### 4.3 Caches & Lazy Sidebar Loading
 
-### 4.3 Caches
-
+- `PdfiumPageCache`: LRU cache on the PDFium render thread holding the last **10 opened `FPDF_PAGE`
+  handles** (`FPDF_LoadPage`). Avoids re-parsing page dictionaries and zlib content streams.
 - `TileCache`: LRU keyed by `(documentId, pageIndex, Zq, tileX, tileY, renderFlags)`, bounded by
   **bytes** (default 256 MB, `w × h × 4`). Level-0 bitmaps have a separate, smaller LRU that is
   evicted last.
-- Invalidate a page's entries when its annotations change (annotation edits are drawn by the
-  vector layer, so this is needed only after "flattening" or reloading).
-- `CanvasDevice.DeviceLost` → drop everything and re-request visible content.
+- **Strictly Lazy Sidebar Thumbnails:**
+  - Thumbnail rasterization is scheduled **only** when `IsSidebarOpen == true` AND
+    `SidebarTab == SidebarTab.Thumbnails`.
+  - Only requested for items currently visible in the virtualized `ListView` (`ItemsStackPanel`).
+  - Closing or switching tabs cancels pending thumbnail jobs immediately.
+- Invalidate page entries when annotations change.
+- `CanvasDevice.DeviceLost` → drop all GPU bitmaps and re-request visible content.
 
 ### 4.4 View modes
 
@@ -341,6 +361,13 @@ A tile at `(tx, ty)` with size `T = 512` px covers page DIP rect
   (`FPDFAnnot_SetAP`) so other viewers render them identically.
 - **Saving:** `FPDF_SaveAsCopy` with a managed `FPDF_FILEWRITE` callback → write to a temp file
   in the same folder → `File.Replace` (atomic) → reopen. Fallback for edge cases: PDFsharp (MIT).
+- **Native Page Cache (`PdfiumPageCache`):** Keep an LRU cache on the PDFium thread retaining the
+  last **10 opened `FPDF_PAGE` handles** (`FPDF_LoadPage`). Avoids re-parsing page dictionaries,
+  decompresing zlib content streams, and loading embedded font programs on every zoom change or reverse scroll.
+- **Zero-LOH / Zero-Copy Memory Pipeline:** Prohibited from allocating `new byte[]` for rendered
+  pages or tiles (prevents buffers >= 85 KB from entering the Large Object Heap and triggering Gen 2 GC).
+  Allocate native bitmaps with `FPDFBitmap_CreateEx`, get the buffer pointer via `FPDFBitmap_GetBuffer`,
+  and upload to `CanvasBitmap.CreateFromBytes` directly from unmanaged memory (or via a single reusable native buffer).
 
 ---
 

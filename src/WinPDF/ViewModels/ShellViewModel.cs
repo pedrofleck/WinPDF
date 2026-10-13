@@ -324,7 +324,10 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     public void SetViewMode(ViewMode mode)
     {
-        ViewMode = mode;
+        if (ViewMode != mode)
+        {
+            ViewMode = mode;
+        }
     }
 
     /// <summary>
@@ -334,7 +337,10 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     public void SetSidebarTab(SidebarTab tab)
     {
-        SidebarTab = tab;
+        if (SidebarTab != tab)
+        {
+            SidebarTab = tab;
+        }
     }
 
     /// <summary>
@@ -344,7 +350,10 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     public void SetTool(AnnotationTool tool)
     {
-        ActiveTool = tool;
+        if (ActiveTool != tool)
+        {
+            ActiveTool = tool;
+        }
     }
 
     /// <summary>
@@ -428,7 +437,11 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         if (CurrentDocument is not null)
         {
-            CurrentDocument.ZoomFactor = Math.Clamp(zoom, 0.25, 8.0);
+            double target = Math.Clamp(zoom, 0.25, 8.0);
+            if (Math.Abs(CurrentDocument.ZoomFactor - target) > 0.0001)
+            {
+                CurrentDocument.ZoomFactor = target;
+            }
         }
     }
 
@@ -466,7 +479,10 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     public void SetTheme(AppThemePreference theme)
     {
-        CurrentTheme = theme;
+        if (CurrentTheme != theme)
+        {
+            CurrentTheme = theme;
+        }
     }
 
     /// <summary>
@@ -475,7 +491,10 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     public void OpenSettings()
     {
-        IsSettingsOpen = true;
+        if (!IsSettingsOpen)
+        {
+            IsSettingsOpen = true;
+        }
     }
 
     /// <summary>
@@ -484,7 +503,10 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     public void CloseSettings()
     {
-        IsSettingsOpen = false;
+        if (IsSettingsOpen)
+        {
+            IsSettingsOpen = false;
+        }
     }
 
     /// <summary>

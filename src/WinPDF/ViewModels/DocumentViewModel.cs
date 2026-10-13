@@ -140,14 +140,23 @@ public sealed partial class DocumentViewModel : ObservableObject
         UpdateIsCurrentPageBookmarked();
     }
 
+    private int _previousSelectedThumbnailIndex = 0;
+
     partial void OnCurrentPageIndexChanged(int value)
     {
         OnPropertyChanged(nameof(CurrentPageNumber));
 
-        for (int i = 0; i < Thumbnails.Count; i++)
+        if (_previousSelectedThumbnailIndex >= 0 && _previousSelectedThumbnailIndex < Thumbnails.Count && _previousSelectedThumbnailIndex != value)
         {
-            Thumbnails[i].IsSelected = (i == value);
+            Thumbnails[_previousSelectedThumbnailIndex].IsSelected = false;
         }
+
+        if (value >= 0 && value < Thumbnails.Count)
+        {
+            Thumbnails[value].IsSelected = true;
+        }
+
+        _previousSelectedThumbnailIndex = value;
 
         UpdateIsCurrentPageBookmarked();
     }
@@ -196,7 +205,11 @@ public sealed partial class DocumentViewModel : ObservableObject
     {
         if (PageCount > 0)
         {
-            CurrentPageIndex = Math.Clamp(pageIndex, 0, PageCount - 1);
+            int targetIndex = Math.Clamp(pageIndex, 0, PageCount - 1);
+            if (CurrentPageIndex != targetIndex)
+            {
+                CurrentPageIndex = targetIndex;
+            }
         }
     }
 
@@ -227,7 +240,11 @@ public sealed partial class DocumentViewModel : ObservableObject
     /// </summary>
     public void ZoomIn()
     {
-        ZoomFactor = Math.Min(8.0, ZoomFactor * Math.Sqrt(2));
+        double newZoom = Math.Min(8.0, ZoomFactor * Math.Sqrt(2));
+        if (Math.Abs(ZoomFactor - newZoom) > 0.0001)
+        {
+            ZoomFactor = newZoom;
+        }
     }
 
     /// <summary>
@@ -235,6 +252,10 @@ public sealed partial class DocumentViewModel : ObservableObject
     /// </summary>
     public void ZoomOut()
     {
-        ZoomFactor = Math.Max(0.25, ZoomFactor / Math.Sqrt(2));
+        double newZoom = Math.Max(0.25, ZoomFactor / Math.Sqrt(2));
+        if (Math.Abs(ZoomFactor - newZoom) > 0.0001)
+        {
+            ZoomFactor = newZoom;
+        }
     }
 }
