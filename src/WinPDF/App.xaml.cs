@@ -1,33 +1,75 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
+using WinPDF.Services;
+using WinPDF.ViewModels;
 
 namespace WinPDF;
 
 /// <summary>
-/// Application entry point. Creates and activates the main window.
+/// Application entry point configuring dependency injection and initial window activation.
 /// </summary>
-/// <remarks>
-/// Step 2 will extend this class with command-line / file-association handling
-/// and dependency injection setup for services and view models.
-/// </remarks>
 public partial class App : Application
 {
-    private Window? _mainWindow;
+    private readonly IServiceProvider _services;
+    private MainWindow? _mainWindow;
 
     /// <summary>
-    /// Initializes the singleton application object.
+    /// Gets the current application instance strongly typed.
+    /// </summary>
+    public static App CurrentApp => (App)Current;
+
+    /// <summary>
+    /// Gets the application-wide dependency injection service provider.
+    /// </summary>
+    public IServiceProvider Services => _services;
+
+    /// <summary>
+    /// Initializes the singleton application object and configures dependency injection.
     /// </summary>
     public App()
     {
         InitializeComponent();
+        _services = ConfigureServices();
+    }
+
+    private static IServiceProvider ConfigureServices()
+    {
+        ServiceCollection services = new();
+
+        // UI & Window Context Services
+        services.AddSingleton<IWindowContext, WindowContext>();
+        services.AddSingleton<IFilePickerService, FilePickerService>();
+        services.AddSingleton<IDialogService, DialogService>();
+
+        // View Models
+        services.AddSingleton<ShellViewModel>();
+
+        return services.BuildServiceProvider();
     }
 
     /// <summary>
-    /// Invoked when the application is launched.
+    /// Invoked when the application is launched normally or via command-line arguments.
     /// </summary>
-    /// <param name="args">Details about the launch request and process.</param>
+    /// <param name="args">Details about the launch request and arguments.</param>
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         _mainWindow = new MainWindow();
+
+        // Initialize window context for pickers and dialogs
+        IWindowContext windowContext = _services.GetRequiredService<IWindowContext>();
+        windowContext.Initialize(_mainWindow);
+
+        // Check command-line activation for file paths
+        if (!string.IsNullOrWhiteSpace(args.Arguments))
+        {
+            string rawArg = args.Arguments.Trim('\"', ' ');
+            if (System.IO.File.Exists(rawArg))
+            {
+                ShellViewModel shellViewModel = _services.GetRequiredService<ShellViewModel>();
+                _ = shellViewModel.OpenFilePathAsync(rawArg);
+            }
+        }
+
         _mainWindow.Activate();
     }
 }

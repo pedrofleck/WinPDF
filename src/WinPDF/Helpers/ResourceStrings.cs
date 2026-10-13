@@ -14,8 +14,7 @@ namespace WinPDF.Helpers;
 /// </remarks>
 public static class ResourceStrings
 {
-    private static readonly Lazy<ResourceLoader> Loader = new(() => new ResourceLoader(), isThreadSafe: true);
-
+    private static readonly Lazy<ResourceManager> Manager = new(() => new ResourceManager(), isThreadSafe: true);
     /// <summary>
     /// Gets the localized string for the given resource key.
     /// </summary>
@@ -23,8 +22,18 @@ public static class ResourceStrings
     /// <returns>The localized string, or the key itself wrapped in brackets if it is missing.</returns>
     public static string Get(string key)
     {
-        string value = Loader.Value.GetString(key);
-        return string.IsNullOrEmpty(value) ? $"[{key}]" : value;
+        try
+        {
+            ResourceCandidate? candidate = Manager.Value.MainResourceMap.TryGetValue($"Resources/{key}")
+                ?? Manager.Value.MainResourceMap.TryGetValue(key);
+
+            string? value = candidate?.ValueAsString;
+            return string.IsNullOrEmpty(value) ? $"[{key}]" : value;
+        }
+        catch
+        {
+            return $"[{key}]";
+        }
     }
 
     /// <summary>

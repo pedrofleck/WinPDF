@@ -12,21 +12,22 @@
   <!-- ===================== Application ===================== -->
   <data name="AppDisplayName" xml:space="preserve"><value>WinPDF</value></data>
   <data name="AppDescription" xml:space="preserve"><value>Um leitor e anotador de PDF moderno e leve para Windows.</value></data>
-  <data name="AppTitleBar.Title" xml:space="preserve"><value>WinPDF</value></data>
+  <data name="AppTitleBarText.Text" xml:space="preserve"><value>WinPDF</value></data>
   <data name="Window_TitleFormat" xml:space="preserve"><value>{0} – WinPDF</value></data>
   <data name="Window_TitleModifiedFormat" xml:space="preserve"><value>• {0} – WinPDF</value></data>
 
   <!-- ===================== Empty state ===================== -->
   <data name="EmptyStateTitle.Text" xml:space="preserve"><value>Abra um documento</value></data>
   <data name="EmptyStateSubtitle.Text" xml:space="preserve"><value>Arraste um arquivo PDF para cá ou use o botão Abrir para começar.</value></data>
-  <data name="EmptyStateOpenButton.Content" xml:space="preserve"><value>Abrir arquivo…</value></data>
+  <data name="EmptyStateOpenButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Abrir arquivo</value></data>
+  <data name="EmptyStateOpenButtonText.Text" xml:space="preserve"><value>Abrir arquivo…</value></data>
 
   <!-- ===================== File commands ===================== -->
-  <data name="OpenFileButton.Label" xml:space="preserve"><value>Abrir</value></data>
+  <data name="OpenFileButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Abrir</value></data>
   <data name="OpenFileButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Abrir um arquivo PDF (Ctrl+O)</value></data>
-  <data name="SaveButton.Label" xml:space="preserve"><value>Salvar</value></data>
+  <data name="SaveButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Salvar</value></data>
   <data name="SaveButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Salvar anotações (Ctrl+S)</value></data>
-  <data name="SaveAsButton.Label" xml:space="preserve"><value>Salvar como</value></data>
+  <data name="SaveAsButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Salvar como</value></data>
   <data name="SaveAsButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Salvar uma cópia com anotações (Ctrl+Shift+S)</value></data>
   <data name="FilePicker_PdfFileType" xml:space="preserve"><value>Documento PDF</value></data>
 
@@ -39,43 +40,47 @@
 
   <!-- ===================== View mode ===================== -->
   <data name="ViewModeSelector.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Modo de visualização</value></data>
-  <data name="ViewModeContinuousItem.Text" xml:space="preserve"><value>Contínuo</value></data>
+  <data name="ViewModeContinuousItem.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Contínuo</value></data>
   <data name="ViewModeContinuousItem.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Rolar continuamente por todas as páginas</value></data>
-  <data name="ViewModePagedItem.Text" xml:space="preserve"><value>Página única</value></data>
+  <data name="ViewModePagedItem.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Página única</value></data>
   <data name="ViewModePagedItem.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Mostrar uma página por vez — deslize para virar as páginas</value></data>
-  <data name="PresentationButton.Label" xml:space="preserve"><value>Apresentação</value></data>
+  <data name="PresentationButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Apresentação</value></data>
   <data name="PresentationButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Iniciar apresentação (F5)</value></data>
-  <data name="FullScreenButton.Label" xml:space="preserve"><value>Tela cheia</value></data>
+  <data name="FullScreenButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Tela cheia</value></data>
   <data name="FullScreenButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Alternar tela cheia (F11)</value></data>
 
   <!-- ===================== Navigation & zoom ===================== -->
+  <data name="PrevPageButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Página anterior (Page Up)</value></data>
+  <data name="PrevPageButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Página anterior</value></data>
+  <data name="NextPageButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Próxima página (Page Down)</value></data>
+  <data name="NextPageButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Próxima página</value></data>
   <data name="PageNumberBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Página atual</value></data>
   <data name="Page_CountFormat" xml:space="preserve"><value>de {0}</value></data>
-  <data name="ZoomInButton.Label" xml:space="preserve"><value>Ampliar</value></data>
+  <data name="ZoomInButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Ampliar</value></data>
   <data name="ZoomInButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Ampliar (Ctrl++)</value></data>
-  <data name="ZoomOutButton.Label" xml:space="preserve"><value>Reduzir</value></data>
+  <data name="ZoomOutButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Reduzir</value></data>
   <data name="ZoomOutButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Reduzir (Ctrl+-)</value></data>
-  <data name="ZoomFitWidthButton.Label" xml:space="preserve"><value>Ajustar à largura</value></data>
+  <data name="ZoomFitWidthButton.Text" xml:space="preserve"><value>Ajustar à largura</value></data>
   <data name="ZoomFitWidthButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Ajustar a largura da página à janela</value></data>
-  <data name="ZoomFitPageButton.Label" xml:space="preserve"><value>Ajustar à página</value></data>
+  <data name="ZoomFitPageButton.Text" xml:space="preserve"><value>Ajustar à página</value></data>
   <data name="ZoomFitPageButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Ajustar a página inteira à janela</value></data>
   <data name="ZoomLevelBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Nível de zoom</value></data>
   <data name="Zoom_PercentFormat" xml:space="preserve"><value>{0}%</value></data>
 
   <!-- ===================== Annotation tools ===================== -->
-  <data name="ToolSelectButton.Label" xml:space="preserve"><value>Selecionar</value></data>
+  <data name="ToolSelectButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Selecionar</value></data>
   <data name="ToolSelectButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Selecionar e mover (V)</value></data>
-  <data name="ToolPenButton.Label" xml:space="preserve"><value>Caneta</value></data>
+  <data name="ToolPenButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Caneta</value></data>
   <data name="ToolPenButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Desenho livre (P)</value></data>
-  <data name="ToolHighlighterButton.Label" xml:space="preserve"><value>Marca-texto</value></data>
+  <data name="ToolHighlighterButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Marca-texto</value></data>
   <data name="ToolHighlighterButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Destacar uma área (H)</value></data>
-  <data name="ToolEraserButton.Label" xml:space="preserve"><value>Borracha</value></data>
+  <data name="ToolEraserButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Borracha</value></data>
   <data name="ToolEraserButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Apagar anotações (E)</value></data>
-  <data name="ToolTextNoteButton.Label" xml:space="preserve"><value>Nota</value></data>
+  <data name="ToolTextNoteButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Nota</value></data>
   <data name="ToolTextNoteButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Adicionar uma nota de texto (N)</value></data>
-  <data name="TouchDrawingToggle.Label" xml:space="preserve"><value>Desenhar com toque</value></data>
+  <data name="TouchDrawingToggle.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Desenhar com toque</value></data>
   <data name="TouchDrawingToggle.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Quando desativado, os dedos movem e ampliam a página e apenas a caneta desenha</value></data>
-  <data name="StrokeColorButton.Label" xml:space="preserve"><value>Cor</value></data>
+  <data name="StrokeColorButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Cor</value></data>
   <data name="StrokeColorButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Cor do traço</value></data>
   <data name="StrokeThicknessSlider.Header" xml:space="preserve"><value>Espessura</value></data>
   <data name="Note_Placeholder" xml:space="preserve"><value>Escreva uma nota…</value></data>

@@ -46,7 +46,26 @@
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" />
     <PackageReference Include="Microsoft.Graphics.Win2D" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
-    <PackageReference Include="bblanchon.PDFium.Win32" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="bblanchon.PDFium.Win32" GeneratePathProperty="true" />    
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Pkgbblanchon_PDFium_Win32)' != ''">
+    <None Include="$(Pkgbblanchon_PDFium_Win32)\runtimes\win-x64\native\pdfium.dll"
+          Condition="'$(Platform)' == 'x64'"
+          Link="pdfium.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false" />
+    <None Include="$(Pkgbblanchon_PDFium_Win32)\runtimes\win-x86\native\pdfium.dll"
+          Condition="'$(Platform)' == 'x86'"
+          Link="pdfium.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false" />
+    <None Include="$(Pkgbblanchon_PDFium_Win32)\runtimes\win-arm64\native\pdfium.dll"
+          Condition="'$(Platform)' == 'ARM64'"
+          Link="pdfium.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          Visible="false" />
   </ItemGroup>
 
 </Project>

@@ -14,9 +14,9 @@ WinUI 3 (Windows App SDK) + C# / .NET 10 (LTS).
 
 | Step | Scope | Status |
 |------|-------|--------|
-| 1 | Solution, `.csproj` (unpackaged), `AGENTS.md`, `en-US` / `pt-BR` resources, .NET 10 migration | ✅ Done (pending first `dotnet build`) |
-| 2 | Shell: Mica, custom TitleBar, `SplitView` sidebar, `CommandBar`, view-mode selector, MVVM wiring | ⏳ Next |
-| 3 | `IPdfService` (PDFium, dedicated thread), Win2D page rendering, DirectManipulation zoom/pan, LOD pipeline | ⏳ |
+| 1 | Solution, `.csproj` (unpackaged), `AGENTS.md`, `en-US` / `pt-BR` resources, .NET 10 migration | ✅ Done |
+| 2 | Shell: Mica, custom TitleBar, `SplitView` sidebar, `CommandBar`, view-mode selector, MVVM wiring | ✅ Done |
+| 3 | `IPdfService` (PDFium, dedicated thread), Win2D page rendering, DirectManipulation zoom/pan, LOD pipeline | ⏳ Next |
 | 4 | Vector annotation layer (ink, highlight, note, eraser), Touch vs. Pen separation, save to PDF | ⏳ |
 
 Sections marked **(design)** describe the agreed target design not yet implemented. Turn them into
@@ -123,6 +123,9 @@ Rules:
 - **DI:** `Microsoft.Extensions.DependencyInjection` (added in Step 2) configured in `App.xaml.cs`.
   Services are singletons; `DocumentViewModel` is created per open document (future tabs).
 - **Commands:** `[RelayCommand]` (async commands use `AsyncRelayCommand` with cancellation).
+- **Observable Properties:** In .NET 10 (C# 13/14) with CommunityToolkit.Mvvm 8.4+, use partial
+  property syntax (`[ObservableProperty] public partial T Property { get; set; }`) with XML docs
+  `/// <summary>` directly on the property so generated code satisfies `CS1591` without warnings.
 - **Code-behind** is allowed only for pure view concerns that cannot be expressed in XAML
   (pointer handling, Win2D draw callbacks, `ScrollViewer.ViewChanged` → forwarded to VM/scheduler).
 - Main view-model state:
