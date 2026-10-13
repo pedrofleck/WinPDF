@@ -1,21 +1,38 @@
-using System.Globalization;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Media.Animation;
+using Windows.Graphics;
 using WinPDF.Models;
 using WinPDF.ViewModels;
+using WinPDF.Views;
+using WinPDF.Views.Sidebar;
 
 namespace WinPDF;
 
 /// <summary>
-/// Main application window hosting the Mica backdrop, custom TitleBar,
-/// Papers-inspired command bar, and navigation sidebar.
+/// Main application window hosting the Mica backdrop, unified single 48 DIPs TitleBar,
+/// resizable sidebar with directional frame navigation, and responsive document view frame.
 /// </summary>
 public sealed partial class MainWindow : Window
 {
+    private const double CompactBreakpoint = 768.0;
+    private const double MinSidebarWidth = 220.0;
+    private const double MaxSidebarWidth = 480.0;
+    private const double DefaultSidebarWidth = 260.0;
+
+    private readonly Windows.UI.ViewManagement.UISettings _uiSettings = new();
+    private double _savedSidebarWidth = DefaultSidebarWidth;
+    private bool _wasSidebarClosedByNarrowWindow;
+    private bool _isInternalSidebarToggle;
+    private int _previousSidebarIndex = -1;
+    private RectInt32[]? _lastPassthroughRects;
+
     /// <summary>
-    /// Gets the shell view model for data binding.
+    /// Gets the shell view model orchestrating window state, documents, and navigation.
     /// </summary>
     public ShellViewModel ViewModel { get; }
 
@@ -32,26 +49,277 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
 
-        // Bind items repeater source when document changes
+        if (AppWindowTitleBar.IsCustomizationSupported())
+        {
+            AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
+        }
+
+        RootGrid.RequestedTheme = ViewModel.CurrentTheme switch
+        {
+            AppThemePreference.Light => ElementTheme.Light,
+            AppThemePreference.Dark => ElementTheme.Dark,
+            _ => ElementTheme.Default
+        };
+
+        UpdateTitleBarTheme();
+        _uiSettings.ColorValuesChanged += (_, _) => DispatcherQueue.TryEnqueue(UpdateTitleBarTheme);
+        RootGrid.Loaded += (_, _) => UpdateTitleBarTheme();
+
+        // Window size and layout events
+        SizeChanged += OnMainWindowSizeChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        AppTitleBar.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
+        SettingsBackBtn.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
+
+        if (Content is FrameworkElement root)
+        {
+            root.Loaded += (_, _) =>
+            {
+                UpdateTitleBarTheme();
+                UpdateTitleBarInsets();
+                UpdateTitleBarNonClientRegions();
+                UpdateSidebarLayout();
+
+                // Initial frame navigation
+                MainContentFrame.Navigate(typeof(DocumentView), ViewModel);
+                UpdateSidebarFooterSelectorBarSelection();
+
+                if (root.XamlRoot is not null)
+                {
+                    root.XamlRoot.Changed += (_, _) =>
+                    {
+                        UpdateTitleBarInsets();
+                        UpdateTitleBarNonClientRegions();
+                    };
+                }
+            };
+        }
+    }
+
+    private void OnMainWindowSizeChanged(object sender, WindowSizeChangedEventArgs args)
+    {
+        UpdateTitleBarInsets();
+        UpdateTitleBarNonClientRegions();
+
+        // Responsive behavior with state memory:
+        // Automatically close sidebar if window is narrower than 768 DIPs,
+        // and restore it when expanding back to >= 768 DIPs if it was closed automatically.
+        if (args.Size.Width < CompactBreakpoint)
+        {
+            if (ViewModel.IsSidebarOpen)
+            {
+                _wasSidebarClosedByNarrowWindow = true;
+                _isInternalSidebarToggle = true;
+                try
+                {
+                    ViewModel.IsSidebarOpen = false;
+                }
+                finally
+                {
+                    _isInternalSidebarToggle = false;
+                }
+            }
+        }
+        else
+        {
+            if (_wasSidebarClosedByNarrowWindow && !ViewModel.IsSidebarOpen)
+            {
+                _wasSidebarClosedByNarrowWindow = false;
+                _isInternalSidebarToggle = true;
+                try
+                {
+                    ViewModel.IsSidebarOpen = true;
+                }
+                finally
+                {
+                    _isInternalSidebarToggle = false;
+                }
+            }
+        }
+    }
+
+    private void OnSidebarToggleClick(object sender, RoutedEventArgs e)
+    {
+        // Manual user interaction clears automatic narrow memory
+        _wasSidebarClosedByNarrowWindow = false;
+    }
+
+    private void OnSidebarSplitterDragDelta(object sender, DragDeltaEventArgs e)
+    {
+        double currentWidth = SidebarColumn.ActualWidth > 0 ? SidebarColumn.ActualWidth : _savedSidebarWidth;
+        double newWidth = Math.Clamp(currentWidth + e.HorizontalChange, MinSidebarWidth, MaxSidebarWidth);
+        _savedSidebarWidth = newWidth;
+        SidebarColumn.Width = new GridLength(newWidth);
+    }
+
+    private void UpdateSidebarLayout()
+    {
+        if (ViewModel.IsSettingsOpen)
+        {
+            SidebarColumn.MinWidth = 0;
+            SidebarColumn.Width = new GridLength(0);
+            SidebarSplitter.Visibility = Visibility.Collapsed;
+            SidebarContainer.Visibility = Visibility.Collapsed;
+            MainContentContainer.CornerRadius = new CornerRadius(0);
+            MainContentContainer.BorderThickness = new Thickness(0, 1, 0, 0);
+        }
+        else
+        {
+            if (ViewModel.IsSidebarOpen)
+            {
+                SidebarColumn.MinWidth = MinSidebarWidth;
+                SidebarColumn.MaxWidth = MaxSidebarWidth;
+                SidebarColumn.Width = new GridLength(_savedSidebarWidth);
+                SidebarSplitter.Visibility = Visibility.Visible;
+                SidebarContainer.Visibility = Visibility.Visible;
+                MainContentContainer.CornerRadius = new CornerRadius(8, 0, 0, 0);
+                MainContentContainer.BorderThickness = new Thickness(1, 1, 0, 0);
+            }
+            else
+            {
+                SidebarColumn.MinWidth = 0;
+                SidebarColumn.Width = new GridLength(0);
+                SidebarSplitter.Visibility = Visibility.Collapsed;
+                SidebarContainer.Visibility = Visibility.Collapsed;
+                MainContentContainer.CornerRadius = new CornerRadius(0);
+                MainContentContainer.BorderThickness = new Thickness(0, 1, 0, 0);
+            }
+        }
+    }
+
+    private void UpdateTitleBarInsets()
+    {
+        if (AppWindowTitleBar.IsCustomizationSupported() && AppWindow.TitleBar.RightInset > 0)
+        {
+            double scale = Content?.XamlRoot?.RasterizationScale ?? 1.0;
+            double rightInsetDip = AppWindow.TitleBar.RightInset / scale;
+            AppTitleBar.Padding = new Thickness(12, 0, Math.Max(140, rightInsetDip), 0);
+        }
+    }
+
+    private static bool AreRectsEqual(RectInt32[] a, RectInt32[] b)
+    {
+        if (a.Length != b.Length)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (a[i].X != b[i].X || a[i].Y != b[i].Y || a[i].Width != b[i].Width || a[i].Height != b[i].Height)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void UpdateTitleBarNonClientRegions()
+    {
+        if (!AppWindowTitleBar.IsCustomizationSupported() || Content?.XamlRoot is null)
+        {
+            return;
+        }
+
+        double scale = Content.XamlRoot.RasterizationScale;
+        List<RectInt32> passthroughRects = new();
+
+        FrameworkElement[] interactiveElements = ViewModel.IsSettingsOpen
+            ? [SettingsBackBtn]
+            :
+            [
+                SidebarToggleButton,
+                OpenFileBtn,
+                SearchBtn,
+                PageNumberBoxControl,
+                AnnotationToolsToggleBtn,
+                DocumentMenuBtn,
+                SettingsBtn
+            ];
+
+        foreach (var element in interactiveElements)
+        {
+            if (element.IsLoaded && element.Visibility == Visibility.Visible && element.ActualWidth > 0 && element.ActualHeight > 0)
+            {
+                var transform = element.TransformToVisual(null);
+                var bounds = transform.TransformBounds(new Windows.Foundation.Rect(0, 0, element.ActualWidth, element.ActualHeight));
+                passthroughRects.Add(new RectInt32(
+                    (int)Math.Round(bounds.X * scale),
+                    (int)Math.Round(bounds.Y * scale),
+                    (int)Math.Round(bounds.Width * scale),
+                    (int)Math.Round(bounds.Height * scale)));
+            }
+        }
+
+        var newRects = passthroughRects.ToArray();
+        if (_lastPassthroughRects is not null && AreRectsEqual(_lastPassthroughRects, newRects))
+        {
+            return;
+        }
+
+        try
+        {
+            var nonClientInput = InputNonClientPointerSource.GetForWindowId(AppWindow.Id);
+            nonClientInput.SetRegionRects(NonClientRegionKind.Passthrough, newRects);
+            _lastPassthroughRects = newRects;
+        }
+        catch
+        {
+            // Fallback gracefully on environments where custom non-client regions are unavailable
+        }
     }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(ShellViewModel.CurrentDocument))
         {
-            if (ViewModel.CurrentDocument is not null)
-            {
-                ContinuousPagesRepeater.ItemsSource = ViewModel.CurrentDocument.Thumbnails;
-            }
-            else
-            {
-                ContinuousPagesRepeater.ItemsSource = null;
-            }
+            DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsFullScreen))
         {
             UpdateFullScreenState(ViewModel.IsFullScreen);
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.CurrentTheme))
+        {
+            RootGrid.RequestedTheme = ViewModel.CurrentTheme switch
+            {
+                AppThemePreference.Light => ElementTheme.Light,
+                AppThemePreference.Dark => ElementTheme.Dark,
+                _ => ElementTheme.Default
+            };
+            UpdateTitleBarTheme();
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.IsSidebarOpen))
+        {
+            if (!_isInternalSidebarToggle)
+            {
+                _wasSidebarClosedByNarrowWindow = false;
+            }
+
+            UpdateSidebarLayout();
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.IsAnnotationToolbarOpen))
+        {
+            DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.IsSettingsOpen))
+        {
+            UpdateSidebarLayout();
+            if (ViewModel.IsSettingsOpen)
+            {
+                MainContentFrame.Navigate(typeof(SettingsView), ViewModel, new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromRight });
+            }
+            else
+            {
+                MainContentFrame.Navigate(typeof(DocumentView), ViewModel, new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromLeft });
+            }
+
+            DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.SidebarTab))
+        {
+            UpdateSidebarFooterSelectorBarSelection();
         }
     }
 
@@ -62,75 +330,114 @@ public sealed partial class MainWindow : Window
             : AppWindowPresenterKind.Default);
     }
 
-    private void OnZoomPresetClick(object sender, RoutedEventArgs e)
+    private void UpdateTitleBarTheme()
     {
-        if (sender is MenuFlyoutItem item && item.Tag is string tagStr &&
-            double.TryParse(tagStr, NumberStyles.Float, CultureInfo.InvariantCulture, out double zoomFactor))
+        if (!AppWindowTitleBar.IsCustomizationSupported())
         {
-            ViewModel.SetZoom(zoomFactor);
+            return;
+        }
+
+        var titleBar = AppWindow.TitleBar;
+
+        bool isDark = RootGrid.RequestedTheme switch
+        {
+            ElementTheme.Dark => true,
+            ElementTheme.Light => false,
+            _ => Application.Current.RequestedTheme == ApplicationTheme.Dark
+        };
+
+        titleBar.ButtonForegroundColor = isDark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
+        titleBar.ButtonHoverForegroundColor = isDark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
+        titleBar.ButtonHoverBackgroundColor = isDark ? Windows.UI.Color.FromArgb(24, 255, 255, 255) : Windows.UI.Color.FromArgb(16, 0, 0, 0);
+        titleBar.ButtonPressedBackgroundColor = isDark ? Windows.UI.Color.FromArgb(40, 255, 255, 255) : Windows.UI.Color.FromArgb(28, 0, 0, 0);
+        titleBar.ButtonInactiveForegroundColor = isDark ? Windows.UI.Color.FromArgb(128, 255, 255, 255) : Windows.UI.Color.FromArgb(128, 0, 0, 0);
+        titleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
+        titleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+    }
+
+    private void OnSidebarFooterSelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    {
+        if (sender.SelectedItem is null)
+        {
+            return;
+        }
+
+        int currentSelectedIndex = sender.Items.IndexOf(sender.SelectedItem);
+        Type pageType = sender.SelectedItem switch
+        {
+            var item when item == ThumbnailsSelectorItem => typeof(ThumbnailsTabPage),
+            var item when item == OutlineSelectorItem => typeof(OutlineTabPage),
+            var item when item == AnnotationsSelectorItem => typeof(AnnotationsTabPage),
+            var item when item == BookmarksSelectorItem => typeof(BookmarksTabPage),
+            var item when item == AttachmentsSelectorItem => typeof(AttachmentsTabPage),
+            _ => typeof(ThumbnailsTabPage)
+        };
+
+        SidebarTab targetTab = sender.SelectedItem switch
+        {
+            var item when item == ThumbnailsSelectorItem => SidebarTab.Thumbnails,
+            var item when item == OutlineSelectorItem => SidebarTab.Outline,
+            var item when item == AnnotationsSelectorItem => SidebarTab.Annotations,
+            var item when item == BookmarksSelectorItem => SidebarTab.Bookmarks,
+            var item when item == AttachmentsSelectorItem => SidebarTab.Attachments,
+            _ => SidebarTab.Thumbnails
+        };
+
+        if (ViewModel.SidebarTab != targetTab)
+        {
+            ViewModel.SetSidebarTab(targetTab);
+        }
+
+        if (_previousSidebarIndex == -1)
+        {
+            SidebarContentFrame.Navigate(pageType, ViewModel);
+        }
+        else if (currentSelectedIndex != _previousSidebarIndex)
+        {
+            var effect = currentSelectedIndex - _previousSidebarIndex > 0
+                ? SlideNavigationTransitionEffect.FromRight
+                : SlideNavigationTransitionEffect.FromLeft;
+            SidebarContentFrame.Navigate(pageType, ViewModel, new SlideNavigationTransitionInfo { Effect = effect });
+        }
+
+        _previousSidebarIndex = currentSelectedIndex;
+    }
+
+    private void UpdateSidebarFooterSelectorBarSelection()
+    {
+        if (SidebarFooterSelectorBar is null)
+        {
+            return;
+        }
+
+        SelectorBarItem targetItem = ViewModel.SidebarTab switch
+        {
+            SidebarTab.Thumbnails => ThumbnailsSelectorItem,
+            SidebarTab.Outline => OutlineSelectorItem,
+            SidebarTab.Annotations => AnnotationsSelectorItem,
+            SidebarTab.Bookmarks => BookmarksSelectorItem,
+            SidebarTab.Attachments => AttachmentsSelectorItem,
+            _ => ThumbnailsSelectorItem
+        };
+
+        if (SidebarFooterSelectorBar.SelectedItem != targetItem)
+        {
+            SidebarFooterSelectorBar.SelectedItem = targetItem;
         }
     }
 
-    private void OnToolSelectClicked(object sender, RoutedEventArgs e)
+    private void OnPrintClick(object sender, RoutedEventArgs e)
     {
-        ViewModel.SetTool(AnnotationTool.Select);
+        _ = ViewModel.PrintAsync();
     }
 
-    private void OnToolPenClicked(object sender, RoutedEventArgs e)
+    private void OnPresentationClick(object sender, RoutedEventArgs e)
     {
-        ViewModel.SetTool(AnnotationTool.Pen);
+        ViewModel.StartPresentation();
     }
 
-    private void OnToolHighlighterClicked(object sender, RoutedEventArgs e)
-    {
-        ViewModel.SetTool(AnnotationTool.Highlighter);
-    }
-
-    private void OnToolEraserClicked(object sender, RoutedEventArgs e)
-    {
-        ViewModel.SetTool(AnnotationTool.Eraser);
-    }
-
-    private void OnToolTextNoteClicked(object sender, RoutedEventArgs e)
-    {
-        ViewModel.SetTool(AnnotationTool.TextNote);
-    }
-
-    private void OnContinuousModeClicked(object sender, RoutedEventArgs e)
+    private void OnContinuousMenuClick(object sender, RoutedEventArgs e)
     {
         ViewModel.SetViewMode(ViewMode.Continuous);
-    }
-
-    private void OnPagedModeClicked(object sender, RoutedEventArgs e)
-    {
-        ViewModel.SetViewMode(ViewMode.Paged);
-    }
-
-    private void OnSidebarSelectorBarChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
-    {
-        if (sender.SelectedItem == ThumbnailsSelectorItem)
-        {
-            ViewModel.SetSidebarTab(SidebarTab.Thumbnails);
-        }
-        else if (sender.SelectedItem == OutlineSelectorItem)
-        {
-            ViewModel.SetSidebarTab(SidebarTab.Outline);
-        }
-    }
-
-    private void OnThumbnailSelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (ThumbnailsList.SelectedItem is ThumbnailItemViewModel thumbnail && ViewModel.CurrentDocument is not null)
-        {
-            ViewModel.CurrentDocument.GoToPage(thumbnail.PageIndex);
-        }
-    }
-
-    private void OnOutlineItemInvoked(TreeView sender, TreeViewItemInvokedEventArgs args)
-    {
-        if (args.InvokedItem is OutlineItemViewModel outlineItem && ViewModel.CurrentDocument is not null)
-        {
-            ViewModel.CurrentDocument.GoToPage(outlineItem.PageIndex);
-        }
     }
 }

@@ -11,16 +11,12 @@ public static class UiHelpers
     /// <summary>
     /// Returns <see cref="Visibility.Visible"/> if the condition is true; otherwise, <see cref="Visibility.Collapsed"/>.
     /// </summary>
-    /// <param name="condition">The boolean condition.</param>
-    /// <returns>Matching visibility state.</returns>
     public static Visibility VisibleIf(bool condition) =>
         condition ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>
     /// Returns <see cref="Visibility.Collapsed"/> if the condition is true; otherwise, <see cref="Visibility.Visible"/>.
     /// </summary>
-    /// <param name="condition">The boolean condition.</param>
-    /// <returns>Inverted visibility state.</returns>
     public static Visibility CollapsedIf(bool condition) =>
         condition ? Visibility.Collapsed : Visibility.Visible;
 
@@ -46,52 +42,89 @@ public static class UiHelpers
     public static Visibility PagedVisibility(ViewMode mode) =>
         mode == ViewMode.Paged ? Visibility.Visible : Visibility.Collapsed;
 
-    /// <summary>
-    /// Returns Visible if the active sidebar tab is Thumbnails.
-    /// </summary>
+    /// <summary>Checks if active sidebar tab is Thumbnails.</summary>
+    public static bool IsThumbnailsTab(SidebarTab tab) => tab == SidebarTab.Thumbnails;
+
+    /// <summary>Checks if active sidebar tab is Outline.</summary>
+    public static bool IsOutlineTab(SidebarTab tab) => tab == SidebarTab.Outline;
+
+    /// <summary>Checks if active sidebar tab is Annotations.</summary>
+    public static bool IsAnnotationsTab(SidebarTab tab) => tab == SidebarTab.Annotations;
+
+    /// <summary>Checks if active sidebar tab is Bookmarks.</summary>
+    public static bool IsBookmarksTab(SidebarTab tab) => tab == SidebarTab.Bookmarks;
+
+    /// <summary>Checks if active sidebar tab is Attachments.</summary>
+    public static bool IsAttachmentsTab(SidebarTab tab) => tab == SidebarTab.Attachments;
+
+    /// <summary>Returns Visible if active sidebar tab is Thumbnails.</summary>
     public static Visibility ThumbnailsVisibility(SidebarTab tab) =>
         tab == SidebarTab.Thumbnails ? Visibility.Visible : Visibility.Collapsed;
 
-    /// <summary>
-    /// Returns Visible if the active sidebar tab is Outline.
-    /// </summary>
+    /// <summary>Returns Visible if active sidebar tab is Outline.</summary>
     public static Visibility OutlineVisibility(SidebarTab tab) =>
         tab == SidebarTab.Outline ? Visibility.Visible : Visibility.Collapsed;
 
-    /// <summary>
-    /// Checks if the active tool matches Select.
-    /// </summary>
+    /// <summary>Returns Visible if active sidebar tab is Annotations.</summary>
+    public static Visibility AnnotationsVisibility(SidebarTab tab) =>
+        tab == SidebarTab.Annotations ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Returns Visible if active sidebar tab is Bookmarks.</summary>
+    public static Visibility BookmarksVisibility(SidebarTab tab) =>
+        tab == SidebarTab.Bookmarks ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Returns Visible if active sidebar tab is Attachments.</summary>
+    public static Visibility AttachmentsVisibility(SidebarTab tab) =>
+        tab == SidebarTab.Attachments ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Checks if the active tool matches Select.</summary>
     public static bool IsSelectTool(AnnotationTool tool) => tool == AnnotationTool.Select;
 
-    /// <summary>
-    /// Checks if the active tool matches Pen.
-    /// </summary>
+    /// <summary>Checks if the active tool matches Pen.</summary>
     public static bool IsPenTool(AnnotationTool tool) => tool == AnnotationTool.Pen;
 
-    /// <summary>
-    /// Checks if the active tool matches Highlighter.
-    /// </summary>
+    /// <summary>Checks if the active tool matches Highlighter.</summary>
     public static bool IsHighlighterTool(AnnotationTool tool) => tool == AnnotationTool.Highlighter;
 
-    /// <summary>
-    /// Checks if the active tool matches Eraser.
-    /// </summary>
+    /// <summary>Checks if the active tool matches Eraser.</summary>
     public static bool IsEraserTool(AnnotationTool tool) => tool == AnnotationTool.Eraser;
 
-    /// <summary>
-    /// Checks if the active tool matches TextNote.
-    /// </summary>
+    /// <summary>Checks if the active tool matches TextNote.</summary>
     public static bool IsTextNoteTool(AnnotationTool tool) => tool == AnnotationTool.TextNote;
 
-    /// <summary>
-    /// Returns Visible if the count is zero.
-    /// </summary>
+    /// <summary>Returns Visible if the count is zero.</summary>
     public static Visibility HasNoItems(int count) =>
         count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-    /// <summary>
-    /// Returns Visible if the count is greater than zero.
-    /// </summary>
+    /// <summary>Returns Visible if the count is greater than zero.</summary>
     public static Visibility HasItems(int count) =>
         count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>
+    /// Computes the corner radius for the main content container creating the curved junction with the sidebar.
+    /// </summary>
+    public static CornerRadius MainContainerCornerRadius(bool isSidebarOpen) =>
+        isSidebarOpen ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
+
+    /// <summary>
+    /// Computes the border thickness for the main content container.
+    /// </summary>
+    public static Thickness MainContainerBorderThickness(bool isSidebarOpen) =>
+        isSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0);
+
+    /// <summary>
+    /// Formats a 1-based page number for bookmark display.
+    /// </summary>
+    public static string FormatBookmarkPage(int pageNumber) =>
+        WinPDF.Helpers.ResourceStrings.Format(WinPDF.Helpers.ResourceKeys.BookmarkPageFormat, pageNumber);
+
+    /// <summary>Checks if active settings category matches the target category.</summary>
+    public static bool IsCategory(SettingsCategory active, SettingsCategory target) => active == target;
+
+    /// <summary>Returns Visible if active settings category matches target category.</summary>
+    public static Visibility CategoryVisibility(SettingsCategory active, SettingsCategory target) =>
+        active == target ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Checks if the active theme matches the target theme preference.</summary>
+    public static bool IsTheme(AppThemePreference active, AppThemePreference target) => active == target;
 }

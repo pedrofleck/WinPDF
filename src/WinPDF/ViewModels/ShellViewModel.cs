@@ -9,7 +9,7 @@ namespace WinPDF.ViewModels;
 
 /// <summary>
 /// Top-level shell view model orchestrating the window chrome, navigation sidebar,
-/// tool selection, active document, and system dialogs.
+/// tool selection, active document, theme preferences, and system dialogs.
 /// </summary>
 public sealed partial class ShellViewModel : ObservableObject
 {
@@ -23,7 +23,7 @@ public sealed partial class ShellViewModel : ObservableObject
     public partial bool IsSidebarOpen { get; set; } = true;
 
     /// <summary>
-    /// Gets or sets the active tab displayed in the sidebar (Thumbnails or Outline).
+    /// Gets or sets the active tab displayed in the sidebar (Thumbnails, Outline, Annotations, Bookmarks, Attachments).
     /// </summary>
     [ObservableProperty]
     public partial SidebarTab SidebarTab { get; set; } = SidebarTab.Thumbnails;
@@ -45,6 +45,42 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     [ObservableProperty]
     public partial bool IsTouchDrawingEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the floating annotation toolbar is expanded.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsAnnotationToolbarOpen { get; set; }
+
+    /// <summary>
+    /// Gets or sets the visual theme preference of the application.
+    /// </summary>
+    [ObservableProperty]
+    public partial AppThemePreference CurrentTheme { get; set; } = AppThemePreference.System;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the full-page settings view is open.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsSettingsOpen { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether dual page mode is enabled.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsDualPage { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether odd pages are aligned on the left.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsOddPagesLeft { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether right-to-left document flow is enabled.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsRightToLeft { get; set; }
 
     /// <summary>
     /// Gets or sets the active PDF document, or <c>null</c> if no document is currently open.
@@ -168,12 +204,13 @@ public sealed partial class ShellViewModel : ObservableObject
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     public Task OpenFilePathAsync(string filePath, CancellationToken cancellationToken = default)
     {
-        // Step 2 creates the DocumentViewModel representation.
-        // Step 3 will connect this to IPdfService for native PDFium loading.
         DocumentViewModel doc = new(filePath, pageCount: 8);
         doc.Outline.Add(new OutlineItemViewModel("Chapter 1: Introduction", 0));
         doc.Outline.Add(new OutlineItemViewModel("Chapter 2: Architecture", 2));
         doc.Outline.Add(new OutlineItemViewModel("Chapter 3: Rendering Pipeline", 5));
+        doc.Bookmarks.Add(new BookmarkItemViewModel(0));
+        doc.AnnotationsSummary.Add(new AnnotationItemViewModel("Highlight on page 1"));
+        doc.Attachments.Add(new AttachmentItemViewModel("supplementary_data.xlsx"));
 
         CurrentDocument = doc;
         return Task.CompletedTask;
@@ -214,6 +251,64 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Initiates document printing.
+    /// </summary>
+    [RelayCommand]
+    public Task PrintAsync()
+    {
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Opens a copy of the current document.
+    /// </summary>
+    [RelayCommand]
+    public Task OpenCopyAsync(CancellationToken cancellationToken)
+    {
+        if (CurrentDocument is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return OpenFilePathAsync(CurrentDocument.FilePath, cancellationToken);
+    }
+
+    /// <summary>
+    /// Launches the external system application picker to open the current PDF file.
+    /// </summary>
+    [RelayCommand]
+    public async Task OpenWithAsync()
+    {
+        if (CurrentDocument is null || string.IsNullOrWhiteSpace(CurrentDocument.FilePath) || !System.IO.File.Exists(CurrentDocument.FilePath))
+        {
+            return;
+        }
+
+        var storageFile = await Windows.Storage.StorageFile.GetFileFromPathAsync(CurrentDocument.FilePath);
+        var options = new Windows.System.LauncherOptions { DisplayApplicationPicker = true };
+        await Windows.System.Launcher.LaunchFileAsync(storageFile, options);
+    }
+
+    /// <summary>
+    /// Enters slide presentation mode.
+    /// </summary>
+    [RelayCommand]
+    public void StartPresentation()
+    {
+        ViewMode = ViewMode.Paged;
+        IsFullScreen = true;
+    }
+
+    /// <summary>
+    /// Toggles between continuous scrolling and paged slide viewing modes.
+    /// </summary>
+    [RelayCommand]
+    public void ToggleContinuousMode()
+    {
+        ViewMode = ViewMode == ViewMode.Continuous ? ViewMode.Paged : ViewMode.Continuous;
+    }
+
+    /// <summary>
     /// Toggles the navigation sidebar visibility.
     /// </summary>
     [RelayCommand]
@@ -233,7 +328,7 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Switches the active sidebar tab between Thumbnails and Outline.
+    /// Switches the active sidebar tab.
     /// </summary>
     /// <param name="tab">The target sidebar tab.</param>
     [RelayCommand]
@@ -259,6 +354,33 @@ public sealed partial class ShellViewModel : ObservableObject
     public void ToggleTouchDrawing()
     {
         IsTouchDrawingEnabled = !IsTouchDrawingEnabled;
+    }
+
+    /// <summary>
+    /// Toggles the visibility of the floating annotation tool bar.
+    /// </summary>
+    [RelayCommand]
+    public void ToggleAnnotationToolbar()
+    {
+        IsAnnotationToolbarOpen = !IsAnnotationToolbarOpen;
+    }
+
+    /// <summary>
+    /// Toggles favorite/bookmark status on the current page.
+    /// </summary>
+    [RelayCommand]
+    public void ToggleBookmarkCurrentPage()
+    {
+        CurrentDocument?.ToggleBookmarkCurrentPage();
+    }
+
+    /// <summary>
+    /// Rotates the active document 90 degrees clockwise.
+    /// </summary>
+    [RelayCommand]
+    public void RotateClockwise()
+    {
+        CurrentDocument?.RotateClockwise();
     }
 
     /// <summary>
@@ -316,7 +438,6 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     public void FitWidth()
     {
-        // Viewport-based calculation will be wired in Step 3
         SetZoom(1.25);
     }
 
@@ -336,6 +457,64 @@ public sealed partial class ShellViewModel : ObservableObject
     public void ToggleFullScreen()
     {
         IsFullScreen = !IsFullScreen;
+    }
+
+    /// <summary>
+    /// Sets application visual theme preference.
+    /// </summary>
+    /// <param name="theme">Target theme preference.</param>
+    [RelayCommand]
+    public void SetTheme(AppThemePreference theme)
+    {
+        CurrentTheme = theme;
+    }
+
+    /// <summary>
+    /// Opens the full-page settings view.
+    /// </summary>
+    [RelayCommand]
+    public void OpenSettings()
+    {
+        IsSettingsOpen = true;
+    }
+
+    /// <summary>
+    /// Closes the full-page settings view and returns to the document viewing area.
+    /// </summary>
+    [RelayCommand]
+    public void CloseSettings()
+    {
+        IsSettingsOpen = false;
+    }
+
+    /// <summary>
+    /// Toggles the settings view between open and closed.
+    /// </summary>
+    [RelayCommand]
+    public void ToggleSettings()
+    {
+        IsSettingsOpen = !IsSettingsOpen;
+    }
+
+    /// <summary>
+    /// Displays the document properties dialog.
+    /// </summary>
+    [RelayCommand]
+    public async Task ShowPropertiesAsync()
+    {
+        if (CurrentDocument is null)
+        {
+            return;
+        }
+
+        string title = ResourceStrings.Get(ResourceKeys.DocPropsTitle);
+        string close = ResourceStrings.Get(ResourceKeys.DialogClose);
+        string body = $"{ResourceStrings.Get(ResourceKeys.DocPropsFileName)} {CurrentDocument.FileName}\n" +
+                      $"{ResourceStrings.Get(ResourceKeys.DocPropsFilePath)} {CurrentDocument.FilePath}\n" +
+                      $"{ResourceStrings.Get(ResourceKeys.DocPropsPageCount)} {CurrentDocument.PageCount}\n" +
+                      $"{ResourceStrings.Get(ResourceKeys.DocPropsFileSize)} {CurrentDocument.FileSizeBytes / 1024:N0} KB";
+
+        await _dialogService.ShowMessageAsync(title, body, close).ConfigureAwait(false);
     }
 
     /// <summary>

@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="WinPDF.Views.Sidebar.BookmarksTabPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:converters="using:WinPDF.Converters"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:WinPDF.ViewModels"
+    Background="Transparent"
+    mc:Ignorable="d">
+
+    <Grid Background="Transparent" RowDefinitions="Auto,*">
+        <!-- Botão Adicionar/Remover Marcador na Página Atual -->
+        <Button
+            Grid.Row="0"
+            HorizontalAlignment="Stretch"
+            Margin="4,4,4,6"
+            Command="{x:Bind ViewModel.ToggleBookmarkCurrentPageCommand}">
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <FontIcon FontSize="14" Glyph="&#xE8A4;" />
+                <TextBlock
+                    x:Uid="BookmarkCurrentPageButton"
+                    Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.CurrentDocument.IsCurrentPageBookmarked), Mode=OneWay}" />
+                <TextBlock
+                    x:Uid="BookmarkRemoveButton"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.IsCurrentPageBookmarked), Mode=OneWay}" />
+            </StackPanel>
+        </Button>
+
+        <!-- Estado Vazio quando não há favoritos -->
+        <StackPanel
+            Grid.Row="1"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Margin="24"
+            Spacing="8"
+            Visibility="{x:Bind converters:UiHelpers.HasNoItems(ViewModel.CurrentDocument.Bookmarks.Count), Mode=OneWay}">
+            <FontIcon
+                HorizontalAlignment="Center"
+                FontSize="28"
+                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                Glyph="&#xE8A4;" />
+            <TextBlock
+                x:Uid="BookmarksEmptyText"
+                HorizontalAlignment="Center"
+                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                TextAlignment="Center"
+                TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- Lista de Marcadores / Favoritos -->
+        <ListView
+            x:Name="BookmarksList"
+            Grid.Row="1"
+            Padding="4"
+            IsItemClickEnabled="True"
+            ItemClick="OnBookmarkItemClick"
+            ItemsSource="{x:Bind ViewModel.CurrentDocument.Bookmarks, Mode=OneWay}"
+            Visibility="{x:Bind converters:UiHelpers.HasItems(ViewModel.CurrentDocument.Bookmarks.Count), Mode=OneWay}">
+            <ListView.ItemTemplate>
+                <DataTemplate x:DataType="vm:BookmarkItemViewModel">
+                    <Border
+                        Margin="0,2,0,2"
+                        Padding="8,6,8,6"
+                        Background="{ThemeResource LayerFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon
+                                FontSize="14"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Glyph="&#xE8A4;" />
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Style="{StaticResource BodyTextBlockStyle}"
+                                Text="{x:Bind DisplayText}" />
+                        </StackPanel>
+                    </Border>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+    </Grid>
+</Page>

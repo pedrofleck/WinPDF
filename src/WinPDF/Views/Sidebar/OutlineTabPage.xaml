@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="WinPDF.Views.Sidebar.OutlineTabPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:converters="using:WinPDF.Converters"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:WinPDF.ViewModels"
+    Background="Transparent"
+    mc:Ignorable="d">
+
+    <Grid Background="Transparent">
+        <!-- Estado Vazio quando não há tópicos / sumário -->
+        <StackPanel
+            HorizontalAlignment="Center"
+            VerticalAlignment="Center"
+            Margin="24"
+            Spacing="8"
+            Visibility="{x:Bind converters:UiHelpers.HasNoItems(ViewModel.CurrentDocument.Outline.Count), Mode=OneWay}">
+            <FontIcon
+                HorizontalAlignment="Center"
+                FontSize="28"
+                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                Glyph="&#xE8FD;" />
+            <TextBlock
+                x:Uid="OutlineEmptyText"
+                HorizontalAlignment="Center"
+                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                TextAlignment="Center"
+                TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- Árvore de Tópicos do Sumário -->
+        <TreeView
+            x:Name="OutlineTreeView"
+            Padding="4"
+            ItemsSource="{x:Bind ViewModel.CurrentDocument.Outline, Mode=OneWay}"
+            ItemInvoked="OnOutlineItemInvoked"
+            Visibility="{x:Bind converters:UiHelpers.HasItems(ViewModel.CurrentDocument.Outline.Count), Mode=OneWay}">
+            <TreeView.ItemTemplate>
+                <DataTemplate x:DataType="vm:OutlineItemViewModel">
+                    <Grid ColumnDefinitions="*,Auto">
+                        <TextBlock
+                            Grid.Column="0"
+                            Text="{x:Bind Title}"
+                            TextTrimming="CharacterEllipsis" />
+                        <TextBlock
+                            Grid.Column="1"
+                            Margin="8,0,0,0"
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="{x:Bind DisplayPageNumber}" />
+                    </Grid>
+                </DataTemplate>
+            </TreeView.ItemTemplate>
+        </TreeView>
+    </Grid>
+</Page>

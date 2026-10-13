@@ -26,40 +26,64 @@
   <data name="EmptyStateOpenButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Open file</value></data>
   <data name="EmptyStateOpenButtonText.Text" xml:space="preserve"><value>Open file…</value></data>
 
-  <!-- ===================== File commands ===================== -->
+  <!-- ===================== Top bar commands ===================== -->
+  <data name="SidebarToggle.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Sidebar</value></data>
+  <data name="SidebarToggle.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Toggle sidebar (F9)</value></data>
   <data name="OpenFileButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Open</value></data>
   <data name="OpenFileButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Open a PDF file (Ctrl+O)</value></data>
-  <data name="SaveButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Save</value></data>
-  <data name="SaveButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Save annotations (Ctrl+S)</value></data>
-  <data name="SaveAsButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Save as</value></data>
-  <data name="SaveAsButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Save a copy with annotations (Ctrl+Shift+S)</value></data>
+  <data name="OpenFileButtonText.Text" xml:space="preserve"><value>Open file</value></data>
+  <data name="SearchButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Search</value></data>
+  <data name="SearchButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Find in document (Ctrl+F)</value></data>
+  <data name="AnnotationToolsToggle.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Annotation tools</value></data>
+  <data name="AnnotationToolsToggle.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Toggle annotation toolbar</value></data>
+  <data name="DocumentMenuButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Document options</value></data>
+  <data name="DocumentMenuButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Document options</value></data>
+  <data name="SettingsButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Settings</value></data>
+  <data name="SettingsButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Settings</value></data>
+  <data name="SettingsBackButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Back to document</value></data>
+  <data name="SettingsBackButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Back to document</value></data>
+  <data name="SettingsBackNavButton.Text" xml:space="preserve"><value>Back to document</value></data>
+  <data name="SettingsTitleText.Text" xml:space="preserve"><value>WinPDF – Settings</value></data>
+
+  <!-- ===================== Document Flyout Menu (GNOME Papers) ===================== -->
+  <data name="Menu_Print.Text" xml:space="preserve"><value>Print…</value></data>
+  <data name="Menu_FullScreen.Text" xml:space="preserve"><value>Full screen</value></data>
+  <data name="Menu_Presentation.Text" xml:space="preserve"><value>Present as slides</value></data>
+  <data name="Menu_OpenCopy.Text" xml:space="preserve"><value>Open a copy</value></data>
+  <data name="Menu_OpenWith.Text" xml:space="preserve"><value>Open with…</value></data>
+  <data name="Menu_SaveAs.Text" xml:space="preserve"><value>Save as…</value></data>
+  <data name="Menu_Continuous.Text" xml:space="preserve"><value>Continuous</value></data>
+  <data name="Menu_DualPage.Text" xml:space="preserve"><value>Dual page</value></data>
+  <data name="Menu_OddPagesLeft.Text" xml:space="preserve"><value>Odd pages on left</value></data>
+  <data name="Menu_Rtl.Text" xml:space="preserve"><value>Right-to-left document</value></data>
+  <data name="Menu_Rotate.Text" xml:space="preserve"><value>Rotate</value></data>
+  <data name="Menu_DocumentProperties.Text" xml:space="preserve"><value>Document properties</value></data>
   <data name="FilePicker_PdfFileType" xml:space="preserve"><value>PDF document</value></data>
 
-  <!-- ===================== Sidebar ===================== -->
-  <data name="ToggleSidebarButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Show or hide the sidebar (F9)</value></data>
-  <data name="ToggleSidebarButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Sidebar</value></data>
-  <data name="SidebarThumbnailsItem.Text" xml:space="preserve"><value>Thumbnails</value></data>
-  <data name="SidebarOutlineItem.Text" xml:space="preserve"><value>Outline</value></data>
-  <data name="OutlineEmptyText.Text" xml:space="preserve"><value>This document has no outline.</value></data>
+  <!-- ===================== 5 Sidebar Footer Tabs ===================== -->
+  <data name="Sidebar_Thumbnails.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Pages</value></data>
+  <data name="Sidebar_Thumbnails.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Page thumbnails</value></data>
+  <data name="Sidebar_Outline.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Outline</value></data>
+  <data name="Sidebar_Outline.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Document outline</value></data>
+  <data name="Sidebar_Annotations.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Annotations</value></data>
+  <data name="Sidebar_Annotations.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Annotations and comments</value></data>
+  <data name="Sidebar_Bookmarks.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Bookmarks</value></data>
+  <data name="Sidebar_Bookmarks.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Bookmarked pages</value></data>
+  <data name="Sidebar_Attachments.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Attachments</value></data>
+  <data name="Sidebar_Attachments.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Embedded attachments</value></data>
 
-  <!-- ===================== View mode ===================== -->
-  <data name="ViewModeSelector.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>View mode</value></data>
-  <data name="ViewModeContinuousItem.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Continuous</value></data>
-  <data name="ViewModeContinuousItem.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Scroll continuously through all pages</value></data>
-  <data name="ViewModePagedItem.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Single page</value></data>
-  <data name="ViewModePagedItem.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Show one page at a time — swipe to turn pages</value></data>
-  <data name="PresentationButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Presentation</value></data>
-  <data name="PresentationButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Start presentation (F5)</value></data>
-  <data name="FullScreenButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Full screen</value></data>
-  <data name="FullScreenButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Toggle full screen (F11)</value></data>
+  <!-- ===================== Sidebar Content Empty States ===================== -->
+  <data name="OutlineEmptyText.Text" xml:space="preserve"><value>This document has no outline.</value></data>
+  <data name="AnnotationsEmptyText.Text" xml:space="preserve"><value>This document has no annotations.</value></data>
+  <data name="BookmarksEmptyText.Text" xml:space="preserve"><value>No bookmarked pages yet.</value></data>
+  <data name="AttachmentsEmptyText.Text" xml:space="preserve"><value>This document has no embedded attachments.</value></data>
+  <data name="BookmarkCurrentPageButton.Text" xml:space="preserve"><value>Bookmark this page</value></data>
+  <data name="BookmarkRemoveButton.Text" xml:space="preserve"><value>Remove bookmark</value></data>
 
   <!-- ===================== Navigation & zoom ===================== -->
-  <data name="PrevPageButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Previous page (Page Up)</value></data>
-  <data name="PrevPageButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Previous page</value></data>
-  <data name="NextPageButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Next page (Page Down)</value></data>
-  <data name="NextPageButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Next page</value></data>
   <data name="PageNumberBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Current page</value></data>
   <data name="Page_CountFormat" xml:space="preserve"><value>of {0}</value></data>
+  <data name="Bookmark_PageFormat" xml:space="preserve"><value>Page {0}</value></data>
   <data name="ZoomInButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Zoom in</value></data>
   <data name="ZoomInButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Zoom in (Ctrl++)</value></data>
   <data name="ZoomOutButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Zoom out</value></data>
@@ -89,6 +113,44 @@
   <data name="StrokeThicknessSlider.Header" xml:space="preserve"><value>Thickness</value></data>
   <data name="Note_Placeholder" xml:space="preserve"><value>Write a note…</value></data>
   <data name="Note_Delete" xml:space="preserve"><value>Delete note</value></data>
+
+  <!-- ===================== Settings Page & Dialog ===================== -->
+  <data name="SettingsDialog_Title" xml:space="preserve"><value>Settings</value></data>
+  <data name="Settings_Theme_Header.Text" xml:space="preserve"><value>App theme</value></data>
+  <data name="Settings_Theme_System.Content" xml:space="preserve"><value>Use system setting</value></data>
+  <data name="Settings_Theme_Light.Content" xml:space="preserve"><value>Light</value></data>
+  <data name="Settings_Theme_Dark.Content" xml:space="preserve"><value>Dark</value></data>
+  <data name="Settings_Theme_Description.Text" xml:space="preserve"><value>Select which app theme to display</value></data>
+  <data name="Settings_Nav_PreferencesHeader.Text" xml:space="preserve"><value>PREFERENCES</value></data>
+  <data name="Settings_Nav_Appearance.Text" xml:space="preserve"><value>Appearance</value></data>
+  <data name="Settings_Nav_Viewing.Text" xml:space="preserve"><value>Viewing</value></data>
+  <data name="Settings_Nav_Annotations.Text" xml:space="preserve"><value>Annotations</value></data>
+  <data name="Settings_Nav_About.Text" xml:space="preserve"><value>About</value></data>
+  <data name="Settings_Viewing_ModeHeader.Text" xml:space="preserve"><value>Default viewing mode</value></data>
+  <data name="Settings_Viewing_ModeDescription.Text" xml:space="preserve"><value>Choose how PDF pages are presented when opening</value></data>
+  <data name="Settings_Viewing_ModeContinuous.Content" xml:space="preserve"><value>Continuous</value></data>
+  <data name="Settings_Viewing_ModePaged.Content" xml:space="preserve"><value>Paged / Slides</value></data>
+  <data name="Settings_Viewing_ZoomHeader.Text" xml:space="preserve"><value>Default zoom level</value></data>
+  <data name="Settings_Viewing_ZoomDescription.Text" xml:space="preserve"><value>Set the initial zoom level when loading a new document</value></data>
+  <data name="Settings_Viewing_ZoomDefault.Content" xml:space="preserve"><value>100% (Actual size)</value></data>
+  <data name="Settings_Viewing_ZoomFitWidth.Content" xml:space="preserve"><value>Fit to width</value></data>
+  <data name="Settings_Viewing_ZoomFitPage.Content" xml:space="preserve"><value>Fit to page</value></data>
+  <data name="Settings_Annotations_TouchHeader.Text" xml:space="preserve"><value>Touch drawing</value></data>
+  <data name="Settings_Annotations_TouchDescription.Text" xml:space="preserve"><value>When disabled, fingers pan and zoom while pen draws.</value></data>
+  <data name="Settings_About_AppHeader.Text" xml:space="preserve"><value>WinPDF Reader &amp; Annotator</value></data>
+  <data name="Settings_About_Description.Text" xml:space="preserve"><value>A modern, lightweight native PDF reader and annotator for Windows 11.</value></data>
+  <data name="Settings_About_CreditsHeader.Text" xml:space="preserve"><value>Open source credits</value></data>
+  <data name="Settings_About_CreditsText.Text" xml:space="preserve"><value>Built with WinUI 3 (Windows App SDK), PDFium and Win2D. Inspired by GNOME Papers.</value></data>
+  <data name="Settings_About_LicenseHeader.Text" xml:space="preserve"><value>License</value></data>
+  <data name="Settings_About_LicenseText.Text" xml:space="preserve"><value>WinPDF is open source software released under the MIT License.</value></data>
+
+  <!-- ===================== Document Properties Dialog ===================== -->
+  <data name="DocProps_Title" xml:space="preserve"><value>Document Properties</value></data>
+  <data name="DocProps_FileName" xml:space="preserve"><value>File name:</value></data>
+  <data name="DocProps_FilePath" xml:space="preserve"><value>Location:</value></data>
+  <data name="DocProps_FileSize" xml:space="preserve"><value>File size:</value></data>
+  <data name="DocProps_PageCount" xml:space="preserve"><value>Page count:</value></data>
+  <data name="DocProps_PageSize" xml:space="preserve"><value>Page dimensions:</value></data>
 
   <!-- ===================== More / About ===================== -->
   <data name="AboutMenuItem.Text" xml:space="preserve"><value>About WinPDF</value></data>

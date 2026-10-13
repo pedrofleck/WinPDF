@@ -1,0 +1,284 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="WinPDF.Views.SettingsView"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:vm="using:WinPDF.ViewModels"
+    Background="{ThemeResource LayerFillColorDefaultBrush}"
+    mc:Ignorable="d">
+
+    <ScrollViewer>
+        <Grid
+            x:Name="SettingsRootGrid"
+            Margin="36,24,36,36"
+            HorizontalAlignment="Left">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MaxWidth="720" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- Coluna 0 (Width="*", MaxWidth="720"): Cartões de Configuração -->
+            <StackPanel
+                x:Name="CardsPanel"
+                Grid.Row="0"
+                Grid.Column="0"
+                MaxWidth="720"
+                Spacing="24">
+
+                <!-- Cabeçalho Principal das Configurações -->
+                <TextBlock
+                    x:Uid="SettingsDialog_Title"
+                    FontWeight="SemiBold"
+                    Style="{StaticResource TitleTextBlockStyle}" />
+
+                <!-- ========================================================= -->
+                <!-- Seção 1: APARÊNCIA                                        -->
+                <!-- ========================================================= -->
+                <StackPanel Spacing="10">
+                    <TextBlock
+                        x:Uid="Settings_Nav_Appearance"
+                        FontWeight="SemiBold"
+                        Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                    <Border
+                        Padding="16"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
+                            <FontIcon
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                FontSize="20"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Glyph="&#xE790;" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock
+                                    x:Uid="Settings_Theme_Header"
+                                    FontWeight="SemiBold"
+                                    Style="{StaticResource BodyTextBlockStyle}" />
+                                <TextBlock
+                                    x:Uid="Settings_Theme_Description"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ComboBox
+                                Grid.Column="2"
+                                Width="180"
+                                VerticalAlignment="Center"
+                                SelectedIndex="{x:Bind ViewModel.ThemeIndex, Mode=TwoWay}">
+                                <ComboBoxItem x:Uid="Settings_Theme_System" />
+                                <ComboBoxItem x:Uid="Settings_Theme_Light" />
+                                <ComboBoxItem x:Uid="Settings_Theme_Dark" />
+                            </ComboBox>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <!-- ========================================================= -->
+                <!-- Seção 2: VISUALIZAÇÃO                                     -->
+                <!-- ========================================================= -->
+                <StackPanel Spacing="10">
+                    <TextBlock
+                        x:Uid="Settings_Nav_Viewing"
+                        FontWeight="SemiBold"
+                        Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                    <!-- Cartão: Modo de visualização padrão -->
+                    <Border
+                        Padding="16"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
+                            <FontIcon
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                FontSize="20"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Glyph="&#xE8A5;" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock
+                                    x:Uid="Settings_Viewing_ModeHeader"
+                                    FontWeight="SemiBold"
+                                    Style="{StaticResource BodyTextBlockStyle}" />
+                                <TextBlock
+                                    x:Uid="Settings_Viewing_ModeDescription"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ComboBox
+                                Grid.Column="2"
+                                Width="180"
+                                VerticalAlignment="Center"
+                                SelectedIndex="{x:Bind ViewModel.ViewModeIndex, Mode=TwoWay}">
+                                <ComboBoxItem x:Uid="Settings_Viewing_ModeContinuous" />
+                                <ComboBoxItem x:Uid="Settings_Viewing_ModePaged" />
+                            </ComboBox>
+                        </Grid>
+                    </Border>
+
+                    <!-- Cartão: Preferência de zoom inicial -->
+                    <Border
+                        Padding="16"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
+                            <FontIcon
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                FontSize="20"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Glyph="&#xE71E;" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock
+                                    x:Uid="Settings_Viewing_ZoomHeader"
+                                    FontWeight="SemiBold"
+                                    Style="{StaticResource BodyTextBlockStyle}" />
+                                <TextBlock
+                                    x:Uid="Settings_Viewing_ZoomDescription"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ComboBox
+                                Grid.Column="2"
+                                Width="180"
+                                VerticalAlignment="Center"
+                                SelectedIndex="{x:Bind ViewModel.DefaultZoomIndex, Mode=TwoWay}">
+                                <ComboBoxItem x:Uid="Settings_Viewing_ZoomFitWidth" />
+                                <ComboBoxItem x:Uid="Settings_Viewing_ZoomFitPage" />
+                                <ComboBoxItem x:Uid="Settings_Viewing_ZoomDefault" />
+                            </ComboBox>
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <!-- ========================================================= -->
+                <!-- Seção 3: ANOTAÇÕES                                        -->
+                <!-- ========================================================= -->
+                <StackPanel Spacing="10">
+                    <TextBlock
+                        x:Uid="Settings_Nav_Annotations"
+                        FontWeight="SemiBold"
+                        Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                    <!-- Cartão: Desenhar com o toque -->
+                    <Border
+                        Padding="16"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
+                            <FontIcon
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                FontSize="20"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Glyph="&#xE70F;" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock
+                                    x:Uid="Settings_Annotations_TouchHeader"
+                                    FontWeight="SemiBold"
+                                    Style="{StaticResource BodyTextBlockStyle}" />
+                                <TextBlock
+                                    x:Uid="Settings_Annotations_TouchDescription"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ToggleSwitch
+                                Grid.Column="2"
+                                VerticalAlignment="Center"
+                                IsOn="{x:Bind ViewModel.DefaultTouchDrawing, Mode=TwoWay}" />
+                        </Grid>
+                    </Border>
+                </StackPanel>
+            </StackPanel>
+
+            <!-- ========================================================= -->
+            <!-- Seção 4: SOBRE O WINPDF (Coluna 1, Estilo MS Paint)       -->
+            <!-- ========================================================= -->
+            <StackPanel
+                x:Name="AboutPanel"
+                Grid.Row="0"
+                Grid.Column="1"
+                Width="280"
+                Margin="48,0,0,0"
+                VerticalAlignment="Top"
+                Spacing="16">
+
+                <TextBlock
+                    x:Uid="Settings_Nav_About"
+                    FontWeight="SemiBold"
+                    Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                <StackPanel Orientation="Horizontal" Spacing="16">
+                    <FontIcon
+                        FontSize="36"
+                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                        Glyph="&#xE8A5;" />
+                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                        <TextBlock
+                            x:Uid="Settings_About_AppHeader"
+                            FontWeight="SemiBold"
+                            Style="{StaticResource SubtitleTextBlockStyle}" />
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="{x:Bind ViewModel.AppVersion}" />
+                        <TextBlock
+                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="{x:Bind ViewModel.AppArchitecture}" />
+                    </StackPanel>
+                </StackPanel>
+
+                <TextBlock
+                    x:Uid="Settings_About_Description"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Style="{StaticResource BodyTextBlockStyle}"
+                    TextWrapping="Wrap" />
+
+                <MenuFlyoutSeparator />
+
+                <StackPanel Spacing="4">
+                    <TextBlock
+                        x:Uid="Settings_About_CreditsHeader"
+                        FontWeight="SemiBold"
+                        Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <TextBlock
+                        x:Uid="Settings_About_CreditsText"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+
+                <StackPanel Spacing="4">
+                    <TextBlock
+                        x:Uid="Settings_About_LicenseHeader"
+                        FontWeight="SemiBold"
+                        Style="{StaticResource BodyStrongTextBlockStyle}" />
+                    <TextBlock
+                        x:Uid="Settings_About_LicenseText"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+            </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</Page>

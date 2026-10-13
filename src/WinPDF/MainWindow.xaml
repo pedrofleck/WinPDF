@@ -4,513 +4,484 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:converters="using:WinPDF.Converters"
+    xmlns:controls="using:WinPDF.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:models="using:WinPDF.Models"
+    xmlns:views="using:WinPDF.Views"
     xmlns:vm="using:WinPDF.ViewModels"
     mc:Ignorable="d">
 
     <Window.SystemBackdrop>
-        <MicaBackdrop />
+        <!-- MicaKind.Base: variante sutil e neutra recomendada para WinUI 3 nativo -->
+        <MicaBackdrop Kind="Base" />
     </Window.SystemBackdrop>
 
-    <Grid RowDefinitions="Auto,Auto,*">
+    <Grid x:Name="RootGrid" Background="Transparent" RowDefinitions="Auto,*">
 
-        <!-- Custom TitleBar (Drag region) -->
+        <!-- ================================================================= -->
+        <!-- Barra Superior ÚNICA de 48 DIPs (TitleBar + CommandBar Integrada) -->
+        <!-- ================================================================= -->
         <Grid
             x:Name="AppTitleBar"
             Grid.Row="0"
-            Height="36"
+            Height="48"
             Padding="12,0,140,0"
             Background="Transparent">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <!-- App Glyph & Title -->
+            <!-- Esquerda: Modo Documento -->
             <StackPanel
                 Grid.Column="0"
                 VerticalAlignment="Center"
                 Orientation="Horizontal"
-                Spacing="8">
-                <FontIcon
-                    FontSize="16"
-                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                    Glyph="&#xE8A5;" />
+                Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.IsSettingsOpen), Mode=OneWay}">
+
+                <!-- Grupo 1: Toggle da Barra Lateral e Logo/Nome do App -->
+                <StackPanel Orientation="Horizontal">
+                    <Button
+                        x:Name="SidebarToggleButton"
+                        x:Uid="SidebarToggle"
+                        Width="36"
+                        Height="32"
+                        Padding="0"
+                        Click="OnSidebarToggleClick"
+                        Command="{x:Bind ViewModel.ToggleSidebarCommand}"
+                        CornerRadius="4"
+                        Style="{StaticResource SubtleButtonStyle}">
+                        <FontIcon FontSize="16" Glyph="&#xE700;" />
+                    </Button>
+
+                    <StackPanel
+                        Margin="14,0,0,0"
+                        VerticalAlignment="Center"
+                        Orientation="Horizontal"
+                        Spacing="6">
+                        <FontIcon
+                            FontSize="16"
+                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                            Glyph="&#xE8A5;" />
+                        <TextBlock
+                            x:Uid="AppTitleBarText"
+                            VerticalAlignment="Center"
+                            FontWeight="SemiBold"
+                            Style="{StaticResource CaptionTextBlockStyle}" />
+                    </StackPanel>
+                </StackPanel>
+
+                <!-- Grupo 2: Espaçamento de 20 DIPs para o botão "Abrir arquivo" e Pesquisa (8 DIPs) -->
+                <StackPanel
+                    Margin="20,0,0,0"
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <!-- Único botão com borda da barra superior ("Abrir arquivo") -->
+                    <Button
+                        x:Name="OpenFileBtn"
+                        x:Uid="OpenFileButton"
+                        Height="32"
+                        Padding="12,0"
+                        Command="{x:Bind ViewModel.OpenFileCommand}"
+                        CornerRadius="4"
+                        Style="{StaticResource DefaultButtonStyle}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon FontSize="16" Glyph="&#xE8E5;" />
+                            <TextBlock x:Uid="OpenFileButtonText" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Button>
+
+                    <Button
+                        x:Name="SearchBtn"
+                        x:Uid="SearchButton"
+                        Width="36"
+                        Height="32"
+                        Padding="0"
+                        CornerRadius="4"
+                        IsEnabled="{x:Bind ViewModel.HasDocument, Mode=OneWay}"
+                        Style="{StaticResource SubtleButtonStyle}">
+                        <FontIcon FontSize="16" Glyph="&#xE721;" />
+                    </Button>
+                </StackPanel>
+            </StackPanel>
+
+            <!-- Esquerda: Modo Configurações (Único Botão Voltar) -->
+            <StackPanel
+                Grid.Column="0"
+                VerticalAlignment="Center"
+                Orientation="Horizontal"
+                Spacing="8"
+                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsSettingsOpen), Mode=OneWay}">
+                <Button
+                    x:Name="SettingsBackBtn"
+                    x:Uid="SettingsBackButton"
+                    Width="36"
+                    Height="32"
+                    Padding="0"
+                    Command="{x:Bind ViewModel.CloseSettingsCommand}"
+                    CornerRadius="4"
+                    Style="{StaticResource SubtleButtonStyle}">
+                    <FontIcon FontSize="16" Glyph="&#xE72B;" />
+                </Button>
+
                 <TextBlock
-                    x:Uid="AppTitleBarText"
+                    x:Uid="SettingsTitleText"
                     VerticalAlignment="Center"
                     FontWeight="SemiBold"
                     Style="{StaticResource CaptionTextBlockStyle}" />
             </StackPanel>
 
-            <AppBarSeparator
+            <!-- Centro: Área de Arraste da Janela + Nome do Documento e Paginação -->
+            <Grid
+                x:Name="TitleBarDragRegion"
                 Grid.Column="1"
-                Margin="8,6,8,6"
-                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}" />
-
-            <!-- Document Title in TitleBar -->
-            <TextBlock
-                Grid.Column="2"
-                VerticalAlignment="Center"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                Style="{StaticResource CaptionTextBlockStyle}"
-                Text="{x:Bind ViewModel.Title, Mode=OneWay}"
-                TextTrimming="CharacterEllipsis" />
-        </Grid>
-
-        <!-- GNOME Papers Inspired HeaderBar / CommandBar -->
-        <Border
-            Grid.Row="1"
-            Padding="8,4,8,6"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="0,0,0,1">
-            <Grid ColumnDefinitions="Auto,*,Auto">
-
-                <!-- Left Group: Sidebar toggle, Open, Save -->
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch"
+                Background="Transparent">
                 <StackPanel
-                    Grid.Column="0"
-                    Orientation="Horizontal"
-                    Spacing="4">
-                    <ToggleButton
-                        x:Uid="ToggleSidebarButton"
-                        IsChecked="{x:Bind ViewModel.IsSidebarOpen, Mode=TwoWay}">
-                        <FontIcon FontSize="15" Glyph="&#xE81E;" />
-                    </ToggleButton>
-
-                    <Button
-                        x:Uid="OpenFileButton"
-                        Command="{x:Bind ViewModel.OpenFileCommand}">
-                        <FontIcon FontSize="15" Glyph="&#xE8E5;" />
-                    </Button>
-
-                    <Button
-                        x:Uid="SaveButton"
-                        Command="{x:Bind ViewModel.SaveCommand}"
-                        IsEnabled="{x:Bind ViewModel.HasDocument, Mode=OneWay}">
-                        <FontIcon FontSize="15" Glyph="&#xE74E;" />
-                    </Button>
-                </StackPanel>
-
-                <!-- Center Group: Navigation and Zoom (visible when document is loaded) -->
-                <StackPanel
-                    Grid.Column="1"
                     HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
                     Orientation="Horizontal"
-                    Spacing="4"
+                    Spacing="8"
                     Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
-
-                    <!-- Page Navigation -->
-                    <Button
-                        x:Uid="PrevPageButton"
-                        Command="{x:Bind ViewModel.PreviousPageCommand}">
-                        <FontIcon FontSize="12" Glyph="&#xE76B;" />
-                    </Button>
-
-                    <TextBox
-                        x:Uid="PageNumberBox"
-                        Width="44"
-                        Height="32"
-                        HorizontalContentAlignment="Center"
-                        InputScope="Number"
-                        Text="{x:Bind ViewModel.CurrentDocument.CurrentPageNumber, Mode=TwoWay}" />
-
+                    <!-- Nome do arquivo aberto centralizado -->
                     <TextBlock
+                        MaxWidth="280"
                         VerticalAlignment="Center"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource BodyTextBlockStyle}"
-                        Text="{x:Bind ViewModel.FormattedPageCount, Mode=OneWay}" />
+                        FontWeight="SemiBold"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{x:Bind ViewModel.CurrentDocument.FileName, Mode=OneWay}"
+                        TextTrimming="CharacterEllipsis" />
 
-                    <Button
-                        x:Uid="NextPageButton"
-                        Command="{x:Bind ViewModel.NextPageCommand}">
-                        <FontIcon FontSize="12" Glyph="&#xE76C;" />
-                    </Button>
-
-                    <AppBarSeparator Margin="8,2,8,2" />
-
-                    <!-- Zoom Controls -->
-                    <Button
-                        x:Uid="ZoomOutButton"
-                        Command="{x:Bind ViewModel.ZoomOutCommand}">
-                        <FontIcon FontSize="13" Glyph="&#xE738;" />
-                    </Button>
-
-                    <DropDownButton
-                        x:Uid="ZoomLevelBox"
-                        MinWidth="76"
-                        Content="{x:Bind ViewModel.FormattedZoomPercent, Mode=OneWay}">
-                        <DropDownButton.Flyout>
-                            <MenuFlyout Placement="Bottom">
-                                <MenuFlyoutItem
-                                    x:Uid="ZoomFitWidthButton"
-                                    Command="{x:Bind ViewModel.FitWidthCommand}" />
-                                <MenuFlyoutItem
-                                    x:Uid="ZoomFitPageButton"
-                                    Command="{x:Bind ViewModel.FitPageCommand}" />
-                                <MenuFlyoutSeparator />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="0.5" Text="50%" />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="0.75" Text="75%" />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="1.0" Text="100%" />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="1.25" Text="125%" />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="1.5" Text="150%" />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="2.0" Text="200%" />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="3.0" Text="300%" />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="4.0" Text="400%" />
-                            </MenuFlyout>
-                        </DropDownButton.Flyout>
-                    </DropDownButton>
-
-                    <Button
-                        x:Uid="ZoomInButton"
-                        Command="{x:Bind ViewModel.ZoomInCommand}">
-                        <FontIcon FontSize="13" Glyph="&#xE710;" />
-                    </Button>
-                </StackPanel>
-
-                <!-- Right Group: Annotation Tools, View Mode, Fullscreen, More -->
-                <StackPanel
-                    Grid.Column="2"
-                    Orientation="Horizontal"
-                    Spacing="4">
-
-                    <!-- Annotation Tools Group (visible when document loaded) -->
+                    <!-- Indicador compacto estilo GNOME Papers: [ TextBox ] de N -->
                     <StackPanel
+                        VerticalAlignment="Center"
                         Orientation="Horizontal"
-                        Spacing="2"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
-                        <ToggleButton
-                            x:Uid="ToolSelectButton"
-                            Click="OnToolSelectClicked"
-                            IsChecked="{x:Bind converters:UiHelpers.IsSelectTool(ViewModel.ActiveTool), Mode=OneWay}">
-                            <FontIcon FontSize="14" Glyph="&#xEF20;" />
-                        </ToggleButton>
-                        <ToggleButton
-                            x:Uid="ToolPenButton"
-                            Click="OnToolPenClicked"
-                            IsChecked="{x:Bind converters:UiHelpers.IsPenTool(ViewModel.ActiveTool), Mode=OneWay}">
-                            <FontIcon FontSize="14" Glyph="&#xED63;" />
-                        </ToggleButton>
-                        <ToggleButton
-                            x:Uid="ToolHighlighterButton"
-                            Click="OnToolHighlighterClicked"
-                            IsChecked="{x:Bind converters:UiHelpers.IsHighlighterTool(ViewModel.ActiveTool), Mode=OneWay}">
-                            <FontIcon FontSize="14" Glyph="&#xE891;" />
-                        </ToggleButton>
-                        <ToggleButton
-                            x:Uid="ToolEraserButton"
-                            Click="OnToolEraserClicked"
-                            IsChecked="{x:Bind converters:UiHelpers.IsEraserTool(ViewModel.ActiveTool), Mode=OneWay}">
-                            <FontIcon FontSize="14" Glyph="&#xE75C;" />
-                        </ToggleButton>
-                        <ToggleButton
-                            x:Uid="ToolTextNoteButton"
-                            Click="OnToolTextNoteClicked"
-                            IsChecked="{x:Bind converters:UiHelpers.IsTextNoteTool(ViewModel.ActiveTool), Mode=OneWay}">
-                            <FontIcon FontSize="14" Glyph="&#xE70B;" />
-                        </ToggleButton>
+                        Spacing="4">
+                        <TextBox
+                            x:Name="PageNumberBoxControl"
+                            x:Uid="PageNumberBox"
+                            Width="44"
+                            Height="28"
+                            Padding="2"
+                            HorizontalContentAlignment="Center"
+                            VerticalContentAlignment="Center"
+                            InputScope="Number"
+                            Text="{x:Bind ViewModel.CurrentDocument.CurrentPageNumber, Mode=TwoWay}" />
 
-                        <AppBarSeparator Margin="4,2,4,2" />
-
-                        <!-- Touch drawing toggle -->
-                        <ToggleButton
-                            x:Uid="TouchDrawingToggle"
-                            IsChecked="{x:Bind ViewModel.IsTouchDrawingEnabled, Mode=TwoWay}">
-                            <FontIcon FontSize="14" Glyph="&#xED5F;" />
-                        </ToggleButton>
-
-                        <AppBarSeparator Margin="4,2,4,2" />
+                        <TextBlock
+                            VerticalAlignment="Center"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Text="{x:Bind ViewModel.FormattedPageCount, Mode=OneWay}" />
                     </StackPanel>
-
-                    <!-- View Mode Selector: Continuous vs Paged/Slides -->
-                    <StackPanel
-                        x:Uid="ViewModeSelector"
-                        Orientation="Horizontal"
-                        Spacing="2"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
-                        <ToggleButton
-                            x:Uid="ViewModeContinuousItem"
-                            Click="OnContinuousModeClicked"
-                            IsChecked="{x:Bind converters:UiHelpers.IsContinuous(ViewModel.ViewMode), Mode=OneWay}">
-                            <FontIcon FontSize="14" Glyph="&#xE8CB;" />
-                        </ToggleButton>
-                        <ToggleButton
-                            x:Uid="ViewModePagedItem"
-                            Click="OnPagedModeClicked"
-                            IsChecked="{x:Bind converters:UiHelpers.IsPaged(ViewModel.ViewMode), Mode=OneWay}">
-                            <FontIcon FontSize="14" Glyph="&#xE7C3;" />
-                        </ToggleButton>
-                    </StackPanel>
-
-                    <!-- Full Screen / Presentation -->
-                    <Button
-                        x:Uid="FullScreenButton"
-                        Command="{x:Bind ViewModel.ToggleFullScreenCommand}"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
-                        <FontIcon FontSize="14" Glyph="&#xE740;" />
-                    </Button>
-
-                    <!-- More Menu -->
-                    <DropDownButton>
-                        <FontIcon FontSize="14" Glyph="&#xE712;" />
-                        <DropDownButton.Flyout>
-                            <MenuFlyout Placement="BottomEdgeAlignedRight">
-                                <MenuFlyoutItem
-                                    x:Uid="AboutMenuItem"
-                                    Command="{x:Bind ViewModel.ShowAboutCommand}">
-                                    <MenuFlyoutItem.Icon>
-                                        <FontIcon Glyph="&#xE946;" />
-                                    </MenuFlyoutItem.Icon>
-                                </MenuFlyoutItem>
-                            </MenuFlyout>
-                        </DropDownButton.Flyout>
-                    </DropDownButton>
                 </StackPanel>
             </Grid>
-        </Border>
 
-        <!-- Main Content Area with SplitView Sidebar -->
-        <SplitView
-            x:Name="RootSplitView"
-            Grid.Row="2"
-            DisplayMode="Inline"
-            IsPaneOpen="{x:Bind ViewModel.IsSidebarOpen, Mode=TwoWay}"
-            OpenPaneLength="260">
+            <!-- Direita: Toggle Barra Anotações, Menu Documento (...), Configurações -->
+            <StackPanel
+                Grid.Column="2"
+                VerticalAlignment="Center"
+                Orientation="Horizontal"
+                Spacing="4"
+                Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.IsSettingsOpen), Mode=OneWay}">
 
-            <!-- Sidebar Navigation Pane -->
-            <SplitView.Pane>
-                <Grid RowDefinitions="Auto,*">
-                    <!-- Sidebar Tab Switcher -->
+                <!-- Toggle da barra flutuante de anotações -->
+                <Button
+                    x:Name="AnnotationToolsToggleBtn"
+                    x:Uid="AnnotationToolsToggle"
+                    Width="36"
+                    Height="32"
+                    Padding="0"
+                    Command="{x:Bind ViewModel.ToggleAnnotationToolbarCommand}"
+                    CornerRadius="4"
+                    Style="{StaticResource SubtleButtonStyle}"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
+                    <FontIcon FontSize="16" Glyph="&#xED63;" />
+                </Button>
+
+                <!-- Menu de Opções do Documento (GNOME Papers) -->
+                <Button
+                    x:Name="DocumentMenuBtn"
+                    x:Uid="DocumentMenuButton"
+                    Width="36"
+                    Height="32"
+                    Padding="0"
+                    CornerRadius="4"
+                    Style="{StaticResource SubtleButtonStyle}">
+                    <FontIcon FontSize="16" Glyph="&#xE712;" />
+                    <Button.Flyout>
+                        <MenuFlyout Placement="BottomEdgeAlignedRight">
+                            <MenuFlyoutItem x:Uid="Menu_Print" Click="OnPrintClick">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE749;" />
+                                </MenuFlyoutItem.Icon>
+                                <MenuFlyoutItem.KeyboardAccelerators>
+                                    <KeyboardAccelerator Key="P" Modifiers="Control" />
+                                </MenuFlyoutItem.KeyboardAccelerators>
+                            </MenuFlyoutItem>
+
+                            <MenuFlyoutItem x:Uid="Menu_FullScreen" Command="{x:Bind ViewModel.ToggleFullScreenCommand}">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE740;" />
+                                </MenuFlyoutItem.Icon>
+                                <MenuFlyoutItem.KeyboardAccelerators>
+                                    <KeyboardAccelerator Key="F11" />
+                                </MenuFlyoutItem.KeyboardAccelerators>
+                            </MenuFlyoutItem>
+
+                            <MenuFlyoutItem x:Uid="Menu_Presentation" Click="OnPresentationClick">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE714;" />
+                                </MenuFlyoutItem.Icon>
+                                <MenuFlyoutItem.KeyboardAccelerators>
+                                    <KeyboardAccelerator Key="F5" />
+                                </MenuFlyoutItem.KeyboardAccelerators>
+                            </MenuFlyoutItem>
+
+                            <MenuFlyoutSeparator />
+
+                            <MenuFlyoutItem x:Uid="Menu_OpenCopy" Command="{x:Bind ViewModel.OpenCopyCommand}">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE8C8;" />
+                                </MenuFlyoutItem.Icon>
+                                <MenuFlyoutItem.KeyboardAccelerators>
+                                    <KeyboardAccelerator Key="N" Modifiers="Control,Shift" />
+                                </MenuFlyoutItem.KeyboardAccelerators>
+                            </MenuFlyoutItem>
+
+                            <MenuFlyoutItem x:Uid="Menu_OpenWith" Command="{x:Bind ViewModel.OpenWithCommand}">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE7AC;" />
+                                </MenuFlyoutItem.Icon>
+                                <MenuFlyoutItem.KeyboardAccelerators>
+                                    <KeyboardAccelerator Key="O" Modifiers="Control,Shift" />
+                                </MenuFlyoutItem.KeyboardAccelerators>
+                            </MenuFlyoutItem>
+
+                            <MenuFlyoutItem x:Uid="Menu_SaveAs" Command="{x:Bind ViewModel.SaveAsCommand}">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE74E;" />
+                                </MenuFlyoutItem.Icon>
+                                <MenuFlyoutItem.KeyboardAccelerators>
+                                    <KeyboardAccelerator Key="S" Modifiers="Control" />
+                                </MenuFlyoutItem.KeyboardAccelerators>
+                            </MenuFlyoutItem>
+
+                            <MenuFlyoutSeparator />
+
+                            <ToggleMenuFlyoutItem
+                                x:Uid="Menu_Continuous"
+                                Click="OnContinuousMenuClick"
+                                IsChecked="{x:Bind converters:UiHelpers.IsContinuous(ViewModel.ViewMode), Mode=OneWay}">
+                                <ToggleMenuFlyoutItem.KeyboardAccelerators>
+                                    <KeyboardAccelerator Key="C" />
+                                </ToggleMenuFlyoutItem.KeyboardAccelerators>
+                            </ToggleMenuFlyoutItem>
+
+                            <ToggleMenuFlyoutItem
+                                x:Uid="Menu_DualPage"
+                                IsChecked="{x:Bind ViewModel.IsDualPage, Mode=TwoWay}">
+                                <ToggleMenuFlyoutItem.KeyboardAccelerators>
+                                    <KeyboardAccelerator Key="D" />
+                                </ToggleMenuFlyoutItem.KeyboardAccelerators>
+                            </ToggleMenuFlyoutItem>
+
+                            <ToggleMenuFlyoutItem
+                                x:Uid="Menu_OddPagesLeft"
+                                IsChecked="{x:Bind ViewModel.IsOddPagesLeft, Mode=TwoWay}">
+                                <ToggleMenuFlyoutItem.KeyboardAccelerators>
+                                    <KeyboardAccelerator Key="O" />
+                                </ToggleMenuFlyoutItem.KeyboardAccelerators>
+                            </ToggleMenuFlyoutItem>
+
+                            <ToggleMenuFlyoutItem
+                                x:Uid="Menu_Rtl"
+                                IsChecked="{x:Bind ViewModel.IsRightToLeft, Mode=TwoWay}" />
+
+                            <MenuFlyoutSeparator />
+
+                            <MenuFlyoutItem x:Uid="Menu_Rotate" Command="{x:Bind ViewModel.RotateClockwiseCommand}">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE7AD;" />
+                                </MenuFlyoutItem.Icon>
+                                <MenuFlyoutItem.KeyboardAccelerators>
+                                    <KeyboardAccelerator Key="Right" Modifiers="Control" />
+                                </MenuFlyoutItem.KeyboardAccelerators>
+                            </MenuFlyoutItem>
+
+                            <MenuFlyoutItem x:Uid="Menu_DocumentProperties" Command="{x:Bind ViewModel.ShowPropertiesCommand}">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE946;" />
+                                </MenuFlyoutItem.Icon>
+                                <MenuFlyoutItem.KeyboardAccelerators>
+                                    <KeyboardAccelerator Key="Enter" Modifiers="Menu" />
+                                </MenuFlyoutItem.KeyboardAccelerators>
+                            </MenuFlyoutItem>
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
+
+                <!-- Botão de Configurações Gerais (Engrenagem) -->
+                <Button
+                    x:Name="SettingsBtn"
+                    x:Uid="SettingsButton"
+                    Width="36"
+                    Height="32"
+                    Padding="0"
+                    Command="{x:Bind ViewModel.OpenSettingsCommand}"
+                    CornerRadius="4"
+                    Style="{StaticResource SubtleButtonStyle}">
+                    <FontIcon FontSize="16" Glyph="&#xE713;" />
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- ================================================================= -->
+        <!-- Layout Principal: Barra Lateral Redimensionável + Splitter + Main -->
+        <!-- Sem ChildrenTransitions para evitar flicker visual no resize      -->
+        <!-- ================================================================= -->
+        <Grid Grid.Row="1" Background="Transparent">
+            <Grid.ColumnDefinitions>
+                <!-- Coluna 0: Barra Lateral Mica Redimensionável (220 a 480 DIPs) -->
+                <ColumnDefinition
+                    x:Name="SidebarColumn"
+                    Width="260"
+                    MinWidth="220"
+                    MaxWidth="480" />
+                <!-- Coluna 1: Divisória / Splitter Arrastável (6 DIPs) -->
+                <ColumnDefinition x:Name="SplitterColumn" Width="Auto" />
+                <!-- Coluna 2: Container Arredondado Principal -->
+                <ColumnDefinition x:Name="MainContentColumn" Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- ============================================================= -->
+            <!-- COLUNA 0: Barra Lateral Mica com Frame de Conteúdo + Rodapé   -->
+            <!-- ============================================================= -->
+            <Grid
+                x:Name="SidebarContainer"
+                Grid.Column="0"
+                Background="Transparent"
+                RowDefinitions="*,Auto"
+                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsSidebarOpen), Mode=OneWay}">
+
+                <!-- Frame de Conteúdo das Abas da Barra Lateral (Navegação Direcional) -->
+                <Frame
+                    x:Name="SidebarContentFrame"
+                    Grid.Row="0"
+                    Background="Transparent"
+                    IsNavigationStackEnabled="False" />
+
+                <!-- Rodapé com SelectorBar Nativo sem Bordas (Ícones Maiores de 20px) -->
+                <Border
+                    Grid.Row="1"
+                    Padding="4,6,4,6"
+                    Background="Transparent"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="0,1,0,0">
                     <SelectorBar
-                        x:Name="SidebarSelectorBar"
-                        Grid.Row="0"
-                        Margin="8,8,8,4"
-                        SelectionChanged="OnSidebarSelectorBarChanged">
+                        x:Name="SidebarFooterSelectorBar"
+                        HorizontalAlignment="Center"
+                        SelectionChanged="OnSidebarFooterSelectionChanged">
                         <SelectorBarItem
                             x:Name="ThumbnailsSelectorItem"
-                            x:Uid="SidebarThumbnailsItem">
+                            x:Uid="Sidebar_Thumbnails"
+                            Margin="4,0"
+                            Padding="8,6">
                             <SelectorBarItem.Icon>
-                                <FontIcon Glyph="&#xE809;" />
+                                <FontIcon FontSize="20" Glyph="&#xF0E2;" />
                             </SelectorBarItem.Icon>
                         </SelectorBarItem>
                         <SelectorBarItem
                             x:Name="OutlineSelectorItem"
-                            x:Uid="SidebarOutlineItem">
+                            x:Uid="Sidebar_Outline"
+                            Margin="4,0"
+                            Padding="8,6">
                             <SelectorBarItem.Icon>
-                                <FontIcon Glyph="&#xE8A5;" />
+                                <FontIcon FontSize="20" Glyph="&#xE8FD;" />
+                            </SelectorBarItem.Icon>
+                        </SelectorBarItem>
+                        <SelectorBarItem
+                            x:Name="AnnotationsSelectorItem"
+                            x:Uid="Sidebar_Annotations"
+                            Margin="4,0"
+                            Padding="8,6">
+                            <SelectorBarItem.Icon>
+                                <FontIcon FontSize="20" Glyph="&#xE8F2;" />
+                            </SelectorBarItem.Icon>
+                        </SelectorBarItem>
+                        <SelectorBarItem
+                            x:Name="BookmarksSelectorItem"
+                            x:Uid="Sidebar_Bookmarks"
+                            Margin="4,0"
+                            Padding="8,6">
+                            <SelectorBarItem.Icon>
+                                <FontIcon FontSize="20" Glyph="&#xE8A4;" />
+                            </SelectorBarItem.Icon>
+                        </SelectorBarItem>
+                        <SelectorBarItem
+                            x:Name="AttachmentsSelectorItem"
+                            x:Uid="Sidebar_Attachments"
+                            Margin="4,0"
+                            Padding="8,6">
+                            <SelectorBarItem.Icon>
+                                <FontIcon FontSize="20" Glyph="&#xE723;" />
                             </SelectorBarItem.Icon>
                         </SelectorBarItem>
                     </SelectorBar>
+                </Border>
+            </Grid>
 
-                    <!-- Thumbnails Gallery -->
-                    <ListView
-                        x:Name="ThumbnailsList"
-                        Grid.Row="1"
-                        Padding="8"
-                        ItemsSource="{x:Bind ViewModel.CurrentDocument.Thumbnails, Mode=OneWay}"
-                        SelectionChanged="OnThumbnailSelectionChanged"
-                        SelectionMode="Single"
-                        Visibility="{x:Bind converters:UiHelpers.ThumbnailsVisibility(ViewModel.SidebarTab), Mode=OneWay}">
-                        <ListView.ItemTemplate>
-                            <DataTemplate x:DataType="vm:ThumbnailItemViewModel">
-                                <StackPanel
-                                    Margin="4,6,4,6"
+            <!-- ============================================================= -->
+            <!-- COLUNA 1: Splitter Arrastável Estilo Windows 11 Fotos         -->
+            <!-- ============================================================= -->
+            <controls:SplitterContainer
+                Grid.Column="1"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Stretch"
+                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsSidebarOpen), Mode=OneWay}">
+                <Thumb
+                    x:Name="SidebarSplitter"
+                    Width="6"
+                    HorizontalAlignment="Center"
+                    Background="Transparent"
+                    DragDelta="OnSidebarSplitterDragDelta">
+                    <Thumb.Template>
+                        <ControlTemplate TargetType="Thumb">
+                            <Grid Background="Transparent">
+                                <!-- Indicador visual central discreto (||) -->
+                                <Border
+                                    Width="2"
+                                    Height="24"
                                     HorizontalAlignment="Center"
-                                    Spacing="4">
-                                    <Border
-                                        Width="140"
-                                        Height="180"
-                                        Background="{ThemeResource LayerFillColorDefaultBrush}"
-                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="4">
-                                        <Grid>
-                                            <FontIcon
-                                                HorizontalAlignment="Center"
-                                                VerticalAlignment="Center"
-                                                FontSize="32"
-                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                Glyph="&#xE8A5;" />
-                                        </Grid>
-                                    </Border>
-                                    <TextBlock
-                                        HorizontalAlignment="Center"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Style="{StaticResource CaptionTextBlockStyle}"
-                                        Text="{x:Bind DisplayNumber}" />
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
+                                    VerticalAlignment="Center"
+                                    Background="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    CornerRadius="1" />
+                            </Grid>
+                        </ControlTemplate>
+                    </Thumb.Template>
+                </Thumb>
+            </controls:SplitterContainer>
 
-                    <!-- Outline / Bookmarks Tree -->
-                    <Grid
-                        Grid.Row="1"
-                        Padding="8"
-                        Visibility="{x:Bind converters:UiHelpers.OutlineVisibility(ViewModel.SidebarTab), Mode=OneWay}">
+            <!-- ============================================================= -->
+            <!-- COLUNA 2: Container Arredondado com Frame Principal           -->
+            <!-- ============================================================= -->
+            <Border
+                x:Name="MainContentContainer"
+                Grid.Column="2"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="{x:Bind converters:UiHelpers.MainContainerBorderThickness(ViewModel.IsSidebarOpen), Mode=OneWay}"
+                CornerRadius="{x:Bind converters:UiHelpers.MainContainerCornerRadius(ViewModel.IsSidebarOpen), Mode=OneWay}">
 
-                        <!-- Empty state when no outline exists -->
-                        <TextBlock
-                            x:Uid="OutlineEmptyText"
-                            Margin="16,24,16,16"
-                            HorizontalAlignment="Center"
-                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Style="{StaticResource BodyTextBlockStyle}"
-                            TextAlignment="Center"
-                            TextWrapping="Wrap"
-                            Visibility="{x:Bind converters:UiHelpers.HasNoItems(ViewModel.CurrentDocument.Outline.Count), Mode=OneWay}" />
-
-                        <!-- Hierarchical Outline Tree -->
-                        <TreeView
-                            x:Name="OutlineTreeView"
-                            ItemsSource="{x:Bind ViewModel.CurrentDocument.Outline, Mode=OneWay}"
-                            ItemInvoked="OnOutlineItemInvoked">
-                            <TreeView.ItemTemplate>
-                                <DataTemplate x:DataType="vm:OutlineItemViewModel">
-                                    <Grid ColumnDefinitions="*,Auto">
-                                        <TextBlock
-                                            Grid.Column="0"
-                                            Text="{x:Bind Title}"
-                                            TextTrimming="CharacterEllipsis" />
-                                        <TextBlock
-                                            Grid.Column="1"
-                                            Margin="8,0,0,0"
-                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                            Style="{StaticResource CaptionTextBlockStyle}"
-                                            Text="{x:Bind DisplayPageNumber}" />
-                                    </Grid>
-                                </DataTemplate>
-                            </TreeView.ItemTemplate>
-                        </TreeView>
-                    </Grid>
-                </Grid>
-            </SplitView.Pane>
-
-            <!-- Document Content / Empty State Host -->
-            <SplitView.Content>
-                <Grid>
-                    <!-- Empty State (when no document is open) -->
-                    <StackPanel
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        Spacing="12"
-                        Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.HasDocument), Mode=OneWay}">
-                        <FontIcon
-                            HorizontalAlignment="Center"
-                            FontSize="56"
-                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                            Glyph="&#xE8A5;" />
-                        <TextBlock
-                            x:Uid="EmptyStateTitle"
-                            HorizontalAlignment="Center"
-                            Style="{StaticResource TitleTextBlockStyle}" />
-                        <TextBlock
-                            x:Uid="EmptyStateSubtitle"
-                            MaxWidth="360"
-                            HorizontalAlignment="Center"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Style="{StaticResource BodyTextBlockStyle}"
-                            TextAlignment="Center"
-                            TextWrapping="Wrap" />
-                        <Button
-                            x:Uid="EmptyStateOpenButton"
-                            Margin="0,8,0,0"
-                            HorizontalAlignment="Center"
-                            Command="{x:Bind ViewModel.OpenFileCommand}"
-                            Style="{StaticResource AccentButtonStyle}">
-                            <Button.Content>
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon FontSize="14" Glyph="&#xE8E5;" />
-                                    <TextBlock x:Uid="EmptyStateOpenButtonText" />
-                                </StackPanel>
-                            </Button.Content>
-                        </Button>
-                    </StackPanel>
-
-                    <!-- Document Display Area (when document is loaded) -->
-                    <Grid Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
-
-                        <!-- Mode 1: Continuous Vertical Scroll (ItemsRepeater in ScrollViewer) -->
-                        <ScrollViewer
-                            x:Name="ContinuousScrollViewer"
-                            ZoomMode="Enabled"
-                            MinZoomFactor="0.25"
-                            MaxZoomFactor="8.0"
-                            HorizontalScrollBarVisibility="Auto"
-                            VerticalScrollBarVisibility="Visible"
-                            Visibility="{x:Bind converters:UiHelpers.ContinuousVisibility(ViewModel.ViewMode), Mode=OneWay}">
-                            <ItemsRepeater
-                                x:Name="ContinuousPagesRepeater"
-                                Margin="24">
-                                <ItemsRepeater.Layout>
-                                    <StackLayout Orientation="Vertical" Spacing="16" />
-                                </ItemsRepeater.Layout>
-                                <ItemsRepeater.ItemTemplate>
-                                    <DataTemplate x:DataType="vm:ThumbnailItemViewModel">
-                                        <!-- Page host card (Step 2 placeholder card, ready for PdfPageCanvas in Step 3) -->
-                                        <Border
-                                            Width="595"
-                                            Height="842"
-                                            HorizontalAlignment="Center"
-                                            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="4">
-                                            <Grid>
-                                                <TextBlock
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"
-                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                    Style="{StaticResource SubtitleTextBlockStyle}"
-                                                    Text="{x:Bind DisplayNumber}" />
-                                            </Grid>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsRepeater.ItemTemplate>
-                            </ItemsRepeater>
-                        </ScrollViewer>
-
-                        <!-- Mode 2: Paged / Presentation Slides (FlipView) -->
-                        <FlipView
-                            x:Name="PagedFlipView"
-                            ItemsSource="{x:Bind ViewModel.CurrentDocument.Thumbnails, Mode=OneWay}"
-                            SelectedIndex="{x:Bind ViewModel.CurrentDocument.CurrentPageIndex, Mode=TwoWay}"
-                            Visibility="{x:Bind converters:UiHelpers.PagedVisibility(ViewModel.ViewMode), Mode=OneWay}">
-                            <FlipView.ItemTemplate>
-                                <DataTemplate x:DataType="vm:ThumbnailItemViewModel">
-                                    <ScrollViewer
-                                        ZoomMode="Enabled"
-                                        MinZoomFactor="0.25"
-                                        MaxZoomFactor="8.0"
-                                        HorizontalScrollBarVisibility="Hidden"
-                                        VerticalScrollBarVisibility="Hidden">
-                                        <Border
-                                            Width="595"
-                                            Height="842"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center"
-                                            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="4">
-                                            <Grid>
-                                                <TextBlock
-                                                    HorizontalAlignment="Center"
-                                                    VerticalAlignment="Center"
-                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                    Style="{StaticResource TitleTextBlockStyle}"
-                                                    Text="{x:Bind DisplayNumber}" />
-                                            </Grid>
-                                        </Border>
-                                    </ScrollViewer>
-                                </DataTemplate>
-                            </FlipView.ItemTemplate>
-                        </FlipView>
-                    </Grid>
-                </Grid>
-            </SplitView.Content>
-        </SplitView>
+                <!-- Frame de Conteúdo Principal (DocumentView vs. SettingsView) -->
+                <Frame
+                    x:Name="MainContentFrame"
+                    Background="Transparent"
+                    IsNavigationStackEnabled="False" />
+            </Border>
+        </Grid>
     </Grid>
 </Window>

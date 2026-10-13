@@ -4,7 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 namespace WinPDF.ViewModels;
 
 /// <summary>
-/// View model representing the active PDF document state, navigation and zoom factors.
+/// View model representing the active PDF document state, navigation, rotation, and collections.
 /// </summary>
 public sealed partial class DocumentViewModel : ObservableObject
 {
@@ -55,10 +55,28 @@ public sealed partial class DocumentViewModel : ObservableObject
     public partial double ZoomFactor { get; set; } = 1.0;
 
     /// <summary>
+    /// Gets or sets the clockwise rotation angle in degrees (0, 90, 180, 270).
+    /// </summary>
+    [ObservableProperty]
+    public partial int Rotation { get; set; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether there are unsaved annotation changes.
     /// </summary>
     [ObservableProperty]
     public partial bool HasUnsavedChanges { get; set; }
+
+    /// <summary>
+    /// Gets or sets the file size in bytes for properties display.
+    /// </summary>
+    [ObservableProperty]
+    public partial long FileSizeBytes { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the current page is pinned in user favorites/bookmarks.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsCurrentPageBookmarked { get; set; }
 
     /// <summary>
     /// Gets the collection of page thumbnail items for sidebar gallery binding.
@@ -66,9 +84,24 @@ public sealed partial class DocumentViewModel : ObservableObject
     public ObservableCollection<ThumbnailItemViewModel> Thumbnails { get; } = new();
 
     /// <summary>
-    /// Gets the collection of top-level bookmarks for outline tree view binding.
+    /// Gets the collection of top-level outline items for bookmark hierarchy binding.
     /// </summary>
     public ObservableCollection<OutlineItemViewModel> Outline { get; } = new();
+
+    /// <summary>
+    /// Gets the collection of user-pinned favorite pages.
+    /// </summary>
+    public ObservableCollection<BookmarkItemViewModel> Bookmarks { get; } = new();
+
+    /// <summary>
+    /// Gets the collection of annotation descriptions in the document.
+    /// </summary>
+    public ObservableCollection<AnnotationItemViewModel> AnnotationsSummary { get; } = new();
+
+    /// <summary>
+    /// Gets the collection of embedded file attachment names.
+    /// </summary>
+    public ObservableCollection<AttachmentItemViewModel> Attachments { get; } = new();
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DocumentViewModel"/> class.
@@ -82,6 +115,18 @@ public sealed partial class DocumentViewModel : ObservableObject
         PageCount = pageCount;
         CurrentPageIndex = 0;
 
+        if (System.IO.File.Exists(filePath))
+        {
+            try
+            {
+                FileSizeBytes = new System.IO.FileInfo(filePath).Length;
+            }
+            catch
+            {
+                FileSizeBytes = 0;
+            }
+        }
+
         for (int i = 0; i < pageCount; i++)
         {
             Thumbnails.Add(new ThumbnailItemViewModel(i));
@@ -91,6 +136,8 @@ public sealed partial class DocumentViewModel : ObservableObject
         {
             Thumbnails[0].IsSelected = true;
         }
+
+        UpdateIsCurrentPageBookmarked();
     }
 
     partial void OnCurrentPageIndexChanged(int value)
@@ -101,6 +148,44 @@ public sealed partial class DocumentViewModel : ObservableObject
         {
             Thumbnails[i].IsSelected = (i == value);
         }
+
+        UpdateIsCurrentPageBookmarked();
+    }
+
+    private void UpdateIsCurrentPageBookmarked()
+    {
+        IsCurrentPageBookmarked = Bookmarks.Any(b => b.PageIndex == CurrentPageIndex);
+    }
+
+    /// <summary>
+    /// Toggles the favorite / bookmark status of the currently active page.
+    /// </summary>
+    public void ToggleBookmarkCurrentPage()
+    {
+        var existing = Bookmarks.FirstOrDefault(b => b.PageIndex == CurrentPageIndex);
+        if (existing is not null)
+        {
+            Bookmarks.Remove(existing);
+        }
+        else
+        {
+            int insertIndex = 0;
+            while (insertIndex < Bookmarks.Count && Bookmarks[insertIndex].PageIndex < CurrentPageIndex)
+            {
+                insertIndex++;
+            }
+            Bookmarks.Insert(insertIndex, new BookmarkItemViewModel(CurrentPageIndex));
+        }
+
+        UpdateIsCurrentPageBookmarked();
+    }
+
+    /// <summary>
+    /// Rotates the document view 90 degrees clockwise.
+    /// </summary>
+    public void RotateClockwise()
+    {
+        Rotation = (Rotation + 90) % 360;
     }
 
     /// <summary>

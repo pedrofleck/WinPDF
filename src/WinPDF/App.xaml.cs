@@ -43,6 +43,7 @@ public partial class App : Application
 
         // View Models
         services.AddSingleton<ShellViewModel>();
+        services.AddSingleton<SettingsViewModel>();
 
         return services.BuildServiceProvider();
     }

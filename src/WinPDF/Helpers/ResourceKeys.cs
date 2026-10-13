@@ -28,6 +28,9 @@ public static class ResourceKeys
     /// <summary>"of {0}" suffix next to the page number box. {0} = page count.</summary>
     public const string PageCountFormat = "Page_CountFormat";
 
+    /// <summary>Bookmark list item page label format. {0} = page number.</summary>
+    public const string BookmarkPageFormat = "Bookmark_PageFormat";
+
     /// <summary>Zoom percentage format. {0} = integer percentage.</summary>
     public const string ZoomPercentFormat = "Zoom_PercentFormat";
 
@@ -111,4 +114,25 @@ public static class ResourceKeys
 
     /// <summary>Text note delete action.</summary>
     public const string NoteDelete = "Note_Delete";
+
+    /// <summary>Settings dialog title.</summary>
+    public const string SettingsDialogTitle = "SettingsDialog_Title";
+
+    /// <summary>Document properties dialog title.</summary>
+    public const string DocPropsTitle = "DocProps_Title";
+
+    /// <summary>Document properties: file name label.</summary>
+    public const string DocPropsFileName = "DocProps_FileName";
+
+    /// <summary>Document properties: file path label.</summary>
+    public const string DocPropsFilePath = "DocProps_FilePath";
+
+    /// <summary>Document properties: file size label.</summary>
+    public const string DocPropsFileSize = "DocProps_FileSize";
+
+    /// <summary>Document properties: page count label.</summary>
+    public const string DocPropsPageCount = "DocProps_PageCount";
+
+    /// <summary>Document properties: page size label.</summary>
+    public const string DocPropsPageSize = "DocProps_PageSize";
 }
