@@ -1,0 +1,114 @@
+namespace WinPDF.Helpers;
+
+/// <summary>
+/// Compile-time constants for every resource key consumed from C# code.
+/// </summary>
+/// <remarks>
+/// Every constant here MUST exist in both <c>Strings/en-US/Resources.resw</c> and
+/// <c>Strings/pt-BR/Resources.resw</c>. Keys consumed only via XAML <c>x:Uid</c>
+/// (e.g. <c>OpenFileButton.Label</c>) are not listed here.
+/// </remarks>
+public static class ResourceKeys
+{
+    /// <summary>Application display name.</summary>
+    public const string AppDisplayName = "AppDisplayName";
+
+    /// <summary>Short application description used in the About dialog.</summary>
+    public const string AppDescription = "AppDescription";
+
+    /// <summary>Window title format. {0} = document file name.</summary>
+    public const string WindowTitleFormat = "Window_TitleFormat";
+
+    /// <summary>Window title format when there are unsaved changes. {0} = document file name.</summary>
+    public const string WindowTitleModifiedFormat = "Window_TitleModifiedFormat";
+
+    /// <summary>File type description shown in file pickers for *.pdf.</summary>
+    public const string FilePickerPdfFileType = "FilePicker_PdfFileType";
+
+    /// <summary>"of {0}" suffix next to the page number box. {0} = page count.</summary>
+    public const string PageCountFormat = "Page_CountFormat";
+
+    /// <summary>Zoom percentage format. {0} = integer percentage.</summary>
+    public const string ZoomPercentFormat = "Zoom_PercentFormat";
+
+    /// <summary>Generic OK button.</summary>
+    public const string DialogOk = "Dialog_Ok";
+
+    /// <summary>Generic Cancel button.</summary>
+    public const string DialogCancel = "Dialog_Cancel";
+
+    /// <summary>Generic Close button.</summary>
+    public const string DialogClose = "Dialog_Close";
+
+    /// <summary>Unsaved changes dialog title. {0} = document file name.</summary>
+    public const string DialogUnsavedChangesTitle = "Dialog_UnsavedChanges_Title";
+
+    /// <summary>Unsaved changes dialog body.</summary>
+    public const string DialogUnsavedChangesContent = "Dialog_UnsavedChanges_Content";
+
+    /// <summary>Unsaved changes dialog primary button.</summary>
+    public const string DialogUnsavedChangesSave = "Dialog_UnsavedChanges_Save";
+
+    /// <summary>Unsaved changes dialog secondary button.</summary>
+    public const string DialogUnsavedChangesDontSave = "Dialog_UnsavedChanges_DontSave";
+
+    /// <summary>Open error dialog title.</summary>
+    public const string DialogOpenErrorTitle = "Dialog_OpenError_Title";
+
+    /// <summary>Open error dialog body. {0} = file name, {1} = reason.</summary>
+    public const string DialogOpenErrorContent = "Dialog_OpenError_Content";
+
+    /// <summary>Save error dialog title.</summary>
+    public const string DialogSaveErrorTitle = "Dialog_SaveError_Title";
+
+    /// <summary>Save error dialog body. {0} = file name, {1} = reason.</summary>
+    public const string DialogSaveErrorContent = "Dialog_SaveError_Content";
+
+    /// <summary>Password dialog title.</summary>
+    public const string DialogPasswordTitle = "Dialog_Password_Title";
+
+    /// <summary>Password dialog body. {0} = file name.</summary>
+    public const string DialogPasswordContent = "Dialog_Password_Content";
+
+    /// <summary>Password box placeholder.</summary>
+    public const string DialogPasswordPlaceholder = "Dialog_Password_Placeholder";
+
+    /// <summary>Password dialog primary button.</summary>
+    public const string DialogPasswordUnlock = "Dialog_Password_Unlock";
+
+    /// <summary>Error: wrong password.</summary>
+    public const string ErrorInvalidPassword = "Error_InvalidPassword";
+
+    /// <summary>Error: file not found or not readable (PDFium FPDF_ERR_FILE).</summary>
+    public const string ErrorFileNotFound = "Error_FileNotFound";
+
+    /// <summary>Error: invalid or corrupted PDF (PDFium FPDF_ERR_FORMAT).</summary>
+    public const string ErrorInvalidFormat = "Error_InvalidFormat";
+
+    /// <summary>Error: unsupported security handler (PDFium FPDF_ERR_SECURITY).</summary>
+    public const string ErrorUnsupportedSecurity = "Error_UnsupportedSecurity";
+
+    /// <summary>Error: page not found or content error (PDFium FPDF_ERR_PAGE).</summary>
+    public const string ErrorPage = "Error_Page";
+
+    /// <summary>Error: file could not be written.</summary>
+    public const string ErrorWriteFailed = "Error_WriteFailed";
+
+    /// <summary>Error: unknown failure.</summary>
+    public const string ErrorUnknown = "Error_Unknown";
+
+    /// <summary>Status: document loading.</summary>
+    public const string StatusLoading = "Status_Loading";
+
+    /// <summary>Status: document saving.</summary>
+    public const string StatusSaving = "Status_Saving";
+
+    /// <summary>Status: document saved.</summary>
+    public const string StatusSaved = "Status_Saved";
+
+    /// <summary>Text note editor placeholder.</summary>
+    public const string NotePlaceholder = "Note_Placeholder";
+
+    /// <summary>Text note delete action.</summary>
+    public const string NoteDelete = "Note_Delete";
+}

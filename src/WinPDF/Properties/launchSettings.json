@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "WinPDF (Unpackaged)": {
+      "commandName": "Project"
+    },
+    "WinPDF (Unpackaged, open file)": {
+      "commandName": "Project",
+      "commandLineArgs": "\"%USERPROFILE%\\Documents\\sample.pdf\""
+    }
+  }
+}

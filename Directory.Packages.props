@@ -1,0 +1,20 @@
+<Project>
+  <!--
+    Central Package Management: every NuGet version lives here.
+    Project files reference packages WITHOUT a Version attribute.
+    Compatibility note: Microsoft.Graphics.Win2D 1.4.0 depends on
+    Microsoft.WindowsAppSDK.WinUI 1.8.x, so the Windows App SDK must stay on the 1.8 line
+    until a Win2D release supporting Windows App SDK 2.x is adopted.
+  -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageVersion Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
+    <PackageVersion Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.7705" />
+    <PackageVersion Include="Microsoft.Graphics.Win2D" Version="1.4.0" />
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <!-- Prebuilt open-source PDFium binaries (pdfium.dll for win-x86/x64/arm64). Bindings are hand-written P/Invoke. -->
+    <PackageVersion Include="bblanchon.PDFium.Win32" Version="157.0.8100" />
+  </ItemGroup>
+</Project>

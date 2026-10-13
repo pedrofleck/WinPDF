@@ -1,0 +1,22 @@
+<Project>
+  <!--
+    Repository-wide build settings applied to every project under this folder.
+    Keep project-specific settings inside each .csproj.
+  -->
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Deterministic>true</Deterministic>
+
+    <!-- XML documentation is mandatory for all public/protected members (see AGENTS.md). -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <Company>WinPDF Contributors</Company>
+    <Product>WinPDF</Product>
+    <Copyright>Copyright © WinPDF Contributors</Copyright>
+  </PropertyGroup>
+</Project>
