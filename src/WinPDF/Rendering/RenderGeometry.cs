@@ -31,6 +31,18 @@ public static class RenderGeometry
     }
 
     /// <summary>
+    /// Computes the pixel size of the whole page rasterized at <paramref name="zoom"/>:
+    /// <c>ceil(W · k · Zq · R) × ceil(H · k · Zq · R)</c>, where W/H are the displayed (rotated) dimensions.
+    /// </summary>
+    /// <param name="page">Page metadata.</param>
+    /// <param name="zoom">Quantized zoom factor <c>Zq</c>.</param>
+    /// <param name="rasterizationScale"><c>XamlRoot.RasterizationScale</c>.</param>
+    /// <param name="userRotationDegrees">Extra user rotation applied on top of the page's <c>/Rotate</c>.</param>
+    /// <returns>The page width and height in physical pixels (each at least 1).</returns>
+    public static (int Width, int Height) ComputeFullPagePixelSize(PdfPageInfo page, double zoom, double rasterizationScale, int userRotationDegrees = 0)
+        => GetPagePixelSize(page, userRotationDegrees, zoom, rasterizationScale);
+
+    /// <summary>
     /// Gets the number of 512×512 tile columns and rows needed to cover a page rasterization.
     /// </summary>
     /// <param name="pagePixelWidth">Full page width in pixels.</param>

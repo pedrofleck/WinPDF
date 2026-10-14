@@ -125,7 +125,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// <summary>
     /// Gets the application display version string.
     /// </summary>
-    public string AppVersion => "1.0.0 (.NET 10 LTS)";
+    public string AppVersion => "0.1.0-alpha.1";
 
     /// <summary>
     /// Gets the runtime processor architecture description.

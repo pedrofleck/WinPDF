@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 namespace WinPDF.Models;
 
 /// <summary>
@@ -9,8 +11,15 @@ namespace WinPDF.Models;
 /// <param name="Rotation">Intrinsic <c>/Rotate</c> of the page: clockwise angle in degrees (0, 90, 180, or 270).</param>
 /// <param name="OriginXPt">Left edge (<c>cx0</c>) of the visible box in PDF user space, in points.</param>
 /// <param name="OriginYPt">Bottom edge (<c>cy0</c>) of the visible box in PDF user space, in points.</param>
-public sealed record PdfPageInfo(int Index, double WidthPt, double HeightPt, int Rotation, double OriginXPt = 0, double OriginYPt = 0)
+public sealed record PdfPageInfo(int Index, double WidthPt, double HeightPt, int Rotation, double OriginXPt = 0, double OriginYPt = 0) : INotifyPropertyChanged
 {
+    /// <inheritdoc/>
+    public event PropertyChangedEventHandler? PropertyChanged
+    {
+        add { }
+        remove { }
+    }
+
     /// <summary>
     /// Gets the display width in DIPs (1/96 inch) at 100% zoom factor.
     /// </summary>

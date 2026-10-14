@@ -3,9 +3,11 @@
     x:Class="WinPDF.Views.DocumentView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:WinPDF.Controls"
     xmlns:converters="using:WinPDF.Converters"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:models="using:WinPDF.Models"
     xmlns:vm="using:WinPDF.ViewModels"
     Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
     mc:Ignorable="d">
@@ -63,21 +65,24 @@
                 MaxZoomFactor="8.0"
                 MinZoomFactor="0.25"
                 VerticalScrollBarVisibility="Visible"
+                ViewChanging="OnScrollViewerViewChanging"
+                ViewChanged="OnScrollViewerViewChanged"
                 Visibility="{x:Bind converters:UiHelpers.ContinuousVisibility(ViewModel.ViewMode), Mode=OneWay}"
                 ZoomMode="Enabled">
                 <ItemsRepeater
                     x:Name="ContinuousPagesRepeater"
                     Margin="24"
-                    ItemsSource="{x:Bind ViewModel.CurrentDocument.Thumbnails, Mode=OneWay}">
+                    HorizontalAlignment="Center"
+                    ItemsSource="{x:Bind ViewModel.CurrentDocument.Pages, Mode=OneWay}">
                     <ItemsRepeater.Layout>
                         <StackLayout Orientation="Vertical" Spacing="16" />
                     </ItemsRepeater.Layout>
                     <ItemsRepeater.ItemTemplate>
-                        <DataTemplate x:DataType="vm:ThumbnailItemViewModel">
+                        <DataTemplate x:DataType="models:PdfPageInfo">
                             <!-- Folha do PDF: Borda com stroke, elevação e ThemeShadow com Translation="0,0,16" -->
                             <Border
-                                Width="595"
-                                Height="842"
+                                Width="{x:Bind DisplayWidthDip, Mode=OneWay}"
+                                Height="{x:Bind DisplayHeightDip, Mode=OneWay}"
                                 HorizontalAlignment="Center"
                                 Background="{ThemeResource LayerFillColorDefaultBrush}"
                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -87,14 +92,7 @@
                                 <Border.Shadow>
                                     <ThemeShadow />
                                 </Border.Shadow>
-                                <Grid>
-                                    <TextBlock
-                                        HorizontalAlignment="Center"
-                                        VerticalAlignment="Center"
-                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                        Style="{StaticResource SubtitleTextBlockStyle}"
-                                        Text="{x:Bind DisplayNumber}" />
-                                </Grid>
+                                <controls:PdfPageCanvas PageInfo="{x:Bind Mode=OneWay}" />
                             </Border>
                         </DataTemplate>
                     </ItemsRepeater.ItemTemplate>
@@ -104,11 +102,11 @@
             <!-- Modo Paginado / Apresentação de Slides -->
             <FlipView
                 x:Name="PagedFlipView"
-                ItemsSource="{x:Bind ViewModel.CurrentDocument.Thumbnails, Mode=OneWay}"
+                ItemsSource="{x:Bind ViewModel.CurrentDocument.Pages, Mode=OneWay}"
                 SelectedIndex="{x:Bind ViewModel.CurrentDocument.CurrentPageIndex, Mode=TwoWay}"
                 Visibility="{x:Bind converters:UiHelpers.PagedVisibility(ViewModel.ViewMode), Mode=OneWay}">
                 <FlipView.ItemTemplate>
-                    <DataTemplate x:DataType="vm:ThumbnailItemViewModel">
+                    <DataTemplate x:DataType="models:PdfPageInfo">
                         <ScrollViewer
                             HorizontalScrollBarVisibility="Hidden"
                             MaxZoomFactor="8.0"
@@ -116,8 +114,8 @@
                             VerticalScrollBarVisibility="Hidden"
                             ZoomMode="Enabled">
                             <Border
-                                Width="595"
-                                Height="842"
+                                Width="{x:Bind DisplayWidthDip, Mode=OneWay}"
+                                Height="{x:Bind DisplayHeightDip, Mode=OneWay}"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
                                 Background="{ThemeResource LayerFillColorDefaultBrush}"
@@ -128,14 +126,7 @@
                                 <Border.Shadow>
                                     <ThemeShadow />
                                 </Border.Shadow>
-                                <Grid>
-                                    <TextBlock
-                                        HorizontalAlignment="Center"
-                                        VerticalAlignment="Center"
-                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                        Style="{StaticResource TitleTextBlockStyle}"
-                                        Text="{x:Bind DisplayNumber}" />
-                                </Grid>
+                                <controls:PdfPageCanvas PageInfo="{x:Bind Mode=OneWay}" />
                             </Border>
                         </ScrollViewer>
                     </DataTemplate>
@@ -210,7 +201,7 @@
                     <Button
                         x:Uid="ZoomOutButton"
                         Padding="6,4,6,4"
-                        Command="{x:Bind ViewModel.ZoomOutCommand}">
+                        Click="OnZoomOutClick">
                         <FontIcon FontSize="12" Glyph="&#xE738;" />
                     </Button>
 
@@ -223,10 +214,10 @@
                             <MenuFlyout Placement="Top">
                                 <MenuFlyoutItem
                                     x:Uid="ZoomFitWidthButton"
-                                    Command="{x:Bind ViewModel.FitWidthCommand}" />
+                                    Click="OnFitWidthClick" />
                                 <MenuFlyoutItem
                                     x:Uid="ZoomFitPageButton"
-                                    Command="{x:Bind ViewModel.FitPageCommand}" />
+                                    Click="OnFitPageClick" />
                                 <MenuFlyoutSeparator />
                                 <MenuFlyoutItem Click="OnZoomPresetClick" Tag="0.5" Text="50%" />
                                 <MenuFlyoutItem Click="OnZoomPresetClick" Tag="0.75" Text="75%" />
@@ -243,7 +234,7 @@
                     <Button
                         x:Uid="ZoomInButton"
                         Padding="6,4,6,4"
-                        Command="{x:Bind ViewModel.ZoomInCommand}">
+                        Click="OnZoomInClick">
                         <FontIcon FontSize="12" Glyph="&#xE710;" />
                     </Button>
                 </StackPanel>

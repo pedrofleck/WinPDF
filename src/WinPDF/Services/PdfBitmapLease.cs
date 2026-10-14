@@ -65,6 +65,35 @@ public sealed unsafe class PdfBitmapLease : IDisposable
         return new ReadOnlySpan<byte>((void*)Scan0, checked((int)SizeInBytes));
     }
 
+    /// <summary>
+    /// Alias for <see cref="AsSpan"/> matching user guidelines.
+    /// </summary>
+    /// <returns>A span over <c>Stride × Height</c> bytes.</returns>
+    public ReadOnlySpan<byte> AsReadOnlySpan() => AsSpan();
+
+    /// <summary>
+    /// Copies pixels to a managed byte array sized exactly for <c>Width * Height * 4</c>.
+    /// </summary>
+    /// <returns>The pixel byte array.</returns>
+    public byte[] ToPixelArray()
+    {
+        ReadOnlySpan<byte> span = AsSpan();
+        int expectedSize = Width * Height * 4;
+        if (span.Length == expectedSize)
+        {
+            return span.ToArray();
+        }
+
+        byte[] result = GC.AllocateUninitializedArray<byte>(expectedSize);
+        int srcStride = Stride;
+        int dstStride = Width * 4;
+        for (int y = 0; y < Height; y++)
+        {
+            span.Slice(y * srcStride, dstStride).CopyTo(result.AsSpan(y * dstStride, dstStride));
+        }
+        return result;
+    }
+
     /// <summary>Returns the bitmap memory to PDFium.</summary>
     public void Dispose()
     {

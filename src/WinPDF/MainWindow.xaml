@@ -175,6 +175,7 @@
                             HorizontalContentAlignment="Center"
                             VerticalContentAlignment="Center"
                             InputScope="Number"
+                            KeyDown="OnPageNumberBoxKeyDown"
                             Text="{x:Bind ViewModel.CurrentDocument.CurrentPageNumber, Mode=TwoWay}" />
 
                         <TextBlock

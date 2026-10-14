@@ -503,4 +503,25 @@ public sealed partial class MainWindow : Window
             deferral.Complete();
         }
     }
+
+    private void OnPageNumberBoxKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            if (sender is TextBox textBox)
+            {
+                if (int.TryParse(textBox.Text, out int pageNumber) && ViewModel.CurrentDocument is not null)
+                {
+                    ViewModel.CurrentDocument.CurrentPageNumber = pageNumber;
+                    textBox.Text = ViewModel.CurrentDocument.CurrentPageNumber.ToString();
+                }
+                else if (ViewModel.CurrentDocument is not null)
+                {
+                    textBox.Text = ViewModel.CurrentDocument.CurrentPageNumber.ToString();
+                }
+            }
+            e.Handled = true;
+            MainContentFrame.Focus(FocusState.Programmatic);
+        }
+    }
 }
