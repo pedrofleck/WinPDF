@@ -14,7 +14,8 @@ namespace WinPDF.Services;
 /// </remarks>
 internal sealed unsafe class PdfiumEngine : IDisposable
 {
-    private const int MaxOutlineDepth = 32;
+    private const int MaxOutlineDepth = 64;
+    private const int MaxSiblingsPerLevel = 2000;
     private const int MaxOutlineNodes = 50_000;
     private const int MaxWideStringBytes = 4096;
     private const double DefaultPageWidthPt = 612;
@@ -64,6 +65,7 @@ internal sealed unsafe class PdfiumEngine : IDisposable
 
         try
         {
+            long id = ++_nextDocumentId;
             int pageCount = Math.Max(0, PdfiumNative.FPDF_GetPageCount(document));
             List<PdfPageInfo> pages = new(pageCount);
             for (int i = 0; i < pageCount; i++)
@@ -73,10 +75,9 @@ internal sealed unsafe class PdfiumEngine : IDisposable
                     cancellationToken.ThrowIfCancellationRequested();
                 }
 
-                pages.Add(ReadPageInfo(document, i));
+                pages.Add(ReadPageInfo(document, i, id));
             }
 
-            long id = ++_nextDocumentId;
             _documents[id] = document;
             return new PdfDocumentInfo(id, filePath, pages);
         }
@@ -145,10 +146,16 @@ internal sealed unsafe class PdfiumEngine : IDisposable
         HashSet<nint> visited,
         CancellationToken cancellationToken)
     {
+        if (depth >= MaxOutlineDepth)
+        {
+            return Array.Empty<OutlineItem>();
+        }
+
         List<OutlineItem>? items = null;
         nint bookmark = PdfiumNative.FPDFBookmark_GetFirstChild(document, parent);
+        int siblingsCount = 0;
 
-        while (bookmark != nint.Zero && budget > 0)
+        while (bookmark != nint.Zero && budget > 0 && siblingsCount < MaxSiblingsPerLevel)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -159,9 +166,10 @@ internal sealed unsafe class PdfiumEngine : IDisposable
             }
 
             budget--;
+            siblingsCount++;
             string title = ReadWideString(bookmark, static (handle, buffer, length) => PdfiumNative.FPDFBookmark_GetTitle(handle, buffer, length));
             int pageIndex = ResolveBookmarkPage(document, bookmark);
-            IReadOnlyList<OutlineItem> children = depth < MaxOutlineDepth
+            IReadOnlyList<OutlineItem> children = (depth + 1 < MaxOutlineDepth)
                 ? ReadBookmarkSiblings(document, bookmark, depth + 1, ref budget, visited, cancellationToken)
                 : Array.Empty<OutlineItem>();
 
@@ -214,12 +222,12 @@ internal sealed unsafe class PdfiumEngine : IDisposable
     // ------------------------------------------------------------------------------------------
 
     // Loads the page transiently (not through the LRU, so opening a 1000-page file cannot flush useful entries).
-    private static PdfPageInfo ReadPageInfo(PdfiumDocumentHandle document, int index)
+    private static PdfPageInfo ReadPageInfo(PdfiumDocumentHandle document, int index, long documentId = 0)
     {
         using PdfiumPageHandle page = PdfiumNative.FPDF_LoadPage(document, index);
         if (page.IsInvalid)
         {
-            return ReadPageInfoFromSize(document, index, rotation: 0);
+            return ReadPageInfoFromSize(document, index, rotation: 0, documentId);
         }
 
         int rotation = PdfiumNative.FPDFPage_GetRotation(page);
@@ -245,23 +253,23 @@ internal sealed unsafe class PdfiumEngine : IDisposable
         }
         else
         {
-            return ReadPageInfoFromSize(document, index, rotation);
+            return ReadPageInfoFromSize(document, index, rotation, documentId);
         }
 
-        return new PdfPageInfo(index, visible.Width, visible.Height, rotation, visible.Left, visible.Bottom);
+        return new PdfPageInfo(index, visible.Width, visible.Height, rotation, visible.Left, visible.Bottom, documentId);
     }
 
     // Fallback: FPDF_GetPageSizeByIndexF reports the rotated (displayed) size; undo the swap.
-    private static PdfPageInfo ReadPageInfoFromSize(PdfiumDocumentHandle document, int index, int rotation)
+    private static PdfPageInfo ReadPageInfoFromSize(PdfiumDocumentHandle document, int index, int rotation, long documentId = 0)
     {
         FsSizeF size = default;
         if (PdfiumNative.FPDF_GetPageSizeByIndexF(document, index, &size) != 0 && size.Width > 0 && size.Height > 0)
         {
             bool swap = rotation is 90 or 270;
-            return new PdfPageInfo(index, swap ? size.Height : size.Width, swap ? size.Width : size.Height, rotation);
+            return new PdfPageInfo(index, swap ? size.Height : size.Width, swap ? size.Width : size.Height, rotation, 0, 0, documentId);
         }
 
-        return new PdfPageInfo(index, DefaultPageWidthPt, DefaultPageHeightPt, rotation);
+        return new PdfPageInfo(index, DefaultPageWidthPt, DefaultPageHeightPt, rotation, 0, 0, documentId);
     }
 
     private static bool TryGetBox(int success, float left, float bottom, float right, float top, out Box box)

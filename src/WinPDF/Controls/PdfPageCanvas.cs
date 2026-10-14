@@ -84,12 +84,32 @@ public sealed class PdfPageCanvas : Grid
     }
 
     /// <summary>
+    /// Event raised when a <see cref="PdfPageCanvas"/> is loaded into the visual tree.
+    /// </summary>
+    public static event Action<PdfPageCanvas>? CanvasLoaded;
+
+    /// <summary>
+    /// Event raised when a <see cref="PdfPageCanvas"/> is unloaded from the visual tree.
+    /// </summary>
+    public static event Action<PdfPageCanvas>? CanvasUnloaded;
+
+    /// <summary>
     /// Gets or sets the current zoom factor applied to the page.
     /// </summary>
     public double ZoomFactor
     {
         get => (double)GetValue(ZoomFactorProperty);
         set => SetValue(ZoomFactorProperty, value);
+    }
+
+    /// <summary>
+    /// Updates the viewport zoom factor for this page canvas and triggers re-rendering if the quantized zoom changed.
+    /// </summary>
+    /// <param name="newZoom">The new zoom factor.</param>
+    public void UpdateViewportZoom(double newZoom)
+    {
+        ZoomFactor = newZoom;
+        UpdateRender();
     }
 
     /// <summary>
@@ -104,6 +124,11 @@ public sealed class PdfPageCanvas : Grid
                 return DocumentId;
             }
 
+            if (PageInfo is { DocumentId: > 0 } pageInfo)
+            {
+                return pageInfo.DocumentId;
+            }
+
             try
             {
                 return App.CurrentApp.Services.GetService<ShellViewModel>()?.CurrentDocument?.DocumentId ?? 0;
@@ -116,15 +141,26 @@ public sealed class PdfPageCanvas : Grid
     }
 
     /// <summary>
-    /// Gets the effective zoom factor, falling back to the shell's active document if not set.
+    /// Gets the effective zoom factor, looking at explicit ZoomFactor, active document ZoomFactor, or parent ScrollViewer.
     /// </summary>
     private double EffectiveZoom
     {
         get
         {
-            if (ZoomFactor > 0.05)
+            if (ZoomFactor > 0.05 && Math.Abs(ZoomFactor - 1.0) > 0.001)
             {
                 return ZoomFactor;
+            }
+
+            if (_observedDocument is not null && _observedDocument.ZoomFactor > 0.05)
+            {
+                return _observedDocument.ZoomFactor;
+            }
+
+            var scrollViewer = FindAncestor<ScrollViewer>(this);
+            if (scrollViewer is not null && scrollViewer.ZoomFactor > 0.05)
+            {
+                return scrollViewer.ZoomFactor;
             }
 
             try
@@ -153,6 +189,7 @@ public sealed class PdfPageCanvas : Grid
         {
             UseSharedDevice = true,
             ClearColor = Windows.UI.Color.FromArgb(255, 255, 255, 255),
+            DpiScale = 1.0f,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Stretch,
         };
@@ -171,13 +208,27 @@ public sealed class PdfPageCanvas : Grid
         _isUnloaded = false;
         UpdateDimensions();
         SubscribeToActiveDocument();
+        if (_observedDocument is not null)
+        {
+            ZoomFactor = _observedDocument.ZoomFactor;
+        }
+        else
+        {
+            var scrollViewer = FindAncestor<ScrollViewer>(this);
+            if (scrollViewer is not null && scrollViewer.ZoomFactor > 0.05)
+            {
+                ZoomFactor = scrollViewer.ZoomFactor;
+            }
+        }
         TryLoadCachedBitmaps();
         UpdateRender();
+        CanvasLoaded?.Invoke(this);
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         _isUnloaded = true;
+        CanvasUnloaded?.Invoke(this);
         CancelInFlightRenders();
         UnsubscribeFromDocument();
         ReleaseBitmaps();
@@ -216,6 +267,10 @@ public sealed class PdfPageCanvas : Grid
     {
         if (e.PropertyName == nameof(DocumentViewModel.ZoomFactor))
         {
+            if (_observedDocument is not null)
+            {
+                ZoomFactor = _observedDocument.ZoomFactor;
+            }
             DispatcherQueue.TryEnqueue(UpdateRender);
         }
     }
@@ -344,7 +399,16 @@ public sealed class PdfPageCanvas : Grid
         // 2. Draw Level 0 base bitmap as fallback (never flicker, always smooth preview)
         if (_baseBitmapEntry is { IsDisposed: false, Bitmap: { } baseBmp })
         {
-            ds.DrawImage(baseBmp, pageRect);
+            try
+            {
+                ds.DrawImage(baseBmp, pageRect);
+            }
+            catch (ObjectDisposedException)
+            {
+                _baseBitmapEntry?.Release();
+                _baseBitmapEntry = null;
+                UpdateRender();
+            }
         }
 
         ZoomLevel level = ZoomQuantizer.Resolve(EffectiveZoom);
@@ -353,7 +417,16 @@ public sealed class PdfPageCanvas : Grid
         {
             if (!level.IsBaseLevel && _activeFullPageEntry is { IsDisposed: false, Bitmap: { } fullBmp })
             {
-                ds.DrawImage(fullBmp, pageRect);
+                try
+                {
+                    ds.DrawImage(fullBmp, pageRect);
+                }
+                catch (ObjectDisposedException)
+                {
+                    _activeFullPageEntry?.Release();
+                    _activeFullPageEntry = null;
+                    UpdateRender();
+                }
             }
         }
         else
@@ -374,11 +447,10 @@ public sealed class PdfPageCanvas : Grid
         int scalePercent = (int)Math.Round(rasterizationScale * 100);
         double Zq = level.Factor;
         int step = level.Step;
+        float effectiveScale = (float)(Zq * rasterizationScale);
 
         (int pageWidth, int pageHeight) = RenderGeometry.GetPagePixelSize(PageInfo, 0, Zq, rasterizationScale);
         (int cols, int rows) = RenderGeometry.GetTileGrid(pageWidth, pageHeight);
-
-        double pxToDip = 1.0 / (Zq * rasterizationScale);
 
         for (int ty = 0; ty < rows; ty++)
         {
@@ -400,8 +472,19 @@ public sealed class PdfPageCanvas : Grid
                     if (entry is CanvasBitmapEntry { IsDisposed: false, Bitmap: { } tileBmp })
                     {
                         (int leftPx, int topPx, int widthPx, int heightPx) = RenderGeometry.GetTileRect(pageWidth, pageHeight, tx, ty);
-                        Rect tileRectDip = new(leftPx * pxToDip, topPx * pxToDip, widthPx * pxToDip, heightPx * pxToDip);
-                        ds.DrawImage(tileBmp, tileRectDip);
+                        Rect tileRectDip = new(
+                            leftPx / effectiveScale,
+                            topPx / effectiveScale,
+                            widthPx / effectiveScale,
+                            heightPx / effectiveScale);
+
+                        try
+                        {
+                            ds.DrawImage(tileBmp, tileRectDip);
+                        }
+                        catch (ObjectDisposedException)
+                        {
+                        }
                     }
                     entry?.Release();
                 }
@@ -439,7 +522,21 @@ public sealed class PdfPageCanvas : Grid
             _ = RenderBaseBitmapAsync(_baseCts.Token);
         }
 
+        double rasterizationScale = XamlRoot?.RasterizationScale ?? 1.0;
         ZoomLevel level = ZoomQuantizer.Resolve(EffectiveZoom);
+        double Zq = level.Factor;
+
+        // Ensure CanvasControl backing surface resolution matches quantized zoom Zq
+        float maxDim = (float)Math.Max(PageInfo.DisplayWidthDip, PageInfo.DisplayHeightDip);
+        float maxSafeDpiScale = (maxDim > 0 && rasterizationScale > 0)
+            ? (float)(16384.0 / (maxDim * rasterizationScale))
+            : 8.0f;
+        float targetDpiScale = (float)Math.Clamp(Zq, 0.25, Math.Min(8.0, maxSafeDpiScale));
+
+        if (Math.Abs(_canvasControl.DpiScale - targetDpiScale) > 0.01f)
+        {
+            _canvasControl.DpiScale = targetDpiScale;
+        }
 
         _renderCts?.Cancel();
         _renderCts?.Dispose();
@@ -698,12 +795,21 @@ public sealed class PdfPageCanvas : Grid
         (int pageWidth, int pageHeight) = RenderGeometry.GetPagePixelSize(pageInfo, 0, Zq, rasterizationScale);
         (int cols, int rows) = RenderGeometry.GetTileGrid(pageWidth, pageHeight);
 
-        double pxToDip = 1.0 / (Zq * rasterizationScale);
+        float effectiveScale = (float)(Zq * rasterizationScale);
         Rect visibleRect = GetVisibleRectInPageDips();
-
-        for (int ty = 0; ty < rows; ty++)
+        if (visibleRect.IsEmpty || visibleRect.Width <= 0 || visibleRect.Height <= 0)
         {
-            for (int tx = 0; tx < cols; tx++)
+            visibleRect = new Rect(0, 0, pageInfo.DisplayWidthDip, pageInfo.DisplayHeightDip);
+        }
+
+        int startTileX = Math.Max(0, (int)Math.Floor(visibleRect.X * effectiveScale / RenderGeometry.TileSizePx));
+        int startTileY = Math.Max(0, (int)Math.Floor(visibleRect.Y * effectiveScale / RenderGeometry.TileSizePx));
+        int endTileX = Math.Min(cols - 1, (int)Math.Floor((visibleRect.X + visibleRect.Width) * effectiveScale / RenderGeometry.TileSizePx));
+        int endTileY = Math.Min(rows - 1, (int)Math.Floor((visibleRect.Y + visibleRect.Height) * effectiveScale / RenderGeometry.TileSizePx));
+
+        for (int ty = startTileY; ty <= endTileY; ty++)
+        {
+            for (int tx = startTileX; tx <= endTileX; tx++)
             {
                 if (ct.IsCancellationRequested || _isUnloaded)
                 {
@@ -711,12 +817,6 @@ public sealed class PdfPageCanvas : Grid
                 }
 
                 (int leftPx, int topPx, int widthPx, int heightPx) = RenderGeometry.GetTileRect(pageWidth, pageHeight, tx, ty);
-                Rect tileRectDip = new(leftPx * pxToDip, topPx * pxToDip, widthPx * pxToDip, heightPx * pxToDip);
-
-                if (!RectIntersects(tileRectDip, visibleRect))
-                {
-                    continue;
-                }
 
                 TileKey key = new(
                     targetDocId,

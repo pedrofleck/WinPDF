@@ -103,7 +103,8 @@
             <FlipView
                 x:Name="PagedFlipView"
                 ItemsSource="{x:Bind ViewModel.CurrentDocument.Pages, Mode=OneWay}"
-                SelectedIndex="{x:Bind ViewModel.CurrentDocument.CurrentPageIndex, Mode=TwoWay}"
+                SelectedIndex="{x:Bind ViewModel.CurrentDocument.CurrentPageIndex, Mode=OneWay}"
+                SelectionChanged="OnPagedFlipViewSelectionChanged"
                 Visibility="{x:Bind converters:UiHelpers.PagedVisibility(ViewModel.ViewMode), Mode=OneWay}">
                 <FlipView.ItemTemplate>
                     <DataTemplate x:DataType="models:PdfPageInfo">

@@ -31,16 +31,48 @@ public static class RenderGeometry
     }
 
     /// <summary>
+    /// Standard tile dimension in pixels (512×512).
+    /// </summary>
+    public const int TileSizePx = 512;
+
+    /// <summary>
+    /// Maximum dimension in pixels for a single full-page bitmap to prevent Direct3D 11 limits (16384px)
+    /// and excessive VRAM consumption on large architectural sheets.
+    /// </summary>
+    public const int MaxFullPageDimensionPx = 4096;
+
+    /// <summary>
     /// Computes the pixel size of the whole page rasterized at <paramref name="zoom"/>:
-    /// <c>ceil(W · k · Zq · R) × ceil(H · k · Zq · R)</c>, where W/H are the displayed (rotated) dimensions.
+    /// <c>ceil(W · k · Zq · R) × ceil(H · k · Zq · R)</c>, where W/H are the displayed (rotated) dimensions,
+    /// clamped to <see cref="MaxFullPageDimensionPx"/> while preserving aspect ratio.
     /// </summary>
     /// <param name="page">Page metadata.</param>
     /// <param name="zoom">Quantized zoom factor <c>Zq</c>.</param>
     /// <param name="rasterizationScale"><c>XamlRoot.RasterizationScale</c>.</param>
     /// <param name="userRotationDegrees">Extra user rotation applied on top of the page's <c>/Rotate</c>.</param>
-    /// <returns>The page width and height in physical pixels (each at least 1).</returns>
+    /// <returns>The page width and height in physical pixels (each at least 1, max dimension 4096).</returns>
     public static (int Width, int Height) ComputeFullPagePixelSize(PdfPageInfo page, double zoom, double rasterizationScale, int userRotationDegrees = 0)
-        => GetPagePixelSize(page, userRotationDegrees, zoom, rasterizationScale);
+    {
+        (int rawWidth, int rawHeight) = GetPagePixelSize(page, userRotationDegrees, zoom, rasterizationScale);
+        if (rawWidth <= MaxFullPageDimensionPx && rawHeight <= MaxFullPageDimensionPx)
+        {
+            return (rawWidth, rawHeight);
+        }
+
+        double aspect = (double)rawWidth / rawHeight;
+        if (rawWidth > rawHeight)
+        {
+            int clampedWidth = MaxFullPageDimensionPx;
+            int clampedHeight = Math.Max(1, (int)Math.Round(clampedWidth / aspect));
+            return (clampedWidth, clampedHeight);
+        }
+        else
+        {
+            int clampedHeight = MaxFullPageDimensionPx;
+            int clampedWidth = Math.Max(1, (int)Math.Round(clampedHeight * aspect));
+            return (clampedWidth, clampedHeight);
+        }
+    }
 
     /// <summary>
     /// Gets the number of 512×512 tile columns and rows needed to cover a page rasterization.
