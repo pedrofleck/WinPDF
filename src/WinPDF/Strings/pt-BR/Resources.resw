@@ -181,4 +181,5 @@
   <data name="Status_Loading" xml:space="preserve"><value>Carregando documento…</value></data>
   <data name="Status_Saving" xml:space="preserve"><value>Salvando…</value></data>
   <data name="Status_Saved" xml:space="preserve"><value>Salvo</value></data>
+  <data name="OpenFile_DragCaption" xml:space="preserve"><value>Abrir PDF</value></data>
 </root>

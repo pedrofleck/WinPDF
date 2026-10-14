@@ -1,8 +1,11 @@
 using System.Globalization;
+using Windows.ApplicationModel.DataTransfer;
+using Windows.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
+using WinPDF.Helpers;
 using WinPDF.Models;
 using WinPDF.ViewModels;
 
@@ -69,5 +72,51 @@ public sealed partial class DocumentView : Page
     private void OnToolTextNoteClicked(object sender, RoutedEventArgs e)
     {
         ViewModel.SetTool(AnnotationTool.TextNote);
+    }
+
+    private void OnDocumentDragOver(object sender, DragEventArgs e)
+    {
+        if (e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            e.DragUIOverride.Caption = ResourceStrings.Get(ResourceKeys.OpenFile_DragCaption);
+            e.DragUIOverride.IsCaptionVisible = true;
+            e.DragUIOverride.IsGlyphVisible = true;
+            e.Handled = true;
+        }
+        else
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+        }
+    }
+
+    private async void OnDocumentDrop(object sender, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            return;
+        }
+
+        var deferral = e.GetDeferral();
+        try
+        {
+            var items = await e.DataView.GetStorageItemsAsync();
+            var pdfFile = items.OfType<StorageFile>()
+                .FirstOrDefault(f => string.Equals(f.FileType, ".pdf", StringComparison.OrdinalIgnoreCase));
+
+            if (pdfFile is not null)
+            {
+                e.Handled = true;
+                await ViewModel.OpenFilePathAsync(pdfFile.Path);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to open dropped PDF file: {ex.Message}");
+        }
+        finally
+        {
+            deferral.Complete();
+        }
     }
 }

@@ -135,4 +135,10 @@ public static class ResourceKeys
 
     /// <summary>Document properties: page size label.</summary>
     public const string DocPropsPageSize = "DocProps_PageSize";
+
+    /// <summary>Drag-and-drop overlay caption when dragging a PDF file over the window.</summary>
+    public const string OpenFileDragCaption = "OpenFile_DragCaption";
+
+    /// <summary>Alias for <see cref="OpenFileDragCaption"/>.</summary>
+    public const string OpenFile_DragCaption = "OpenFile_DragCaption";
 }

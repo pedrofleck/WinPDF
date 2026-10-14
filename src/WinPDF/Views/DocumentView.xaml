@@ -10,7 +10,11 @@
     Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
     mc:Ignorable="d">
 
-    <Grid Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
+    <Grid
+        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+        AllowDrop="True"
+        DragOver="OnDocumentDragOver"
+        Drop="OnDocumentDrop">
         <!-- Empty State quando nenhum documento está aberto -->
         <StackPanel
             HorizontalAlignment="Center"

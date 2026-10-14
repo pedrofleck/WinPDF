@@ -5,7 +5,10 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Media.Animation;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Graphics;
+using Windows.Storage;
+using WinPDF.Helpers;
 using WinPDF.Models;
 using WinPDF.ViewModels;
 using WinPDF.Views;
@@ -453,5 +456,51 @@ public sealed partial class MainWindow : Window
     private void OnContinuousMenuClick(object sender, RoutedEventArgs e)
     {
         ViewModel.SetViewMode(ViewMode.Continuous);
+    }
+
+    private void OnWindowDragOver(object sender, DragEventArgs e)
+    {
+        if (e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            e.DragUIOverride.Caption = ResourceStrings.Get(ResourceKeys.OpenFile_DragCaption);
+            e.DragUIOverride.IsCaptionVisible = true;
+            e.DragUIOverride.IsGlyphVisible = true;
+            e.Handled = true;
+        }
+        else
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+        }
+    }
+
+    private async void OnWindowDrop(object sender, DragEventArgs e)
+    {
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems))
+        {
+            return;
+        }
+
+        var deferral = e.GetDeferral();
+        try
+        {
+            var items = await e.DataView.GetStorageItemsAsync();
+            var pdfFile = items.OfType<StorageFile>()
+                .FirstOrDefault(f => string.Equals(f.FileType, ".pdf", StringComparison.OrdinalIgnoreCase));
+
+            if (pdfFile is not null)
+            {
+                e.Handled = true;
+                await ViewModel.OpenFilePathAsync(pdfFile.Path);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to open dropped PDF file in window: {ex.Message}");
+        }
+        finally
+        {
+            deferral.Complete();
+        }
     }
 }

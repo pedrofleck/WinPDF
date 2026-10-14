@@ -17,7 +17,13 @@
         <MicaBackdrop Kind="Base" />
     </Window.SystemBackdrop>
 
-    <Grid x:Name="RootGrid" Background="Transparent" RowDefinitions="Auto,*">
+    <Grid
+        x:Name="RootGrid"
+        Background="Transparent"
+        RowDefinitions="Auto,*"
+        AllowDrop="True"
+        DragOver="OnWindowDragOver"
+        Drop="OnWindowDrop">
 
         <!-- ================================================================= -->
         <!-- Barra Superior ÚNICA de 48 DIPs (TitleBar + CommandBar Integrada) -->
