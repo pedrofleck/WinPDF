@@ -290,7 +290,6 @@ public sealed partial class PdfPageCanvas : Grid
             {
                 ZoomFactor = _observedDocument.ZoomFactor;
             }
-            DispatcherQueue.TryEnqueue(UpdateRender);
         }
     }
 
@@ -326,7 +325,7 @@ public sealed partial class PdfPageCanvas : Grid
     {
         if (d is PdfPageCanvas canvas)
         {
-            canvas.UpdateRender();
+            canvas.UpdateViewport(canvas.EffectiveZoom);
         }
     }
 
@@ -352,7 +351,16 @@ public sealed partial class PdfPageCanvas : Grid
             ReleaseHighResPatch();
         }
 
-        if (_pendingRender || _baseBitmapEntry is null)
+        if (_baseBitmapEntry is null)
+        {
+            TryLoadCachedBitmaps();
+        }
+
+        if (_baseBitmapEntry is not null)
+        {
+            _baseCanvas.Invalidate();
+        }
+        else if (_pendingRender || PageInfo is not null)
         {
             _pendingRender = false;
             UpdateRender();

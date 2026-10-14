@@ -6,6 +6,7 @@ using Windows.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Navigation;
 using WinPDF.Controls;
@@ -16,11 +17,12 @@ using WinPDF.ViewModels;
 namespace WinPDF.Views;
 
 /// <summary>
-/// Page hosting the responsive document canvas, scroll viewer, flip view, and floating overlays.
+/// Page hosting the responsive document canvas, unified scroll viewer, and floating overlays.
 /// </summary>
 public sealed partial class DocumentView : Page
 {
     private readonly HashSet<PdfPageCanvas> _activeCanvases = new();
+    private readonly DispatcherTimer _presentationHideTimer = new() { Interval = TimeSpan.FromSeconds(2.5) };
     private CancellationTokenSource? _zoomDebounceCts;
     private DocumentViewModel? _observedDocument;
     private bool _isUpdatingPageFromScroll;
@@ -71,6 +73,9 @@ public sealed partial class DocumentView : Page
     /// <summary>Gets the localized full screen toggle tooltip.</summary>
     public string FullScreenToolTipText => ResourceStrings.Get(ResourceKeys.StatusBarFullScreenToolTip);
 
+    /// <summary>Gets the localized exit presentation button text.</summary>
+    public string ExitPresentationText => ResourceStrings.Get(ResourceKeys.PresentationExitButton);
+
     /// <summary>
     /// Gets the shell view model.
     /// </summary>
@@ -83,6 +88,8 @@ public sealed partial class DocumentView : Page
     {
         ViewModel = App.CurrentApp.Services.GetRequiredService<ShellViewModel>();
         InitializeComponent();
+
+        _presentationHideTimer.Tick += OnPresentationHideTimerTick;
 
         PdfPageCanvas.CanvasLoaded += OnCanvasLoaded;
         PdfPageCanvas.CanvasUnloaded += OnCanvasUnloaded;
@@ -114,6 +121,9 @@ public sealed partial class DocumentView : Page
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        _presentationHideTimer.Stop();
+        _presentationHideTimer.Tick -= OnPresentationHideTimerTick;
+
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         UnsubscribeFromDocument();
 
@@ -125,8 +135,7 @@ public sealed partial class DocumentView : Page
     private void OnCanvasLoaded(PdfPageCanvas canvas)
     {
         _activeCanvases.Add(canvas);
-        double targetZoom = ViewModel.CurrentDocument?.ZoomFactor
-            ?? (ViewModel.ViewMode == ViewMode.Continuous ? ContinuousScrollViewer.ZoomFactor : 1.0);
+        double targetZoom = ViewModel.CurrentDocument?.ZoomFactor ?? ContinuousScrollViewer.ZoomFactor;
         if (targetZoom > 0.05)
         {
             ApplyViewportToCanvas(canvas, targetZoom);
@@ -150,7 +159,6 @@ public sealed partial class DocumentView : Page
         else
         {
             FindAndApplyCanvases(ContinuousPagesRepeater, currentZoom);
-            FindAndApplyCanvases(PagedFlipView, currentZoom);
         }
     }
 
@@ -191,11 +199,19 @@ public sealed partial class DocumentView : Page
                 ScrollToPage(ViewModel.CurrentDocument.CurrentPageIndex);
             }
         }
-        else if (e.PropertyName == nameof(ShellViewModel.ViewMode))
+        else if (e.PropertyName == nameof(ShellViewModel.IsPresentationMode))
         {
-            if (ViewModel.CurrentDocument is not null)
+            if (ViewModel.IsPresentationMode)
             {
-                ScrollToPage(ViewModel.CurrentDocument.CurrentPageIndex);
+                ExitPresentationOverlay.Visibility = Visibility.Visible;
+                _presentationHideTimer.Stop();
+                _presentationHideTimer.Start();
+                DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
+            }
+            else
+            {
+                _presentationHideTimer.Stop();
+                ExitPresentationOverlay.Visibility = Visibility.Collapsed;
             }
         }
     }
@@ -215,6 +231,7 @@ public sealed partial class DocumentView : Page
             _observedDocument.PropertyChanged += OnCurrentDocumentPropertyChanged;
             _observedDocument.FitVerticalRequested += OnFitPageRequested;
             _observedDocument.FitHorizontalRequested += OnFitWidthRequested;
+            _observedDocument.ModeChanged += OnDocumentModeChanged;
             UpdateZoomSlider(doc.ZoomFactor);
             if (StatusBarPageBox is not null)
             {
@@ -230,18 +247,24 @@ public sealed partial class DocumentView : Page
             _observedDocument.PropertyChanged -= OnCurrentDocumentPropertyChanged;
             _observedDocument.FitVerticalRequested -= OnFitPageRequested;
             _observedDocument.FitHorizontalRequested -= OnFitWidthRequested;
+            _observedDocument.ModeChanged -= OnDocumentModeChanged;
             _observedDocument = null;
         }
     }
 
+    private void OnDocumentModeChanged(object? sender, EventArgs e)
+    {
+        DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
+    }
+
     private void OnFitPageRequested()
     {
-        OnFitPageClick(this, new RoutedEventArgs());
+        ExecuteFitVertical();
     }
 
     private void OnFitWidthRequested()
     {
-        OnFitWidthClick(this, new RoutedEventArgs());
+        ExecuteFitHorizontal();
     }
 
     private void OnCurrentDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -298,31 +321,6 @@ public sealed partial class DocumentView : Page
         ScheduleViewportUpdate();
     }
 
-    private void OnPagedScrollViewerViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
-    {
-        if (e.IsIntermediate || sender is not ScrollViewer sv)
-        {
-            _zoomDebounceCts?.Cancel();
-            return;
-        }
-
-        if (ViewModel.CurrentDocument is not null && Math.Abs(ViewModel.CurrentDocument.ZoomFactor - sv.ZoomFactor) > 0.01)
-        {
-            _isUpdatingZoomFromScrollViewer = true;
-            try
-            {
-                ViewModel.CurrentDocument.ZoomFactor = sv.ZoomFactor;
-                UpdateZoomSlider(sv.ZoomFactor);
-            }
-            finally
-            {
-                _isUpdatingZoomFromScrollViewer = false;
-            }
-        }
-
-        ScheduleViewportUpdate();
-    }
-
     private void ScheduleViewportUpdate()
     {
         _zoomDebounceCts?.Cancel();
@@ -347,10 +345,7 @@ public sealed partial class DocumentView : Page
                         return;
                     }
 
-                    double activeZoom = ViewModel.ViewMode == ViewMode.Continuous
-                        ? ContinuousScrollViewer.ZoomFactor
-                        : (GetActivePagedScrollViewer()?.ZoomFactor ?? ViewModel.CurrentDocument.ZoomFactor);
-
+                    double activeZoom = ContinuousScrollViewer.ZoomFactor;
                     if (Math.Abs(ViewModel.CurrentDocument.ZoomFactor - activeZoom) > 0.01)
                     {
                         _isUpdatingZoomFromScrollViewer = true;
@@ -375,12 +370,12 @@ public sealed partial class DocumentView : Page
 
     private void UpdateCurrentPageIndexFromViewport()
     {
-        if (ViewModel.ViewMode != ViewMode.Continuous || ContinuousScrollViewer.ViewportHeight <= 0)
+        if (ViewModel.CurrentDocument is null || !ViewModel.CurrentDocument.IsContinuous || ContinuousScrollViewer.ViewportHeight <= 0)
         {
             return;
         }
 
-        if (ViewModel.CurrentDocument is null || ViewModel.CurrentDocument.Pages.Count == 0)
+        if (ViewModel.CurrentDocument.Pages.Count == 0)
         {
             return;
         }
@@ -407,7 +402,7 @@ public sealed partial class DocumentView : Page
             return 0;
         }
 
-        if (ViewModel.ViewMode != ViewMode.Continuous || ContinuousScrollViewer.ViewportHeight <= 0)
+        if (!ViewModel.CurrentDocument.IsContinuous || ContinuousScrollViewer.ViewportHeight <= 0)
         {
             return ViewModel.CurrentDocument.CurrentPageIndex;
         }
@@ -417,7 +412,8 @@ public sealed partial class DocumentView : Page
 
         double currentY = 24.0; // Margin.Top
         var pages = ViewModel.CurrentDocument.Pages;
-        for (int i = 0; i < pages.Count; i++)
+        int step = ViewModel.CurrentDocument.IsDoublePage ? 2 : 1;
+        for (int i = 0; i < pages.Count; i += step)
         {
             double pageHeight = pages[i].DisplayHeightDip;
             if (centerY <= currentY + pageHeight + 8.0)
@@ -437,58 +433,24 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        if (ViewModel.ViewMode == ViewMode.Continuous)
+        if (ViewModel.CurrentDocument.IsContinuous)
         {
             double zoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor);
             double targetY = 24.0;
             var pages = ViewModel.CurrentDocument.Pages;
-            for (int i = 0; i < pageIndex; i++)
+            int step = ViewModel.CurrentDocument.IsDoublePage ? 2 : 1;
+            int targetRow = pageIndex / step;
+            for (int r = 0; r < targetRow && r * step < pages.Count; r++)
             {
-                targetY += pages[i].DisplayHeightDip + 16.0;
+                targetY += pages[r * step].DisplayHeightDip + 16.0;
             }
 
             double verticalOffset = targetY * zoom;
-            ContinuousScrollViewer.ChangeView(null, verticalOffset, null, disableAnimation: false);
+            ContinuousScrollViewer.ChangeView(null, verticalOffset, null, disableAnimation: true);
         }
         else
         {
-            if (PagedFlipView.SelectedIndex != pageIndex)
-            {
-                _isUpdatingPageFromScroll = true;
-                try
-                {
-                    PagedFlipView.SelectedIndex = pageIndex;
-                }
-                finally
-                {
-                    _isUpdatingPageFromScroll = false;
-                }
-            }
-        }
-    }
-
-    private void OnPagedFlipViewSelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_isUpdatingPageFromScroll || ViewModel.CurrentDocument is null)
-        {
-            return;
-        }
-
-        int newIndex = PagedFlipView.SelectedIndex;
-        if (newIndex >= 0 && newIndex < ViewModel.CurrentDocument.Pages.Count && ViewModel.CurrentDocument.CurrentPageIndex != newIndex)
-        {
-            _isUpdatingPageFromScroll = true;
-            try
-            {
-                ViewModel.CurrentDocument.CurrentPageIndex = newIndex;
-            }
-            finally
-            {
-                _isUpdatingPageFromScroll = false;
-            }
-
-            ApplyCurrentZoomToActivePagedScrollViewer();
-            UpdateViewportPages(ViewModel.CurrentDocument.ZoomFactor);
+            ContinuousScrollViewer.ChangeView(0, 0, null, disableAnimation: true);
         }
     }
 
@@ -502,39 +464,14 @@ public sealed partial class DocumentView : Page
         _isApplyingZoom = true;
         try
         {
-            if (ViewModel.ViewMode == ViewMode.Continuous)
-            {
-                double oldZoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor);
-                double viewportCenterY = (ContinuousScrollViewer.VerticalOffset + ContinuousScrollViewer.ViewportHeight / 2.0) / oldZoom;
-                double newOffsetY = Math.Max(0, viewportCenterY * newZoom - ContinuousScrollViewer.ViewportHeight / 2.0);
+            double oldZoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor);
+            double viewportCenterX = (ContinuousScrollViewer.HorizontalOffset + ContinuousScrollViewer.ViewportWidth / 2.0) / oldZoom;
+            double viewportCenterY = (ContinuousScrollViewer.VerticalOffset + ContinuousScrollViewer.ViewportHeight / 2.0) / oldZoom;
 
-                double contentWidth = 0;
-                if (ContinuousPagesRepeater.ActualWidth > 0)
-                {
-                    contentWidth = ContinuousPagesRepeater.ActualWidth;
-                }
-                else if (ViewModel.CurrentDocument is { Pages.Count: > 0 } doc)
-                {
-                    contentWidth = doc.Pages[0].DisplayWidthDip + 48.0;
-                }
+            double newOffsetX = Math.Max(0, viewportCenterX * newZoom - ContinuousScrollViewer.ViewportWidth / 2.0);
+            double newOffsetY = Math.Max(0, viewportCenterY * newZoom - ContinuousScrollViewer.ViewportHeight / 2.0);
 
-                double renderedWidth = contentWidth * newZoom;
-                double newOffsetX = 0;
-                if (renderedWidth > ContinuousScrollViewer.ViewportWidth)
-                {
-                    newOffsetX = (renderedWidth - ContinuousScrollViewer.ViewportWidth) / 2.0;
-                }
-
-                ContinuousScrollViewer.ChangeView(newOffsetX, newOffsetY, newZoom, disableAnimation: true);
-            }
-            else
-            {
-                var innerScrollViewer = GetActivePagedScrollViewer();
-                if (innerScrollViewer is not null)
-                {
-                    innerScrollViewer.ChangeView(null, null, newZoom, disableAnimation: true);
-                }
-            }
+            ContinuousScrollViewer.ChangeView(newOffsetX, newOffsetY, newZoom, disableAnimation: true);
 
             ViewModel.SetZoom(newZoom);
             UpdateViewportPages(newZoom);
@@ -545,140 +482,143 @@ public sealed partial class DocumentView : Page
         }
     }
 
-    private ScrollViewer? GetActivePagedScrollViewer()
+    /// <summary>
+    /// Executes vertical fitting, adjusting zoom so the current page (or page pair) fits comfortably within the viewport.
+    /// </summary>
+    public void ExecuteFitVertical()
     {
-        if (PagedFlipView.SelectedIndex < 0)
-        {
-            return null;
-        }
-
-        var container = PagedFlipView.ContainerFromIndex(PagedFlipView.SelectedIndex);
-        if (container is null)
-        {
-            return null;
-        }
-
-        return FindDescendant<ScrollViewer>(container);
-    }
-
-    private void ApplyCurrentZoomToActivePagedScrollViewer()
-    {
-        if (ViewModel.CurrentDocument is null)
+        if (ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
         {
             return;
         }
 
-        var sv = GetActivePagedScrollViewer();
-        if (sv is not null)
+        int cur = Math.Clamp(doc.CurrentPageIndex, 0, doc.Pages.Count - 1);
+        var page = doc.Pages[cur];
+        double availW = Math.Max(100.0, ContinuousScrollViewer.ViewportWidth - 32.0);
+        double availH = Math.Max(100.0, ContinuousScrollViewer.ViewportHeight - 32.0);
+        double targetW = doc.IsDoublePage ? (page.DisplayWidthDip * 2.0 + 16.0) : page.DisplayWidthDip;
+        double targetH = page.DisplayHeightDip;
+        double targetZoom = Math.Clamp(Math.Min(availH / targetH, availW / targetW), DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
+
+        if (doc.IsContinuous)
         {
-            float targetZoom = (float)ViewModel.CurrentDocument.ZoomFactor;
-            if (targetZoom > 0.1f && Math.Abs(sv.ZoomFactor - targetZoom) > 0.01f)
+            double targetY = 24.0;
+            int step = doc.IsDoublePage ? 2 : 1;
+            int targetRow = cur / step;
+            for (int r = 0; r < targetRow && r * step < doc.Pages.Count; r++)
             {
-                sv.ChangeView(null, null, targetZoom, disableAnimation: true);
+                targetY += doc.Pages[r * step].DisplayHeightDip + 16.0;
             }
-        }
-    }
 
-    private void OnPagedScrollViewerLoaded(object sender, RoutedEventArgs e)
-    {
-        if (sender is ScrollViewer sv && ViewModel.CurrentDocument is not null)
+            double vOffset = Math.Max(0, (targetY * targetZoom) - Math.Max(0, (ContinuousScrollViewer.ViewportHeight - (targetH * targetZoom)) / 2.0));
+            double hOffset = Math.Max(0, ((targetW * targetZoom) - ContinuousScrollViewer.ViewportWidth) / 2.0);
+            ContinuousScrollViewer.ChangeView(hOffset, vOffset, (float)targetZoom, disableAnimation: true);
+        }
+        else
         {
-            float targetZoom = (float)ViewModel.CurrentDocument.ZoomFactor;
-            if (targetZoom > 0.1f && Math.Abs(sv.ZoomFactor - targetZoom) > 0.01f)
-            {
-                sv.ChangeView(null, null, targetZoom, disableAnimation: true);
-            }
+            double hOffset = Math.Max(0, (ContinuousScrollViewer.ExtentWidth - ContinuousScrollViewer.ViewportWidth) / 2.0);
+            double vOffset = Math.Max(0, (ContinuousScrollViewer.ExtentHeight - ContinuousScrollViewer.ViewportHeight) / 2.0);
+            ContinuousScrollViewer.ChangeView(hOffset, vOffset, (float)targetZoom, disableAnimation: true);
         }
+
+        doc.ZoomFactor = targetZoom;
+        UpdateViewportPages(targetZoom);
     }
 
-    private void OnPagedFlipViewPointerWheelChanged(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    /// <summary>
+    /// Executes horizontal fitting, adjusting zoom so the current page (or page pair) fits width-wise within the viewport.
+    /// </summary>
+    public void ExecuteFitHorizontal()
     {
-        HandlePagedPointerWheel(e);
-    }
-
-    private void OnPagedScrollViewerPointerWheelChanged(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
-    {
-        HandlePagedPointerWheel(e);
-    }
-
-    private void HandlePagedPointerWheel(Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
-    {
-        if (ViewModel.ViewMode == ViewMode.Continuous || ViewModel.CurrentDocument is null)
+        if (ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
         {
             return;
         }
 
-        var point = e.GetCurrentPoint(PagedFlipView);
-        if ((e.KeyModifiers & Windows.System.VirtualKeyModifiers.Control) != 0)
-        {
-            int delta = point.Properties.MouseWheelDelta;
-            if (delta > 0)
-            {
-                OnZoomInClick(this, new RoutedEventArgs());
-            }
-            else if (delta < 0)
-            {
-                OnZoomOutClick(this, new RoutedEventArgs());
-            }
+        int cur = Math.Clamp(doc.CurrentPageIndex, 0, doc.Pages.Count - 1);
+        var page = doc.Pages[cur];
+        double availW = Math.Max(100.0, ContinuousScrollViewer.ViewportWidth - 32.0);
+        double targetW = doc.IsDoublePage ? (page.DisplayWidthDip * 2.0 + 16.0) : page.DisplayWidthDip;
+        double targetZoom = Math.Clamp(availW / targetW, DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
 
-            e.Handled = true;
+        ContinuousScrollViewer.ChangeView(null, null, (float)targetZoom, disableAnimation: true);
+        doc.ZoomFactor = targetZoom;
+        UpdateViewportPages(targetZoom);
+    }
+
+    private void OnScrollViewerPointerWheelChanged(object sender, PointerRoutedEventArgs e)
+    {
+        if (ViewModel.CurrentDocument is not { } doc)
+        {
             return;
         }
 
-        int mouseDelta = point.Properties.MouseWheelDelta;
-        if (mouseDelta < 0)
+        var props = e.GetCurrentPoint(ContinuousScrollViewer).Properties;
+        bool isCtrlPressed = (e.KeyModifiers & Windows.System.VirtualKeyModifiers.Control) != 0;
+
+        if (!doc.IsContinuous && !isCtrlPressed)
         {
-            if (PagedFlipView.SelectedIndex < ViewModel.CurrentDocument.Pages.Count - 1)
+            int delta = props.MouseWheelDelta;
+            if (delta != 0)
             {
-                PagedFlipView.SelectedIndex++;
-                e.Handled = true;
-            }
-        }
-        else if (mouseDelta > 0)
-        {
-            if (PagedFlipView.SelectedIndex > 0)
-            {
-                PagedFlipView.SelectedIndex--;
-                e.Handled = true;
+                bool atTop = ContinuousScrollViewer.VerticalOffset <= 2.0;
+                bool atBottom = ContinuousScrollViewer.VerticalOffset >= ContinuousScrollViewer.ScrollableHeight - 2.0;
+
+                if (delta > 0 && atTop)
+                {
+                    e.Handled = true;
+                    doc.PreviousPage();
+                }
+                else if (delta < 0 && atBottom)
+                {
+                    e.Handled = true;
+                    doc.NextPage();
+                }
             }
         }
     }
 
-    private static T? FindDescendant<T>(DependencyObject parent) where T : DependencyObject
+    private void OnPrevPageFloatingClick(object sender, RoutedEventArgs e)
     {
-        int count = VisualTreeHelper.GetChildrenCount(parent);
-        for (int i = 0; i < count; i++)
+        ViewModel.CurrentDocument?.PreviousPage();
+    }
+
+    private void OnNextPageFloatingClick(object sender, RoutedEventArgs e)
+    {
+        ViewModel.CurrentDocument?.NextPage();
+    }
+
+    private void OnDocumentPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (ViewModel.IsPresentationMode)
         {
-            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T typedChild)
-            {
-                return typedChild;
-            }
-
-            T? descendant = FindDescendant<T>(child);
-            if (descendant is not null)
-            {
-                return descendant;
-            }
+            ExitPresentationOverlay.Visibility = Visibility.Visible;
+            _presentationHideTimer.Stop();
+            _presentationHideTimer.Start();
         }
+    }
 
-        return null;
+    private void OnPresentationHideTimerTick(object? sender, object e)
+    {
+        _presentationHideTimer.Stop();
+        if (ViewModel.IsPresentationMode)
+        {
+            ExitPresentationOverlay.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void OnEscapeAcceleratorInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        if (ViewModel.IsPresentationMode)
+        {
+            args.Handled = true;
+            ViewModel.ExitPresentationCommand.Execute(null);
+        }
     }
 
     private float GetCurrentZoomFactor()
     {
-        if (ViewModel.ViewMode == ViewMode.Continuous)
-        {
-            return (float)ContinuousScrollViewer.ZoomFactor;
-        }
-
-        var inner = GetActivePagedScrollViewer();
-        if (inner is not null)
-        {
-            return (float)inner.ZoomFactor;
-        }
-
-        return (float)(ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
+        return (float)(ViewModel.CurrentDocument?.ZoomFactor ?? ContinuousScrollViewer.ZoomFactor);
     }
 
     private void OnZoomInClick(object sender, RoutedEventArgs e)
@@ -706,49 +646,12 @@ public sealed partial class DocumentView : Page
 
     private void OnFitWidthClick(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.CurrentDocument is null || ViewModel.CurrentDocument.Pages.Count == 0)
-        {
-            return;
-        }
-
-        int pageIdx = ViewModel.CurrentDocument.CurrentPageIndex;
-        var page = ViewModel.CurrentDocument.Pages[pageIdx];
-        double viewportW = ViewModel.ViewMode == ViewMode.Continuous
-            ? ContinuousScrollViewer.ViewportWidth
-            : PagedFlipView.ActualWidth;
-        double availableWidth = viewportW - 48; // accounting for 24 DIP margins on each side
-        if (availableWidth > 100 && page.DisplayWidthDip > 0)
-        {
-            float fitZoom = (float)Math.Clamp(availableWidth / page.DisplayWidthDip, 0.25, 8.0);
-            ApplyZoomAroundCenter(fitZoom);
-        }
+        ExecuteFitHorizontal();
     }
 
     private void OnFitPageClick(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.CurrentDocument is null || ViewModel.CurrentDocument.Pages.Count == 0)
-        {
-            return;
-        }
-
-        int pageIdx = ViewModel.CurrentDocument.CurrentPageIndex;
-        var page = ViewModel.CurrentDocument.Pages[pageIdx];
-        double viewportW = ViewModel.ViewMode == ViewMode.Continuous
-            ? ContinuousScrollViewer.ViewportWidth
-            : PagedFlipView.ActualWidth;
-        double viewportH = ViewModel.ViewMode == ViewMode.Continuous
-            ? ContinuousScrollViewer.ViewportHeight
-            : PagedFlipView.ActualHeight;
-
-        double availableWidth = viewportW - 48;
-        double availableHeight = viewportH - 48;
-        if (availableWidth > 100 && availableHeight > 100 && page.DisplayWidthDip > 0 && page.DisplayHeightDip > 0)
-        {
-            float zoomW = (float)(availableWidth / page.DisplayWidthDip);
-            float zoomH = (float)(availableHeight / page.DisplayHeightDip);
-            float fitZoom = (float)Math.Clamp(Math.Min(zoomW, zoomH), 0.25, 8.0);
-            ApplyZoomAroundCenter(fitZoom);
-        }
+        ExecuteFitVertical();
     }
 
     private void OnToolSelectClicked(object sender, RoutedEventArgs e)
@@ -828,7 +731,7 @@ public sealed partial class DocumentView : Page
         StatusBarPageBox.SelectAll();
     }
 
-    private void OnStatusBarPageBoxKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    private void OnStatusBarPageBoxKeyDown(object sender, KeyRoutedEventArgs e)
     {
         if (e.Key == Windows.System.VirtualKey.Enter)
         {
@@ -870,7 +773,7 @@ public sealed partial class DocumentView : Page
         }
     }
 
-    private void OnPageBoxAcceleratorInvoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender, Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+    private void OnPageBoxAcceleratorInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         args.Handled = true;
         StatusBarPageBox.Focus(FocusState.Programmatic);
@@ -879,14 +782,7 @@ public sealed partial class DocumentView : Page
 
     private void ReturnFocusToViewer()
     {
-        if (ViewModel.ViewMode == ViewMode.Continuous)
-        {
-            ContinuousScrollViewer.Focus(FocusState.Programmatic);
-        }
-        else
-        {
-            PagedFlipView.Focus(FocusState.Programmatic);
-        }
+        ContinuousScrollViewer.Focus(FocusState.Programmatic);
     }
 
     private void OnStatusBarZoomSliderValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)

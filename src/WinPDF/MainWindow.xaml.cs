@@ -301,6 +301,14 @@ public sealed partial class MainWindow : Window
         {
             UpdateFullScreenState(ViewModel.IsFullScreen);
         }
+        else if (e.PropertyName == nameof(ShellViewModel.IsPresentationMode))
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                UpdateTitleBarInsets();
+                UpdateTitleBarNonClientRegions();
+            });
+        }
         else if (e.PropertyName == nameof(ShellViewModel.CurrentTheme))
         {
             RootGrid.RequestedTheme = ViewModel.CurrentTheme switch
@@ -362,17 +370,20 @@ public sealed partial class MainWindow : Window
     {
         if (isFullScreen)
         {
-            _sidebarOpenBeforeFullScreen = ViewModel.IsSidebarOpen;
-            if (ViewModel.IsSidebarOpen)
+            if (ViewModel.IsPresentationMode)
             {
-                _isInternalSidebarToggle = true;
-                try
+                _sidebarOpenBeforeFullScreen = ViewModel.IsSidebarOpen;
+                if (ViewModel.IsSidebarOpen)
                 {
-                    ViewModel.IsSidebarOpen = false;
-                }
-                finally
-                {
-                    _isInternalSidebarToggle = false;
+                    _isInternalSidebarToggle = true;
+                    try
+                    {
+                        ViewModel.IsSidebarOpen = false;
+                    }
+                    finally
+                    {
+                        _isInternalSidebarToggle = false;
+                    }
                 }
             }
 

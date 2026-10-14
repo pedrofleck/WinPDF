@@ -183,4 +183,7 @@ public static class ResourceKeys
 
     /// <summary>Status bar: full screen toggle tooltip.</summary>
     public const string StatusBarFullScreenToolTip = "StatusBar_FullScreenToolTip";
+
+    /// <summary>Floating exit presentation button text.</summary>
+    public const string PresentationExitButton = "Presentation_ExitButton";
 }

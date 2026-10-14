@@ -146,10 +146,32 @@ public sealed partial class ShellViewModel : ObservableObject
     public partial string FormattedZoomPercent { get; set; } = "100%";
 
     /// <summary>
-    /// Gets or sets a value indicating whether the window is in presentation or full screen mode.
+    /// Gets or sets a value indicating whether the window is in full screen mode (F11).
     /// </summary>
     [ObservableProperty]
     public partial bool IsFullScreen { get; set; }
+
+    partial void OnIsFullScreenChanged(bool value)
+    {
+        if (!value)
+        {
+            IsPresentationMode = false;
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether slide presentation mode is active (F5).
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsPresentationMode { get; set; }
+
+    partial void OnIsPresentationModeChanged(bool value)
+    {
+        if (CurrentDocument is not null)
+        {
+            CurrentDocument.IsPresentationMode = value;
+        }
+    }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="ShellViewModel"/> class.
@@ -187,6 +209,7 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             newValue.IsContinuous = (ViewMode == ViewMode.Continuous);
             newValue.IsDoublePage = IsDualPage;
+            newValue.IsPresentationMode = IsPresentationMode;
             newValue.PropertyChanged += OnDocumentPropertyChanged;
             newValue.SetThumbnailsActive(IsSidebarOpen && SidebarTab == SidebarTab.Thumbnails);
         }
@@ -392,13 +415,32 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Enters slide presentation mode.
+    /// Enters slide presentation mode (F5).
     /// </summary>
     [RelayCommand]
     public void StartPresentation()
     {
+        if (CurrentDocument is null)
+        {
+            return;
+        }
+
+        IsSidebarOpen = false;
+        CurrentDocument.IsContinuous = false;
+        CurrentDocument.IsDoublePage = false;
         ViewMode = ViewMode.Paged;
+        IsPresentationMode = true;
         IsFullScreen = true;
+    }
+
+    /// <summary>
+    /// Exits slide presentation mode (Esc).
+    /// </summary>
+    [RelayCommand]
+    public void ExitPresentation()
+    {
+        IsPresentationMode = false;
+        IsFullScreen = false;
     }
 
     /// <summary>
@@ -566,12 +608,16 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Toggles full screen / presentation mode.
+    /// Toggles full screen mode (F11).
     /// </summary>
     [RelayCommand]
     public void ToggleFullScreen()
     {
         IsFullScreen = !IsFullScreen;
+        if (!IsFullScreen)
+        {
+            IsPresentationMode = false;
+        }
     }
 
     /// <summary>

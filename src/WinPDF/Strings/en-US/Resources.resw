@@ -202,4 +202,5 @@
   <data name="StatusBar_ZoomInToolTip" xml:space="preserve"><value>Zoom in</value></data>
   <data name="StatusBar_SlideshowToolTip" xml:space="preserve"><value>Slide show (F5)</value></data>
   <data name="StatusBar_FullScreenToolTip" xml:space="preserve"><value>Full screen (F11)</value></data>
+  <data name="Presentation_ExitButton" xml:space="preserve"><value>Exit presentation (Esc)</value></data>
 </root>

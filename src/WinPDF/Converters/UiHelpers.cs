@@ -127,4 +127,22 @@ public static class UiHelpers
 
     /// <summary>Checks if the active theme matches the target theme preference.</summary>
     public static bool IsTheme(AppThemePreference active, AppThemePreference target) => active == target;
+
+    /// <summary>Returns border thickness for page border depending on presentation mode.</summary>
+    public static Thickness PresentationBorderThickness(bool isPresentation) =>
+        isPresentation ? new Thickness(0) : new Thickness(1);
+
+    /// <summary>Returns corner radius for page border depending on presentation mode.</summary>
+    public static CornerRadius PresentationCornerRadius(bool isPresentation) =>
+        isPresentation ? new CornerRadius(0) : new CornerRadius(4);
+
+    /// <summary>Returns background brush for viewer grid depending on presentation mode.</summary>
+    public static Microsoft.UI.Xaml.Media.Brush ViewerBackground(bool isPresentation) =>
+        isPresentation
+            ? new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 0, 0))
+            : (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SolidBackgroundFillColorBaseBrush"];
+
+    /// <summary>Returns page repeater margin depending on presentation mode.</summary>
+    public static Thickness RepeaterMargin(bool isPresentation) =>
+        isPresentation ? new Thickness(0) : new Thickness(24);
 }

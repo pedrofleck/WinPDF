@@ -95,12 +95,55 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial bool IsDoublePage { get; set; }
 
+    partial void OnIsDoublePageChanged(bool value)
+    {
+        UpdateDisplayedRows();
+        ModeChanged?.Invoke(this, EventArgs.Empty);
+    }
+
     /// <summary>
     /// Gets or sets a value indicating whether continuous vertical scrolling is active.
     /// Synchronized with <see cref="ViewMode.Continuous"/> versus <see cref="ViewMode.Paged"/>.
     /// </summary>
     [ObservableProperty]
     public partial bool IsContinuous { get; set; } = true;
+
+    partial void OnIsContinuousChanged(bool value)
+    {
+        UpdateDisplayedRows();
+        ModeChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether slideshow presentation mode is active.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsPresentationMode { get; set; }
+
+    partial void OnIsPresentationModeChanged(bool value)
+    {
+        UpdateDisplayedRows();
+    }
+
+    /// <summary>
+    /// Event raised when view modes (Continuous or DoublePage) change, requesting viewport refitting.
+    /// </summary>
+    public event EventHandler? ModeChanged;
+
+    /// <summary>
+    /// Gets the rows of pages currently displayed in the unified document view.
+    /// </summary>
+    public ObservableCollection<PdfPageRow> DisplayedRows { get; } = new();
+
+    /// <summary>
+    /// Gets the minimum zoom factor supported (0.25x = 25%).
+    /// </summary>
+    public const double MinZoom = 0.25;
+
+    /// <summary>
+    /// Gets the maximum zoom factor supported (8.0x = 800%).
+    /// </summary>
+    public const double MaxZoom = 8.0;
 
     /// <summary>
     /// Gets or sets the current zoom factor (1.0 = 100%).
@@ -252,6 +295,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         }
 
         UpdateIsCurrentPageBookmarked();
+        UpdateDisplayedRows();
     }
 
     private static OutlineItemViewModel CreateOutlineViewModel(OutlineItem item)
@@ -294,6 +338,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     partial void OnCurrentPageIndexChanged(int value)
     {
         OnPropertyChanged(nameof(CurrentPageNumber));
+
+        if (!IsContinuous)
+        {
+            UpdateDisplayedRows();
+        }
 
         if (_previousSelectedThumbnailIndex >= 0 && _previousSelectedThumbnailIndex < Thumbnails.Count && _previousSelectedThumbnailIndex != value)
         {
@@ -359,28 +408,101 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             {
                 CurrentPageIndex = targetIndex;
             }
+            else if (!IsContinuous)
+            {
+                UpdateDisplayedRows();
+            }
         }
     }
 
     /// <summary>
-    /// Moves to the previous page if available.
+    /// Moves to the previous page (or pair of pages in double-page mode).
     /// </summary>
     public void PreviousPage()
     {
-        if (CurrentPageIndex > 0)
-        {
-            CurrentPageIndex--;
-        }
+        int step = (!IsContinuous && IsDoublePage) ? 2 : 1;
+        GoToPage(CurrentPageIndex - step);
     }
 
     /// <summary>
-    /// Moves to the next page if available.
+    /// Moves to the next page (or pair of pages in double-page mode).
     /// </summary>
     public void NextPage()
     {
-        if (CurrentPageIndex < PageCount - 1)
+        int step = (!IsContinuous && IsDoublePage) ? 2 : 1;
+        GoToPage(CurrentPageIndex + step);
+    }
+
+    /// <summary>
+    /// Updates the collection of displayed page rows based on current view modes and page index.
+    /// </summary>
+    public void UpdateDisplayedRows()
+    {
+        if (Pages.Count == 0)
         {
-            CurrentPageIndex++;
+            DisplayedRows.Clear();
+            return;
+        }
+
+        List<PdfPageRow> targetRows = new();
+
+        if (IsContinuous)
+        {
+            if (IsDoublePage)
+            {
+                for (int i = 0; i < Pages.Count; i += 2)
+                {
+                    PdfPageInfo left = Pages[i];
+                    PdfPageInfo? right = (i + 1 < Pages.Count) ? Pages[i + 1] : null;
+                    targetRows.Add(new PdfPageRow(left, right, IsPresentationMode));
+                }
+            }
+            else
+            {
+                for (int i = 0; i < Pages.Count; i++)
+                {
+                    targetRows.Add(new PdfPageRow(Pages[i], null, IsPresentationMode));
+                }
+            }
+        }
+        else
+        {
+            int cur = Math.Clamp(CurrentPageIndex, 0, Pages.Count - 1);
+            if (IsDoublePage)
+            {
+                int leftIndex = cur;
+                PdfPageInfo left = Pages[leftIndex];
+                PdfPageInfo? right = (leftIndex + 1 < Pages.Count) ? Pages[leftIndex + 1] : null;
+                targetRows.Add(new PdfPageRow(left, right, IsPresentationMode));
+            }
+            else
+            {
+                targetRows.Add(new PdfPageRow(Pages[cur], null, IsPresentationMode));
+            }
+        }
+
+        bool isIdentical = (DisplayedRows.Count == targetRows.Count);
+        if (isIdentical)
+        {
+            for (int i = 0; i < targetRows.Count; i++)
+            {
+                if (DisplayedRows[i].LeftPage.Index != targetRows[i].LeftPage.Index ||
+                    DisplayedRows[i].RightPage?.Index != targetRows[i].RightPage?.Index ||
+                    DisplayedRows[i].IsPresentationMode != targetRows[i].IsPresentationMode)
+                {
+                    isIdentical = false;
+                    break;
+                }
+            }
+        }
+
+        if (!isIdentical)
+        {
+            DisplayedRows.Clear();
+            foreach (var r in targetRows)
+            {
+                DisplayedRows.Add(r);
+            }
         }
     }
 
