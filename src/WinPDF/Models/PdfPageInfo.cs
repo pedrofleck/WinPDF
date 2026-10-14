@@ -4,10 +4,12 @@ namespace WinPDF.Models;
 /// Immutable metadata describing a single page of a PDF document.
 /// </summary>
 /// <param name="Index">Zero-based index of the page within the document.</param>
-/// <param name="WidthPt">CropBox width in points (1/72 inch).</param>
-/// <param name="HeightPt">CropBox height in points (1/72 inch).</param>
-/// <param name="Rotation">Clockwise rotation angle in degrees (0, 90, 180, or 270).</param>
-public sealed record PdfPageInfo(int Index, double WidthPt, double HeightPt, int Rotation)
+/// <param name="WidthPt">Visible-box (CropBox ∩ MediaBox) width in points (1/72 inch), before rotation.</param>
+/// <param name="HeightPt">Visible-box (CropBox ∩ MediaBox) height in points (1/72 inch), before rotation.</param>
+/// <param name="Rotation">Intrinsic <c>/Rotate</c> of the page: clockwise angle in degrees (0, 90, 180, or 270).</param>
+/// <param name="OriginXPt">Left edge (<c>cx0</c>) of the visible box in PDF user space, in points.</param>
+/// <param name="OriginYPt">Bottom edge (<c>cy0</c>) of the visible box in PDF user space, in points.</param>
+public sealed record PdfPageInfo(int Index, double WidthPt, double HeightPt, int Rotation, double OriginXPt = 0, double OriginYPt = 0)
 {
     /// <summary>
     /// Gets the display width in DIPs (1/96 inch) at 100% zoom factor.

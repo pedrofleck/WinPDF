@@ -41,4 +41,20 @@ public sealed partial class ThumbnailsTabPage : Page
             ViewModel.CurrentDocument.GoToPage(thumbnail.PageIndex);
         }
     }
+
+    private void OnThumbnailsContainerContentChanging(ListViewBase sender, ContainerContentChangingEventArgs args)
+    {
+        if (args.Item is ThumbnailItemViewModel thumbnail)
+        {
+            if (args.InRecycleQueue)
+            {
+                thumbnail.NotifyRecycled();
+            }
+            else
+            {
+                double scale = XamlRoot?.RasterizationScale ?? 1.0;
+                thumbnail.NotifyRealized(scale);
+            }
+        }
+    }
 }

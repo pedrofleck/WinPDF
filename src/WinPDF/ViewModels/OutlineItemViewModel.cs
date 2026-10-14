@@ -14,14 +14,14 @@ public sealed partial class OutlineItemViewModel : ObservableObject
     public string Title { get; }
 
     /// <summary>
-    /// Gets the zero-based target page index.
+    /// Gets the zero-based target page index, or -1 when the bookmark has no resolvable destination.
     /// </summary>
     public int PageIndex { get; }
 
     /// <summary>
-    /// Gets the 1-based target page display number.
+    /// Gets the 1-based target page display number (empty when the bookmark has no destination).
     /// </summary>
-    public string DisplayPageNumber => (PageIndex + 1).ToString();
+    public string DisplayPageNumber => PageIndex >= 0 ? (PageIndex + 1).ToString() : string.Empty;
 
     /// <summary>
     /// Gets the collection of nested child outline items.

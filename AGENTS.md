@@ -16,7 +16,8 @@ WinUI 3 (Windows App SDK) + C# / .NET 10 (LTS).
 |------|-------|--------|
 | 1 | Solution, `.csproj` (unpackaged), `AGENTS.md`, `en-US` / `pt-BR` resources, .NET 10 migration | ✅ Done |
 | 2 | Shell: Mica, custom TitleBar, `SplitView` sidebar, `CommandBar`, view-mode selector, MVVM wiring | ✅ Done |
-| 3 | `IPdfService` (PDFium, dedicated thread), Win2D page rendering, DirectManipulation zoom/pan, LOD pipeline | ⏳ Next |
+| 3A | `IPdfService` (PDFium, dedicated thread, Zero-LOH/Zero-Copy), coordinate math, LRU caches, lazy sidebar thumbnails | ✅ Done |
+| 3B | `PdfPageCanvas` (Win2D), DirectManipulation zoom/pan, hybrid full-page / 512×512 tiles, continuous & paged views | ⏳ Next |
 | 4 | Vector annotation layer (ink, highlight, note, eraser), Touch vs. Pen separation, save to PDF | ⏳ |
 
 Sections marked **(design)** describe the agreed target design not yet implemented. Turn them into

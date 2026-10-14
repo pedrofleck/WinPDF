@@ -3,6 +3,7 @@
     x:Class="WinPDF.Views.Sidebar.ThumbnailsTabPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:WinPDF.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="using:WinPDF.ViewModels"
@@ -14,6 +15,7 @@
             x:Name="ThumbnailsList"
             Padding="4"
             ItemsSource="{x:Bind ViewModel.CurrentDocument.Thumbnails, Mode=OneWay}"
+            ContainerContentChanging="OnThumbnailsContainerContentChanging"
             SelectionChanged="OnThumbnailSelectionChanged"
             SelectionMode="Single">
             <ListView.ItemsPanel>
@@ -41,6 +43,7 @@
                                     FontSize="32"
                                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                     Glyph="&#xE8A5;" />
+                                <controls:ThumbnailPresenter Item="{x:Bind}" />
                             </Grid>
                         </Border>
                         <TextBlock

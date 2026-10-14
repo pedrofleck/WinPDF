@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WinPDF.Helpers;
 using WinPDF.Models;
+using WinPDF.Rendering;
 using WinPDF.Services;
 
 namespace WinPDF.ViewModels;
@@ -15,6 +16,9 @@ public sealed partial class ShellViewModel : ObservableObject
 {
     private readonly IFilePickerService _filePickerService;
     private readonly IDialogService _dialogService;
+    private readonly IPdfService _pdfService;
+    private readonly TileCache _tileCache;
+    private readonly IWindowContext _windowContext;
 
     /// <summary>
     /// Gets or sets a value indicating whether the navigation sidebar pane is visible.
@@ -27,6 +31,16 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     [ObservableProperty]
     public partial SidebarTab SidebarTab { get; set; } = SidebarTab.Thumbnails;
+
+    partial void OnIsSidebarOpenChanged(bool value)
+    {
+        CurrentDocument?.SetThumbnailsActive(value && SidebarTab == SidebarTab.Thumbnails);
+    }
+
+    partial void OnSidebarTabChanged(SidebarTab value)
+    {
+        CurrentDocument?.SetThumbnailsActive(IsSidebarOpen && value == SidebarTab.Thumbnails);
+    }
 
     /// <summary>
     /// Gets or sets the active page view mode (Continuous vertical scroll or Paged slide flip).
@@ -122,10 +136,21 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     /// <param name="filePickerService">File open and save picker service.</param>
     /// <param name="dialogService">Message and confirmation dialog service.</param>
-    public ShellViewModel(IFilePickerService filePickerService, IDialogService dialogService)
+    /// <param name="pdfService">PDF rendering and document engine.</param>
+    /// <param name="tileCache">Bitmap and tile cache.</param>
+    /// <param name="windowContext">Window context providing UI dispatcher queue access.</param>
+    public ShellViewModel(
+        IFilePickerService filePickerService,
+        IDialogService dialogService,
+        IPdfService pdfService,
+        TileCache tileCache,
+        IWindowContext windowContext)
     {
         _filePickerService = filePickerService;
         _dialogService = dialogService;
+        _pdfService = pdfService;
+        _tileCache = tileCache;
+        _windowContext = windowContext;
         Title = ResourceStrings.Get(ResourceKeys.AppDisplayName);
         UpdateFormattedStrings();
     }
@@ -135,11 +160,13 @@ public sealed partial class ShellViewModel : ObservableObject
         if (oldValue is not null)
         {
             oldValue.PropertyChanged -= OnDocumentPropertyChanged;
+            oldValue.Dispose();
         }
 
         if (newValue is not null)
         {
             newValue.PropertyChanged += OnDocumentPropertyChanged;
+            newValue.SetThumbnailsActive(IsSidebarOpen && SidebarTab == SidebarTab.Thumbnails);
         }
 
         UpdateTitle();
@@ -190,10 +217,10 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     public async Task OpenFileAsync(CancellationToken cancellationToken)
     {
-        string? path = await _filePickerService.PickOpenPdfAsync(cancellationToken).ConfigureAwait(false);
+        string? path = await _filePickerService.PickOpenPdfAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(path))
         {
-            await OpenFilePathAsync(path, cancellationToken).ConfigureAwait(false);
+            await OpenFilePathAsync(path, cancellationToken);
         }
     }
 
@@ -202,18 +229,49 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     /// <param name="filePath">Absolute path to the PDF file.</param>
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
-    public Task OpenFilePathAsync(string filePath, CancellationToken cancellationToken = default)
+    public async Task OpenFilePathAsync(string filePath, CancellationToken cancellationToken = default)
     {
-        DocumentViewModel doc = new(filePath, pageCount: 8);
-        doc.Outline.Add(new OutlineItemViewModel("Chapter 1: Introduction", 0));
-        doc.Outline.Add(new OutlineItemViewModel("Chapter 2: Architecture", 2));
-        doc.Outline.Add(new OutlineItemViewModel("Chapter 3: Rendering Pipeline", 5));
-        doc.Bookmarks.Add(new BookmarkItemViewModel(0));
-        doc.AnnotationsSummary.Add(new AnnotationItemViewModel("Highlight on page 1"));
-        doc.Attachments.Add(new AttachmentItemViewModel("supplementary_data.xlsx"));
+        try
+        {
+            PdfDocumentInfo docInfo = await _pdfService.OpenDocumentAsync(filePath, null, cancellationToken);
+            var outline = await _pdfService.GetOutlineAsync(docInfo.DocumentId, cancellationToken);
+            var attachments = await _pdfService.GetAttachmentNamesAsync(docInfo.DocumentId, cancellationToken);
 
-        CurrentDocument = doc;
-        return Task.CompletedTask;
+            DocumentViewModel doc = new(_pdfService, _tileCache, docInfo, outline, attachments);
+
+            if (_windowContext.DispatcherQueue.HasThreadAccess)
+            {
+                CurrentDocument = doc;
+            }
+            else
+            {
+                _windowContext.DispatcherQueue.TryEnqueue(() => CurrentDocument = doc);
+            }
+        }
+        catch (PdfiumException ex)
+        {
+            string errorReason = ex.ErrorCode switch
+            {
+                PdfiumErrorCode.Password => ResourceStrings.Get(ResourceKeys.ErrorInvalidPassword),
+                PdfiumErrorCode.File => ResourceStrings.Get(ResourceKeys.ErrorFileNotFound),
+                PdfiumErrorCode.Format => ResourceStrings.Get(ResourceKeys.ErrorInvalidFormat),
+                PdfiumErrorCode.Security => ResourceStrings.Get(ResourceKeys.ErrorUnsupportedSecurity),
+                PdfiumErrorCode.Page => ResourceStrings.Get(ResourceKeys.ErrorPage),
+                _ => ResourceStrings.Get(ResourceKeys.ErrorUnknown)
+            };
+
+            string title = ResourceStrings.Get(ResourceKeys.DialogOpenErrorTitle);
+            string content = ResourceStrings.Format(ResourceKeys.DialogOpenErrorContent, System.IO.Path.GetFileName(filePath), errorReason);
+            string close = ResourceStrings.Get(ResourceKeys.DialogClose);
+            await _dialogService.ShowMessageAsync(title, content, close, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            string title = ResourceStrings.Get(ResourceKeys.DialogOpenErrorTitle);
+            string content = ResourceStrings.Format(ResourceKeys.DialogOpenErrorContent, System.IO.Path.GetFileName(filePath), ex.Message);
+            string close = ResourceStrings.Get(ResourceKeys.DialogClose);
+            await _dialogService.ShowMessageAsync(title, content, close, cancellationToken);
+        }
     }
 
     /// <summary>
@@ -241,7 +299,7 @@ public sealed partial class ShellViewModel : ObservableObject
             return;
         }
 
-        string? targetPath = await _filePickerService.PickSavePdfAsync(CurrentDocument.FileName, cancellationToken).ConfigureAwait(false);
+        string? targetPath = await _filePickerService.PickSavePdfAsync(CurrentDocument.FileName, cancellationToken);
         if (!string.IsNullOrWhiteSpace(targetPath))
         {
             CurrentDocument.FilePath = targetPath;
@@ -536,7 +594,7 @@ public sealed partial class ShellViewModel : ObservableObject
                       $"{ResourceStrings.Get(ResourceKeys.DocPropsPageCount)} {CurrentDocument.PageCount}\n" +
                       $"{ResourceStrings.Get(ResourceKeys.DocPropsFileSize)} {CurrentDocument.FileSizeBytes / 1024:N0} KB";
 
-        await _dialogService.ShowMessageAsync(title, body, close).ConfigureAwait(false);
+        await _dialogService.ShowMessageAsync(title, body, close);
     }
 
     /// <summary>
@@ -549,6 +607,6 @@ public sealed partial class ShellViewModel : ObservableObject
         string description = ResourceStrings.Get(ResourceKeys.AppDescription);
         string close = ResourceStrings.Get(ResourceKeys.DialogClose);
 
-        await _dialogService.ShowMessageAsync(name, description, close).ConfigureAwait(false);
+        await _dialogService.ShowMessageAsync(name, description, close);
     }
 }

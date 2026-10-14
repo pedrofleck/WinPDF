@@ -33,7 +33,7 @@ public sealed class FilePickerService : IFilePickerService
         InitializeWithWindow.Initialize(picker, _windowContext.WindowHandle);
         picker.FileTypeFilter.Add(".pdf");
 
-        StorageFile? file = await picker.PickSingleFileAsync().AsTask(cancellationToken).ConfigureAwait(false);
+        StorageFile? file = await picker.PickSingleFileAsync().AsTask(cancellationToken);
         return file?.Path;
     }
 
@@ -50,7 +50,7 @@ public sealed class FilePickerService : IFilePickerService
         string fileTypeDesc = ResourceStrings.Get(ResourceKeys.FilePickerPdfFileType);
         picker.FileTypeChoices.Add(fileTypeDesc, new List<string> { ".pdf" });
 
-        StorageFile? file = await picker.PickSaveFileAsync().AsTask(cancellationToken).ConfigureAwait(false);
+        StorageFile? file = await picker.PickSaveFileAsync().AsTask(cancellationToken);
         return file?.Path;
     }
 }

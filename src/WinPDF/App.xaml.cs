@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
+using WinPDF.Rendering;
 using WinPDF.Services;
 using WinPDF.ViewModels;
 
@@ -40,6 +41,10 @@ public partial class App : Application
         services.AddSingleton<IWindowContext, WindowContext>();
         services.AddSingleton<IFilePickerService, FilePickerService>();
         services.AddSingleton<IDialogService, DialogService>();
+
+        // Core PDF Engine & Rendering Caches
+        services.AddSingleton<IPdfService, PdfiumService>();
+        services.AddSingleton<TileCache>();
 
         // View Models
         services.AddSingleton<ShellViewModel>();

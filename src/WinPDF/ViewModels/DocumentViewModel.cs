@@ -1,12 +1,16 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
+using WinPDF.Models;
+using WinPDF.Rendering;
+using WinPDF.Services;
 
 namespace WinPDF.ViewModels;
 
 /// <summary>
 /// View model representing the active PDF document state, navigation, rotation, and collections.
 /// </summary>
-public sealed partial class DocumentViewModel : ObservableObject
+public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 {
     /// <summary>
     /// Gets or sets the absolute file path on disk.
@@ -104,22 +108,45 @@ public sealed partial class DocumentViewModel : ObservableObject
     public ObservableCollection<AttachmentItemViewModel> Attachments { get; } = new();
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="DocumentViewModel"/> class.
+    /// Gets the engine-assigned id of the open PDFium document.
     /// </summary>
-    /// <param name="filePath">Path to the document file.</param>
-    /// <param name="pageCount">Initial number of pages.</param>
-    public DocumentViewModel(string filePath, int pageCount = 1)
+    public long DocumentId { get; }
+
+    /// <summary>
+    /// Gets the exact geometry of every page, in document order.
+    /// </summary>
+    public IReadOnlyList<PdfPageInfo> Pages { get; }
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DocumentViewModel"/> class from an opened PDF document.
+    /// </summary>
+    /// <param name="pdfService">PDF engine used to render thumbnails and to close the document.</param>
+    /// <param name="tileCache">Shared bitmap cache (thumbnails are cached here).</param>
+    /// <param name="info">Description of the opened document (id, path and page geometry).</param>
+    /// <param name="outline">Real table of contents read from the document.</param>
+    /// <param name="attachmentNames">Names of the embedded file attachments.</param>
+    public DocumentViewModel(
+        IPdfService pdfService,
+        TileCache tileCache,
+        PdfDocumentInfo info,
+        IReadOnlyList<OutlineItem> outline,
+        IReadOnlyList<string> attachmentNames)
     {
-        FilePath = filePath;
-        FileName = System.IO.Path.GetFileName(filePath);
-        PageCount = pageCount;
+        _pdfService = pdfService;
+        _tileCache = tileCache;
+
+        DocumentId = info.DocumentId;
+        Pages = info.Pages;
+        FilePath = info.FilePath;
+        FileName = System.IO.Path.GetFileName(info.FilePath);
+        PageCount = info.PageCount;
         CurrentPageIndex = 0;
 
-        if (System.IO.File.Exists(filePath))
+        if (System.IO.File.Exists(info.FilePath))
         {
             try
             {
-                FileSizeBytes = new System.IO.FileInfo(filePath).Length;
+                FileSizeBytes = new System.IO.FileInfo(info.FilePath).Length;
             }
             catch
             {
@@ -127,9 +154,10 @@ public sealed partial class DocumentViewModel : ObservableObject
             }
         }
 
-        for (int i = 0; i < pageCount; i++)
+        foreach (PdfPageInfo page in info.Pages)
         {
-            Thumbnails.Add(new ThumbnailItemViewModel(i));
+            (double widthDip, double heightDip) = FitThumbnail(page);
+            Thumbnails.Add(new ThumbnailItemViewModel(page.Index, widthDip, heightDip) { Owner = this });
         }
 
         if (Thumbnails.Count > 0)
@@ -137,8 +165,53 @@ public sealed partial class DocumentViewModel : ObservableObject
             Thumbnails[0].IsSelected = true;
         }
 
+        foreach (OutlineItem item in outline)
+        {
+            Outline.Add(CreateOutlineViewModel(item));
+        }
+
+        foreach (string name in attachmentNames)
+        {
+            Attachments.Add(new AttachmentItemViewModel(name));
+        }
+
         UpdateIsCurrentPageBookmarked();
     }
+
+    private static OutlineItemViewModel CreateOutlineViewModel(OutlineItem item)
+    {
+        OutlineItemViewModel viewModel = new(item.Title, item.PageIndex);
+        foreach (OutlineItem child in item.Children)
+        {
+            viewModel.Children.Add(CreateOutlineViewModel(child));
+        }
+
+        return viewModel;
+    }
+
+    // Fits the page's aspect ratio inside the sidebar card (140x180 DIPs minus its 4 DIP inner margin).
+    private static (double Width, double Height) FitThumbnail(PdfPageInfo page)
+    {
+        double width = page.DisplayWidthDip;
+        double height = page.DisplayHeightDip;
+        if (width <= 0 || height <= 0)
+        {
+            return (ThumbnailBoxWidthDip, ThumbnailBoxHeightDip);
+        }
+
+        double scale = Math.Min(ThumbnailBoxWidthDip / width, ThumbnailBoxHeightDip / height);
+        return (Math.Max(1, Math.Round(width * scale)), Math.Max(1, Math.Round(height * scale)));
+    }
+
+    private const double ThumbnailBoxWidthDip = 132;
+    private const double ThumbnailBoxHeightDip = 172;
+
+    private readonly IPdfService _pdfService;
+    private readonly TileCache _tileCache;
+    private readonly CancellationTokenSource _lifetime = new();
+    private bool _thumbnailsActive;
+    private double _thumbnailScale = 1.0;
+    private bool _isDisposed;
 
     private int _previousSelectedThumbnailIndex = 0;
 
@@ -258,4 +331,181 @@ public sealed partial class DocumentViewModel : ObservableObject
             ZoomFactor = newZoom;
         }
     }
+
+    /// <summary>
+    /// Activates or deactivates sidebar thumbnail rasterization. When deactivated, pending thumbnail jobs are cancelled immediately.
+    /// </summary>
+    /// <param name="active">Whether thumbnail loading is active.</param>
+    /// <param name="scale">Display rasterization scale.</param>
+    public void SetThumbnailsActive(bool active, double scale = 1.0)
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        if (_thumbnailsActive == active && Math.Abs(_thumbnailScale - scale) <= 0.01)
+        {
+            return;
+        }
+
+        _thumbnailsActive = active;
+        _thumbnailScale = scale > 0 ? scale : 1.0;
+
+        if (!active)
+        {
+            foreach (ThumbnailItemViewModel item in Thumbnails)
+            {
+                if (item.LoadCancellation is not null)
+                {
+                    item.LoadCancellation.Cancel();
+                    item.LoadCancellation.Dispose();
+                    item.LoadCancellation = null;
+                }
+            }
+        }
+        else
+        {
+            foreach (ThumbnailItemViewModel item in Thumbnails)
+            {
+                if (item.IsRealized && item.Image is null)
+                {
+                    RequestThumbnail(item, _thumbnailScale);
+                }
+            }
+        }
+    }
+
+    internal void OnThumbnailRealized(ThumbnailItemViewModel item, double scale)
+    {
+        item.IsRealized = true;
+        if (!_thumbnailsActive || _isDisposed)
+        {
+            return;
+        }
+
+        RequestThumbnail(item, scale > 0 ? scale : _thumbnailScale);
+    }
+
+    internal void OnThumbnailRecycled(ThumbnailItemViewModel item)
+    {
+        item.IsRealized = false;
+        if (item.LoadCancellation is not null)
+        {
+            item.LoadCancellation.Cancel();
+            item.LoadCancellation.Dispose();
+            item.LoadCancellation = null;
+        }
+
+        item.ClearImage();
+    }
+
+    private void RequestThumbnail(ThumbnailItemViewModel item, double scale)
+    {
+        if (item.Image is not null || item.LoadCancellation is not null || _isDisposed)
+        {
+            return;
+        }
+
+        TileKey key = new(
+            DocumentId,
+            item.PageIndex,
+            TileKind.Thumbnail,
+            ZoomStep: 0,
+            TileX: 0,
+            TileY: 0,
+            RenderFlags: (int)PdfRenderFlags.Annotations,
+            Rotation: 0,
+            ScalePercent: (int)Math.Round(scale * 100));
+
+        if (_tileCache.TryGet(in key, out TileCacheEntry? cachedEntry))
+        {
+            if (cachedEntry is PdfBitmapEntry bitmapEntry)
+            {
+                item.SetImage(bitmapEntry);
+                return;
+            }
+
+            cachedEntry?.Release();
+        }
+
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        item.LoadCancellation = cts;
+
+        int widthPx = Math.Max(1, (int)Math.Round(item.WidthDip * scale));
+        int heightPx = Math.Max(1, (int)Math.Round(item.HeightDip * scale));
+        PdfRenderRequest request = PdfRenderRequest.ForThumbnail(DocumentId, item.PageIndex, widthPx, heightPx);
+
+        _ = LoadThumbnailAsync(item, key, request, cts);
+    }
+
+    private async Task LoadThumbnailAsync(
+        ThumbnailItemViewModel item,
+        TileKey key,
+        PdfRenderRequest request,
+        CancellationTokenSource cts)
+    {
+        try
+        {
+            PdfBitmapLease lease = await _pdfService.RenderAsync(request, PdfJobPriority.Thumbnail, cts.Token).ConfigureAwait(false);
+
+            if (_isDisposed || cts.IsCancellationRequested || !item.IsRealized || !_thumbnailsActive)
+            {
+                lease.Dispose();
+                return;
+            }
+
+            PdfBitmapEntry entry = new(lease);
+            _tileCache.Add(in key, entry);
+            item.SetImage(entry);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when scrolling past or closing the sidebar.
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Failed to render thumbnail for page {item.PageIndex}: {ex.Message}");
+        }
+        finally
+        {
+            if (item.LoadCancellation == cts)
+            {
+                item.LoadCancellation = null;
+            }
+
+            cts.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Releases all native document handles, cancels background rendering, and clears thumbnail memory.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+
+        foreach (ThumbnailItemViewModel item in Thumbnails)
+        {
+            if (item.LoadCancellation is not null)
+            {
+                item.LoadCancellation.Cancel();
+                item.LoadCancellation.Dispose();
+                item.LoadCancellation = null;
+            }
+
+            item.ClearImage();
+        }
+
+        _tileCache.RemoveDocument(DocumentId);
+        _ = _pdfService.CloseDocumentAsync(DocumentId);
+    }
 }
+
