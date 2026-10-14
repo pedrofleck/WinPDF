@@ -43,6 +43,50 @@ public interface IPdfService : IDisposable
     Task<IReadOnlyList<string>> GetAttachmentNamesAsync(long documentId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Rasterizes an entire page at the specified pixel size.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="widthPx">Target bitmap width in pixels.</param>
+    /// <param name="heightPx">Target bitmap height in pixels.</param>
+    /// <param name="highPriority">Whether this job takes priority over background thumbnail renders.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>A lease owning the rendered native bitmap.</returns>
+    Task<PdfBitmapLease> RenderPageAsync(
+        long documentId,
+        int pageIndex,
+        int widthPx,
+        int heightPx,
+        bool highPriority = true,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Rasterizes a specific region or tile of a page.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="startXPx">Horizontal pixel offset of the sub-region.</param>
+    /// <param name="startYPx">Vertical pixel offset of the sub-region.</param>
+    /// <param name="widthPx">Width of the tile in pixels.</param>
+    /// <param name="heightPx">Height of the tile in pixels.</param>
+    /// <param name="totalWidthPx">Full rendered page width at this zoom in pixels.</param>
+    /// <param name="totalHeightPx">Full rendered page height at this zoom in pixels.</param>
+    /// <param name="highPriority">Whether this job takes priority over background thumbnail renders.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>A lease owning the rendered native bitmap.</returns>
+    Task<PdfBitmapLease> RenderRegionAsync(
+        long documentId,
+        int pageIndex,
+        int startXPx,
+        int startYPx,
+        int widthPx,
+        int heightPx,
+        int totalWidthPx,
+        int totalHeightPx,
+        bool highPriority = true,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Rasterizes a page, thumbnail or tile into a native bitmap.
     /// </summary>
     /// <param name="request">What to render.</param>

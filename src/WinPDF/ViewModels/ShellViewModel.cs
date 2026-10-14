@@ -229,6 +229,14 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     /// <param name="filePath">Absolute path to the PDF file.</param>
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    public Task OpenFileFromPathAsync(string filePath, CancellationToken cancellationToken = default)
+        => OpenFilePathAsync(filePath, cancellationToken);
+
+    /// <summary>
+    /// Opens the specified PDF file path.
+    /// </summary>
+    /// <param name="filePath">Absolute path to the PDF file.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     public async Task OpenFilePathAsync(string filePath, CancellationToken cancellationToken = default)
     {
         try

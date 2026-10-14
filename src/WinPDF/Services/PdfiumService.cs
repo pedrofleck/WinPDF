@@ -10,28 +10,37 @@ namespace WinPDF.Services;
 /// <remarks>
 /// <para>
 /// PDFium is not thread-safe, so every <c>FPDF_*</c> call runs on <b>one dedicated thread</b>. Callers enqueue
-/// jobs through an unbounded <see cref="Channel{T}"/>; the thread drains it into a priority queue (critical
-/// metadata first, then visible renders, prefetch, thumbnails; newest request first among renders so a fast
-/// scroll serves what is on screen now) and executes one job at a time.
+/// jobs through dual priority channels: <c>_highPriorityChannel</c> (document loading, outline, metadata and
+/// main visible renders) and <c>_lowPriorityChannel</c> (background sidebar thumbnails).
 /// </para>
 /// <para>
-/// <b>Zero idle cost:</b> when no job is pending the thread blocks on
-/// <see cref="ChannelReader{T}.WaitToReadAsync(CancellationToken)"/> (a kernel wait): no polling, timers, spin-waits
-/// or sleeps. The thread and the PDFium library are created lazily on the first job.
+/// <b>Zero idle cost:</b> when no job is pending the thread blocks on <see cref="SemaphoreSlim.Wait(CancellationToken)"/>
+/// (a kernel wait): no polling, timers, spin-waits or sleeps. The thread and the PDFium library are created lazily
+/// on the first job.
 /// </para>
 /// </remarks>
 public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
 {
     private const int WorkerStackSizeBytes = 8 * 1024 * 1024;
 
-    private readonly Channel<PdfiumJob> _channel = Channel.CreateUnbounded<PdfiumJob>(new UnboundedChannelOptions
+    private readonly Channel<IPdfiumJob> _highPriorityChannel = Channel.CreateUnbounded<IPdfiumJob>(new UnboundedChannelOptions
     {
         SingleReader = true,
         SingleWriter = false,
         AllowSynchronousContinuations = false,
     });
 
+    private readonly Channel<IPdfiumJob> _lowPriorityChannel = Channel.CreateUnbounded<IPdfiumJob>(new UnboundedChannelOptions
+    {
+        SingleReader = true,
+        SingleWriter = false,
+        AllowSynchronousContinuations = false,
+    });
+
+    private readonly SemaphoreSlim _signal = new(0);
+    private readonly CancellationTokenSource _shutdownCts = new();
     private readonly object _startGate = new();
+
     private Thread? _thread;
     private long _sequence;
     private volatile bool _disposed;
@@ -41,41 +50,102 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
     public Task<PdfDocumentInfo> OpenDocumentAsync(string filePath, string? password = null, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
-        return Enqueue(PdfJobPriority.Critical, cancellationToken, (engine, token) => engine.OpenDocument(filePath, password, token));
+        LoadDocumentJob job = new(filePath, password, cancellationToken);
+        return Enqueue<PdfDocumentInfo>(job, highPriority: true);
     }
 
     /// <inheritdoc/>
     public Task CloseDocumentAsync(long documentId, CancellationToken cancellationToken = default)
-        => Enqueue(
-            PdfJobPriority.Critical,
-            cancellationToken,
-            (engine, _) =>
-            {
-                engine.CloseDocument(documentId);
-                return true;
-            });
+        => Enqueue<bool>(
+            new PdfiumJob<bool>(
+                PdfJobPriority.Critical,
+                (engine, _) =>
+                {
+                    engine.CloseDocument(documentId);
+                    return true;
+                },
+                cancellationToken),
+            highPriority: true);
 
     /// <inheritdoc/>
     public Task<IReadOnlyList<OutlineItem>> GetOutlineAsync(long documentId, CancellationToken cancellationToken = default)
-        => Enqueue(PdfJobPriority.Critical, cancellationToken, (engine, token) => engine.ReadOutline(documentId, token));
+        => Enqueue<IReadOnlyList<OutlineItem>>(
+            new PdfiumJob<IReadOnlyList<OutlineItem>>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.ReadOutline(documentId, token),
+                cancellationToken),
+            highPriority: true);
 
     /// <inheritdoc/>
     public Task<IReadOnlyList<string>> GetAttachmentNamesAsync(long documentId, CancellationToken cancellationToken = default)
-        => Enqueue(PdfJobPriority.Critical, cancellationToken, (engine, token) => engine.ReadAttachmentNames(documentId, token));
+        => Enqueue<IReadOnlyList<string>>(
+            new PdfiumJob<IReadOnlyList<string>>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.ReadAttachmentNames(documentId, token),
+                cancellationToken),
+            highPriority: true);
+
+    /// <inheritdoc/>
+    public Task<PdfBitmapLease> RenderPageAsync(
+        long documentId,
+        int pageIndex,
+        int widthPx,
+        int heightPx,
+        bool highPriority = true,
+        CancellationToken cancellationToken = default)
+    {
+        PdfRenderRequest request = PdfRenderRequest.ForThumbnail(documentId, pageIndex, widthPx, heightPx);
+        RenderPageJob job = new(request, this, highPriority, cancellationToken);
+        return Enqueue<PdfBitmapLease>(job, highPriority);
+    }
+
+    /// <inheritdoc/>
+    public Task<PdfBitmapLease> RenderRegionAsync(
+        long documentId,
+        int pageIndex,
+        int startXPx,
+        int startYPx,
+        int widthPx,
+        int heightPx,
+        int totalWidthPx,
+        int totalHeightPx,
+        bool highPriority = true,
+        CancellationToken cancellationToken = default)
+    {
+        PdfRenderRequest request = new(
+            documentId,
+            pageIndex,
+            widthPx,
+            heightPx,
+            totalWidthPx,
+            totalHeightPx,
+            -startXPx,
+            -startYPx,
+            0,
+            PdfRenderFlags.Annotations);
+        RenderRegionJob job = new(request, this, highPriority, cancellationToken);
+        return Enqueue<PdfBitmapLease>(job, highPriority);
+    }
 
     /// <inheritdoc/>
     public Task<PdfBitmapLease> RenderAsync(PdfRenderRequest request, PdfJobPriority priority, CancellationToken cancellationToken = default)
-        => Enqueue(priority, cancellationToken, (engine, token) => engine.Render(request, this, token));
+    {
+        bool highPriority = priority != PdfJobPriority.Thumbnail;
+        RenderPageJob job = new(request, this, highPriority, cancellationToken);
+        return Enqueue<PdfBitmapLease>(job, highPriority);
+    }
 
     /// <inheritdoc/>
     void IPdfiumBitmapOwner.ReleaseBitmap(PdfiumBitmapHandle bitmap)
     {
-        // Native memory goes back to PDFium on its own thread (all FPDF_* calls live there). Fire-and-forget,
-        // no Task is allocated; if the worker is gone nothing can race with this call, so destroy inline.
-        PdfiumJob job = new BitmapReleaseJob(bitmap);
-        if (_disposed || !_channel.Writer.TryWrite(job))
+        BitmapReleaseJob job = new(bitmap);
+        if (_disposed || !_highPriorityChannel.Writer.TryWrite(job))
         {
             bitmap.Dispose();
+        }
+        else
+        {
+            _signal.Release();
         }
     }
 
@@ -90,30 +160,53 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
         }
 
         _disposed = true;
-        _channel.Writer.TryComplete();
+        _highPriorityChannel.Writer.TryComplete();
+        _lowPriorityChannel.Writer.TryComplete();
+        _shutdownCts.Cancel();
+
+        try
+        {
+            _signal.Release();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
 
         Thread? thread = _thread;
         if (thread is not null && thread != Thread.CurrentThread)
         {
             thread.Join(TimeSpan.FromSeconds(5));
         }
+
+        _shutdownCts.Dispose();
+        _signal.Dispose();
     }
 
-    private Task<T> Enqueue<T>(PdfJobPriority priority, CancellationToken cancellationToken, Func<PdfiumEngine, CancellationToken, T> work)
+    private Task<T> Enqueue<T>(IPdfiumJob job, bool highPriority)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         EnsureStarted();
 
-        PdfiumJob<T> job = new(priority, work, cancellationToken);
         job.Sequence = Interlocked.Increment(ref _sequence);
 
-        if (!_channel.Writer.TryWrite(job))
+        Channel<IPdfiumJob> targetChannel = highPriority ? _highPriorityChannel : _lowPriorityChannel;
+
+        if (!targetChannel.Writer.TryWrite(job))
         {
             Exception reason = _fatalError ?? new ObjectDisposedException(nameof(PdfiumService));
             job.Abort(reason);
         }
+        else
+        {
+            _signal.Release();
+        }
 
-        return job.Task;
+        if (job is PdfiumJob<T> typedJob)
+        {
+            return typedJob.Task;
+        }
+
+        throw new InvalidOperationException("Unexpected job type.");
     }
 
     private void EnsureStarted()
@@ -143,6 +236,11 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
 
     private void WorkerMain()
     {
+        WorkerLoopAsync(_shutdownCts.Token);
+    }
+
+    private void WorkerLoopAsync(CancellationToken cancellationToken)
+    {
         PdfiumEngine? engine = null;
         try
         {
@@ -150,40 +248,50 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
         }
         catch (Exception ex)
         {
-            // e.g. pdfium.dll missing: fail this and every later job instead of hanging callers.
             _fatalError = ex;
-            _channel.Writer.TryComplete();
+            _highPriorityChannel.Writer.TryComplete();
+            _lowPriorityChannel.Writer.TryComplete();
         }
-
-        ChannelReader<PdfiumJob> reader = _channel.Reader;
-        PriorityQueue<PdfiumJob, (int Priority, long Order)> queue = new();
 
         try
         {
-            while (true)
+            while (!_disposed && !cancellationToken.IsCancellationRequested)
             {
-                // Pick up everything that arrived while the previous job was running.
-                while (reader.TryRead(out PdfiumJob? incoming))
+                // Always drain ALL high priority jobs first
+                while (_highPriorityChannel.Reader.TryRead(out IPdfiumJob? highJob))
                 {
-                    queue.Enqueue(incoming, GetOrderKey(incoming));
+                    ExecuteJob(highJob, engine);
                 }
 
-                if (queue.TryDequeue(out PdfiumJob? job, out _))
+                // If high priority is clear, drain ONE low priority job, then loop back to check high priority again
+                if (_lowPriorityChannel.Reader.TryRead(out IPdfiumJob? lowJob))
                 {
-                    if (engine is null)
-                    {
-                        job.Abort(_fatalError);
-                    }
-                    else
-                    {
-                        job.Execute(engine);
-                    }
-
+                    ExecuteJob(lowJob, engine);
                     continue;
                 }
 
-                // Idle: block in the kernel until a job arrives or the channel completes. No polling.
-                if (!reader.WaitToReadAsync().AsTask().GetAwaiter().GetResult())
+                // Drain any extra signal permits since we already drained both channels
+                while (_signal.CurrentCount > 0 && _signal.Wait(0)) { }
+
+                // Check again in case a job arrived just before draining the signal
+                if (_highPriorityChannel.Reader.TryRead(out IPdfiumJob? arrivedHigh))
+                {
+                    ExecuteJob(arrivedHigh, engine);
+                    continue;
+                }
+
+                if (_lowPriorityChannel.Reader.TryRead(out IPdfiumJob? arrivedLow))
+                {
+                    ExecuteJob(arrivedLow, engine);
+                    continue;
+                }
+
+                // Idle: wait in the kernel until signaled with 0.0% CPU
+                try
+                {
+                    _signal.Wait(cancellationToken);
+                }
+                catch (OperationCanceledException)
                 {
                     break;
                 }
@@ -191,21 +299,32 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
         }
         finally
         {
-            while (queue.TryDequeue(out PdfiumJob? leftover, out _))
+            // Cleanly cancel all remaining pending jobs in both channels so no caller Task hangs
+            while (_highPriorityChannel.Reader.TryRead(out IPdfiumJob? job))
             {
-                leftover.Abort(_fatalError);
+                job.Cancel();
+            }
+
+            while (_lowPriorityChannel.Reader.TryRead(out IPdfiumJob? job))
+            {
+                job.Cancel();
             }
 
             engine?.Dispose();
         }
     }
 
-    // Critical work is FIFO (open before queries). Render-class work is LIFO: the newest request is what the
-    // user is looking at; older ones are usually cancelled and skipped without touching PDFium.
-    private static (int Priority, long Order) GetOrderKey(PdfiumJob job)
-        => (
-            (int)job.Priority,
-            job.Priority == PdfJobPriority.Critical ? job.Sequence : long.MaxValue - job.Sequence);
+    private void ExecuteJob(IPdfiumJob job, PdfiumEngine? engine)
+    {
+        if (engine is null)
+        {
+            job.Abort(_fatalError);
+        }
+        else
+        {
+            job.Execute(engine);
+        }
+    }
 
     private sealed class BitmapReleaseJob : PdfiumJob
     {
@@ -217,8 +336,10 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
             _bitmap = bitmap;
         }
 
-        internal override void Execute(PdfiumEngine engine) => _bitmap.Dispose();
+        public override void Execute(PdfiumEngine engine) => _bitmap.Dispose();
 
-        internal override void Abort(Exception? reason) => _bitmap.Dispose();
+        public override void Cancel() => _bitmap.Dispose();
+
+        public override void Abort(Exception? reason) => _bitmap.Dispose();
     }
 }

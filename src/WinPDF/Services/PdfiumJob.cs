@@ -3,7 +3,30 @@ namespace WinPDF.Services;
 /// <summary>
 /// A unit of work executed on the dedicated PDFium thread.
 /// </summary>
-internal abstract class PdfiumJob
+internal interface IPdfiumJob
+{
+    /// <summary>Gets the scheduling priority.</summary>
+    PdfJobPriority Priority { get; }
+
+    /// <summary>Gets or sets the arrival sequence number.</summary>
+    long Sequence { get; set; }
+
+    /// <summary>Runs the job on the PDFium thread.</summary>
+    /// <param name="engine">The engine owned by the PDFium thread.</param>
+    void Execute(PdfiumEngine engine);
+
+    /// <summary>Cancels the pending task.</summary>
+    void Cancel();
+
+    /// <summary>Completes the job without running it (service shutdown or failure).</summary>
+    /// <param name="reason">Exception to fault the job with, or <see langword="null"/> to cancel it.</param>
+    void Abort(Exception? reason);
+}
+
+/// <summary>
+/// Base class for units of work executed on the dedicated PDFium thread.
+/// </summary>
+internal abstract class PdfiumJob : IPdfiumJob
 {
     /// <summary>Initializes the job with its scheduling priority.</summary>
     /// <param name="priority">Scheduling priority.</param>
@@ -12,26 +35,27 @@ internal abstract class PdfiumJob
         Priority = priority;
     }
 
-    /// <summary>Gets the scheduling priority.</summary>
-    internal PdfJobPriority Priority { get; }
+    /// <inheritdoc/>
+    public PdfJobPriority Priority { get; }
 
-    /// <summary>Gets or sets the arrival sequence number (assigned when enqueued).</summary>
-    internal long Sequence { get; set; }
+    /// <inheritdoc/>
+    public long Sequence { get; set; }
 
-    /// <summary>Runs the job on the PDFium thread (skipped, not executed, if already cancelled).</summary>
-    /// <param name="engine">The engine owned by the PDFium thread.</param>
-    internal abstract void Execute(PdfiumEngine engine);
+    /// <inheritdoc/>
+    public abstract void Execute(PdfiumEngine engine);
 
-    /// <summary>Completes the job without running it (service shutdown or failure).</summary>
-    /// <param name="reason">Exception to fault the job with, or <see langword="null"/> to cancel it.</param>
-    internal abstract void Abort(Exception? reason);
+    /// <inheritdoc/>
+    public abstract void Cancel();
+
+    /// <inheritdoc/>
+    public abstract void Abort(Exception? reason);
 }
 
 /// <summary>
 /// A <see cref="PdfiumJob"/> producing a result exposed through a <see cref="Task{TResult}"/>.
 /// </summary>
 /// <typeparam name="TResult">Result type.</typeparam>
-internal sealed class PdfiumJob<TResult> : PdfiumJob
+internal class PdfiumJob<TResult> : PdfiumJob
 {
     private readonly Func<PdfiumEngine, CancellationToken, TResult> _work;
     private readonly TaskCompletionSource<TResult> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -56,7 +80,8 @@ internal sealed class PdfiumJob<TResult> : PdfiumJob
     /// <summary>Gets the task that completes with the job's outcome.</summary>
     internal Task<TResult> Task => _completion.Task;
 
-    internal override void Execute(PdfiumEngine engine)
+    /// <inheritdoc/>
+    public override void Execute(PdfiumEngine engine)
     {
         try
         {
@@ -88,7 +113,15 @@ internal sealed class PdfiumJob<TResult> : PdfiumJob
         }
     }
 
-    internal override void Abort(Exception? reason)
+    /// <inheritdoc/>
+    public override void Cancel()
+    {
+        _completion.TrySetCanceled();
+        _registration.Dispose();
+    }
+
+    /// <inheritdoc/>
+    public override void Abort(Exception? reason)
     {
         if (reason is null)
         {
@@ -103,4 +136,37 @@ internal sealed class PdfiumJob<TResult> : PdfiumJob
     }
 
     private void CancelFromToken() => _completion.TrySetCanceled(_cancellationToken);
+}
+
+/// <summary>
+/// Job for loading a PDF document.
+/// </summary>
+internal sealed class LoadDocumentJob : PdfiumJob<PdfDocumentInfo>
+{
+    internal LoadDocumentJob(string filePath, string? password, CancellationToken cancellationToken)
+        : base(PdfJobPriority.Critical, (engine, token) => engine.OpenDocument(filePath, password, token), cancellationToken)
+    {
+    }
+}
+
+/// <summary>
+/// Job for rendering a full PDF page.
+/// </summary>
+internal sealed class RenderPageJob : PdfiumJob<PdfBitmapLease>
+{
+    internal RenderPageJob(PdfRenderRequest request, IPdfiumBitmapOwner owner, bool highPriority, CancellationToken cancellationToken)
+        : base(highPriority ? PdfJobPriority.Visible : PdfJobPriority.Thumbnail, (engine, token) => engine.Render(request, owner, token), cancellationToken)
+    {
+    }
+}
+
+/// <summary>
+/// Job for rendering a sub-region (tile) of a PDF page.
+/// </summary>
+internal sealed class RenderRegionJob : PdfiumJob<PdfBitmapLease>
+{
+    internal RenderRegionJob(PdfRenderRequest request, IPdfiumBitmapOwner owner, bool highPriority, CancellationToken cancellationToken)
+        : base(highPriority ? PdfJobPriority.Visible : PdfJobPriority.Thumbnail, (engine, token) => engine.Render(request, owner, token), cancellationToken)
+    {
+    }
 }

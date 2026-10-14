@@ -447,7 +447,13 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     {
         try
         {
-            PdfBitmapLease lease = await _pdfService.RenderAsync(request, PdfJobPriority.Thumbnail, cts.Token).ConfigureAwait(false);
+            PdfBitmapLease lease = await _pdfService.RenderPageAsync(
+                DocumentId,
+                item.PageIndex,
+                request.BitmapWidth,
+                request.BitmapHeight,
+                highPriority: false,
+                cts.Token).ConfigureAwait(false);
 
             if (_isDisposed || cts.IsCancellationRequested || !item.IsRealized || !_thumbnailsActive)
             {
