@@ -141,4 +141,46 @@ public static class ResourceKeys
 
     /// <summary>Alias for <see cref="OpenFileDragCaption"/>.</summary>
     public const string OpenFile_DragCaption = "OpenFile_DragCaption";
+
+    /// <summary>Status bar: page prefix.</summary>
+    public const string StatusBarPagePrefix = "StatusBar_PagePrefix";
+
+    /// <summary>Status bar: page box tooltip.</summary>
+    public const string StatusBarPageBoxToolTip = "StatusBar_PageBoxToolTip";
+
+    /// <summary>Status bar: document format tooltip.</summary>
+    public const string StatusBarFormatToolTip = "StatusBar_FormatToolTip";
+
+    /// <summary>Status bar: document properties tooltip.</summary>
+    public const string StatusBarPropertiesToolTip = "StatusBar_PropertiesToolTip";
+
+    /// <summary>Status bar: two-page mode toggle tooltip.</summary>
+    public const string StatusBarDoublePageToolTip = "StatusBar_DoublePageToolTip";
+
+    /// <summary>Status bar: continuous scroll mode toggle tooltip.</summary>
+    public const string StatusBarContinuousToolTip = "StatusBar_ContinuousToolTip";
+
+    /// <summary>Status bar: fit vertical (fit page) tooltip.</summary>
+    public const string StatusBarFitVerticalToolTip = "StatusBar_FitVerticalToolTip";
+
+    /// <summary>Status bar: fit horizontal (fit width) tooltip.</summary>
+    public const string StatusBarFitHorizontalToolTip = "StatusBar_FitHorizontalToolTip";
+
+    /// <summary>Status bar: zoom preset dropdown tooltip.</summary>
+    public const string StatusBarZoomPresetToolTip = "StatusBar_ZoomPresetToolTip";
+
+    /// <summary>Status bar: zoom out button tooltip.</summary>
+    public const string StatusBarZoomOutToolTip = "StatusBar_ZoomOutToolTip";
+
+    /// <summary>Status bar: zoom slider tooltip.</summary>
+    public const string StatusBarZoomSliderToolTip = "StatusBar_ZoomSliderToolTip";
+
+    /// <summary>Status bar: zoom in button tooltip.</summary>
+    public const string StatusBarZoomInToolTip = "StatusBar_ZoomInToolTip";
+
+    /// <summary>Status bar: slideshow presentation tooltip.</summary>
+    public const string StatusBarSlideshowToolTip = "StatusBar_SlideshowToolTip";
+
+    /// <summary>Status bar: full screen toggle tooltip.</summary>
+    public const string StatusBarFullScreenToolTip = "StatusBar_FullScreenToolTip";
 }

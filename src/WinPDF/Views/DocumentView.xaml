@@ -12,6 +12,10 @@
     Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
     mc:Ignorable="d">
 
+    <Page.KeyboardAccelerators>
+        <KeyboardAccelerator Key="G" Modifiers="Control" Invoked="OnPageBoxAcceleratorInvoked" />
+    </Page.KeyboardAccelerators>
+
     <Grid
         Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
         AllowDrop="True"
@@ -56,190 +60,419 @@
         </StackPanel>
 
         <!-- Área de Exibição do Documento -->
-        <Grid Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
+        <Grid
+            Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}"
+            RowDefinitions="*,Auto">
 
-            <!-- Modo Contínuo: Rolagem Vertical de Todas as Páginas -->
-            <ScrollViewer
-                x:Name="ContinuousScrollViewer"
-                HorizontalScrollBarVisibility="Auto"
-                MaxZoomFactor="8.0"
-                MinZoomFactor="0.25"
-                VerticalScrollBarVisibility="Visible"
-                ViewChanging="OnScrollViewerViewChanging"
-                ViewChanged="OnScrollViewerViewChanged"
-                Visibility="{x:Bind converters:UiHelpers.ContinuousVisibility(ViewModel.ViewMode), Mode=OneWay}"
-                ZoomMode="Enabled">
-                <ItemsRepeater
-                    x:Name="ContinuousPagesRepeater"
-                    Margin="24"
-                    HorizontalAlignment="Center"
-                    ItemsSource="{x:Bind ViewModel.CurrentDocument.Pages, Mode=OneWay}">
-                    <ItemsRepeater.Layout>
-                        <StackLayout Orientation="Vertical" Spacing="16" />
-                    </ItemsRepeater.Layout>
-                    <ItemsRepeater.ItemTemplate>
+            <!-- Row 0: Visualizador do Documento -->
+            <Grid Grid.Row="0">
+                <!-- Modo Contínuo: Rolagem Vertical de Todas as Páginas -->
+                <ScrollViewer
+                    x:Name="ContinuousScrollViewer"
+                    HorizontalScrollBarVisibility="Auto"
+                    MaxZoomFactor="8.0"
+                    MinZoomFactor="0.25"
+                    VerticalScrollBarVisibility="Visible"
+                    ViewChanging="OnScrollViewerViewChanging"
+                    ViewChanged="OnScrollViewerViewChanged"
+                    Visibility="{x:Bind converters:UiHelpers.ContinuousVisibility(ViewModel.ViewMode), Mode=OneWay}"
+                    ZoomMode="Enabled">
+                    <ItemsRepeater
+                        x:Name="ContinuousPagesRepeater"
+                        Margin="24"
+                        HorizontalAlignment="Center"
+                        ItemsSource="{x:Bind ViewModel.CurrentDocument.Pages, Mode=OneWay}">
+                        <ItemsRepeater.Layout>
+                            <StackLayout Orientation="Vertical" Spacing="16" />
+                        </ItemsRepeater.Layout>
+                        <ItemsRepeater.ItemTemplate>
+                            <DataTemplate x:DataType="models:PdfPageInfo">
+                                <!-- Folha do PDF: Borda com stroke, elevação e ThemeShadow com Translation="0,0,16" -->
+                                <Border
+                                    Width="{x:Bind DisplayWidthDip, Mode=OneWay}"
+                                    Height="{x:Bind DisplayHeightDip, Mode=OneWay}"
+                                    HorizontalAlignment="Center"
+                                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Translation="0,0,16">
+                                    <Border.Shadow>
+                                        <ThemeShadow />
+                                    </Border.Shadow>
+                                    <controls:PdfPageCanvas PageInfo="{x:Bind Mode=OneWay}" />
+                                </Border>
+                            </DataTemplate>
+                        </ItemsRepeater.ItemTemplate>
+                    </ItemsRepeater>
+                </ScrollViewer>
+
+                <!-- Modo Paginado / Apresentação de Slides -->
+                <FlipView
+                    x:Name="PagedFlipView"
+                    ItemsSource="{x:Bind ViewModel.CurrentDocument.Pages, Mode=OneWay}"
+                    SelectedIndex="{x:Bind ViewModel.CurrentDocument.CurrentPageIndex, Mode=OneWay}"
+                    SelectionChanged="OnPagedFlipViewSelectionChanged"
+                    PointerWheelChanged="OnPagedFlipViewPointerWheelChanged"
+                    Visibility="{x:Bind converters:UiHelpers.PagedVisibility(ViewModel.ViewMode), Mode=OneWay}">
+                    <FlipView.ItemContainerTransitions>
+                        <TransitionCollection />
+                    </FlipView.ItemContainerTransitions>
+                    <FlipView.ItemTemplate>
                         <DataTemplate x:DataType="models:PdfPageInfo">
-                            <!-- Folha do PDF: Borda com stroke, elevação e ThemeShadow com Translation="0,0,16" -->
-                            <Border
-                                Width="{x:Bind DisplayWidthDip, Mode=OneWay}"
-                                Height="{x:Bind DisplayHeightDip, Mode=OneWay}"
-                                HorizontalAlignment="Center"
-                                Background="{ThemeResource LayerFillColorDefaultBrush}"
-                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                BorderThickness="1"
-                                CornerRadius="4"
-                                Translation="0,0,16">
-                                <Border.Shadow>
-                                    <ThemeShadow />
-                                </Border.Shadow>
-                                <controls:PdfPageCanvas PageInfo="{x:Bind Mode=OneWay}" />
-                            </Border>
+                            <ScrollViewer
+                                HorizontalScrollBarVisibility="Hidden"
+                                MaxZoomFactor="8.0"
+                                MinZoomFactor="0.25"
+                                VerticalScrollBarVisibility="Hidden"
+                                ViewChanged="OnPagedScrollViewerViewChanged"
+                                PointerWheelChanged="OnPagedScrollViewerPointerWheelChanged"
+                                Loaded="OnPagedScrollViewerLoaded"
+                                ZoomMode="Enabled">
+                                <Border
+                                    Width="{x:Bind DisplayWidthDip, Mode=OneWay}"
+                                    Height="{x:Bind DisplayHeightDip, Mode=OneWay}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Translation="0,0,16">
+                                    <Border.Shadow>
+                                        <ThemeShadow />
+                                    </Border.Shadow>
+                                    <controls:PdfPageCanvas PageInfo="{x:Bind Mode=OneWay}" />
+                                </Border>
+                            </ScrollViewer>
                         </DataTemplate>
-                    </ItemsRepeater.ItemTemplate>
-                </ItemsRepeater>
-            </ScrollViewer>
+                    </FlipView.ItemTemplate>
+                </FlipView>
 
-            <!-- Modo Paginado / Apresentação de Slides -->
-            <FlipView
-                x:Name="PagedFlipView"
-                ItemsSource="{x:Bind ViewModel.CurrentDocument.Pages, Mode=OneWay}"
-                SelectedIndex="{x:Bind ViewModel.CurrentDocument.CurrentPageIndex, Mode=OneWay}"
-                SelectionChanged="OnPagedFlipViewSelectionChanged"
-                Visibility="{x:Bind converters:UiHelpers.PagedVisibility(ViewModel.ViewMode), Mode=OneWay}">
-                <FlipView.ItemTemplate>
-                    <DataTemplate x:DataType="models:PdfPageInfo">
-                        <ScrollViewer
-                            HorizontalScrollBarVisibility="Hidden"
-                            MaxZoomFactor="8.0"
-                            MinZoomFactor="0.25"
-                            VerticalScrollBarVisibility="Hidden"
-                            ViewChanged="OnPagedScrollViewerViewChanged"
-                            ZoomMode="Enabled">
-                            <Border
-                                Width="{x:Bind DisplayWidthDip, Mode=OneWay}"
-                                Height="{x:Bind DisplayHeightDip, Mode=OneWay}"
-                                HorizontalAlignment="Center"
+                <!-- Barra Flutuante de Ferramentas de Anotação (Topo Centralizado) -->
+                <Border
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Margin="0,12,0,0"
+                    Padding="6,4,6,4"
+                    Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsAnnotationToolbarOpen), Mode=OneWay}">
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <ToggleButton
+                            x:Uid="ToolSelectButton"
+                            Click="OnToolSelectClicked"
+                            IsChecked="{x:Bind converters:UiHelpers.IsSelectTool(ViewModel.ActiveTool), Mode=OneWay}">
+                            <FontIcon FontSize="14" Glyph="&#xEF20;" />
+                        </ToggleButton>
+                        <ToggleButton
+                            x:Uid="ToolPenButton"
+                            Click="OnToolPenClicked"
+                            IsChecked="{x:Bind converters:UiHelpers.IsPenTool(ViewModel.ActiveTool), Mode=OneWay}">
+                            <FontIcon FontSize="14" Glyph="&#xED63;" />
+                        </ToggleButton>
+                        <ToggleButton
+                            x:Uid="ToolHighlighterButton"
+                            Click="OnToolHighlighterClicked"
+                            IsChecked="{x:Bind converters:UiHelpers.IsHighlighterTool(ViewModel.ActiveTool), Mode=OneWay}">
+                            <FontIcon FontSize="14" Glyph="&#xE891;" />
+                        </ToggleButton>
+                        <ToggleButton
+                            x:Uid="ToolEraserButton"
+                            Click="OnToolEraserClicked"
+                            IsChecked="{x:Bind converters:UiHelpers.IsEraserTool(ViewModel.ActiveTool), Mode=OneWay}">
+                            <FontIcon FontSize="14" Glyph="&#xE75C;" />
+                        </ToggleButton>
+                        <ToggleButton
+                            x:Uid="ToolTextNoteButton"
+                            Click="OnToolTextNoteClicked"
+                            IsChecked="{x:Bind converters:UiHelpers.IsTextNoteTool(ViewModel.ActiveTool), Mode=OneWay}">
+                            <FontIcon FontSize="14" Glyph="&#xE70B;" />
+                        </ToggleButton>
+
+                        <AppBarSeparator Margin="4,2,4,2" />
+
+                        <ToggleButton
+                            x:Uid="TouchDrawingToggle"
+                            IsChecked="{x:Bind ViewModel.IsTouchDrawingEnabled, Mode=TwoWay}">
+                            <FontIcon FontSize="14" Glyph="&#xED5F;" />
+                        </ToggleButton>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- Row 1: Barra de Status Inferior Nativa de 32 DIPs (estilo Paint / Fotos / Notepad) -->
+            <Border
+                x:Name="StatusBarBorder"
+                Grid.Row="1"
+                Height="32"
+                Padding="12,0"
+                BorderThickness="0,1,0,0"
+                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.IsFullScreen), Mode=OneWay}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Elementos Alinhados à Esquerda -->
+                    <StackPanel
+                        Grid.Column="0"
+                        Orientation="Horizontal"
+                        Spacing="6"
+                        VerticalAlignment="Center">
+
+                        <!-- 1. Seletor de Página "Inline Pill" (Página [ X ] de Y) -->
+                        <StackPanel
+                            Orientation="Horizontal"
+                            Spacing="4"
+                            VerticalAlignment="Center"
+                            ToolTipService.ToolTip="{x:Bind PageBoxToolTipText, Mode=OneTime}">
+                            <TextBlock
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 VerticalAlignment="Center"
-                                Background="{ThemeResource LayerFillColorDefaultBrush}"
-                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                BorderThickness="1"
+                                Text="{x:Bind PagePrefixText, Mode=OneTime}" />
+                            <TextBox
+                                x:Name="StatusBarPageBox"
+                                Height="22"
+                                MinHeight="22"
+                                MinWidth="28"
+                                MaxWidth="56"
+                                Padding="4,0,4,0"
+                                FontSize="12"
+                                TextAlignment="Center"
+                                VerticalAlignment="Center"
+                                HorizontalContentAlignment="Center"
+                                VerticalContentAlignment="Center"
                                 CornerRadius="4"
-                                Translation="0,0,16">
-                                <Border.Shadow>
-                                    <ThemeShadow />
-                                </Border.Shadow>
-                                <controls:PdfPageCanvas PageInfo="{x:Bind Mode=OneWay}" />
-                            </Border>
-                        </ScrollViewer>
-                    </DataTemplate>
-                </FlipView.ItemTemplate>
-            </FlipView>
+                                BorderThickness="1"
+                                Background="Transparent"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                InputScope="Number"
+                                GotFocus="OnStatusBarPageBoxGotFocus"
+                                KeyDown="OnStatusBarPageBoxKeyDown"
+                                LostFocus="OnStatusBarPageBoxLostFocus"
+                                Text="{x:Bind ViewModel.CurrentDocument.CurrentPageNumber, Mode=OneWay}" />
+                            <TextBlock
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                VerticalAlignment="Center"
+                                Text="{x:Bind ViewModel.FormattedPageCount, Mode=OneWay}" />
+                        </StackPanel>
 
-            <!-- Barra Flutuante de Ferramentas de Anotação (Topo Centralizado) -->
-            <Border
-                HorizontalAlignment="Center"
-                VerticalAlignment="Top"
-                Margin="0,12,0,0"
-                Padding="6,4,6,4"
-                Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="8"
-                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsAnnotationToolbarOpen), Mode=OneWay}">
-                <StackPanel Orientation="Horizontal" Spacing="4">
-                    <ToggleButton
-                        x:Uid="ToolSelectButton"
-                        Click="OnToolSelectClicked"
-                        IsChecked="{x:Bind converters:UiHelpers.IsSelectTool(ViewModel.ActiveTool), Mode=OneWay}">
-                        <FontIcon FontSize="14" Glyph="&#xEF20;" />
-                    </ToggleButton>
-                    <ToggleButton
-                        x:Uid="ToolPenButton"
-                        Click="OnToolPenClicked"
-                        IsChecked="{x:Bind converters:UiHelpers.IsPenTool(ViewModel.ActiveTool), Mode=OneWay}">
-                        <FontIcon FontSize="14" Glyph="&#xED63;" />
-                    </ToggleButton>
-                    <ToggleButton
-                        x:Uid="ToolHighlighterButton"
-                        Click="OnToolHighlighterClicked"
-                        IsChecked="{x:Bind converters:UiHelpers.IsHighlighterTool(ViewModel.ActiveTool), Mode=OneWay}">
-                        <FontIcon FontSize="14" Glyph="&#xE891;" />
-                    </ToggleButton>
-                    <ToggleButton
-                        x:Uid="ToolEraserButton"
-                        Click="OnToolEraserClicked"
-                        IsChecked="{x:Bind converters:UiHelpers.IsEraserTool(ViewModel.ActiveTool), Mode=OneWay}">
-                        <FontIcon FontSize="14" Glyph="&#xE75C;" />
-                    </ToggleButton>
-                    <ToggleButton
-                        x:Uid="ToolTextNoteButton"
-                        Click="OnToolTextNoteClicked"
-                        IsChecked="{x:Bind converters:UiHelpers.IsTextNoteTool(ViewModel.ActiveTool), Mode=OneWay}">
-                        <FontIcon FontSize="14" Glyph="&#xE70B;" />
-                    </ToggleButton>
+                        <!-- 2. Separador | -->
+                        <Border Width="1" Height="16" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="4,0" VerticalAlignment="Center" />
 
-                    <AppBarSeparator Margin="4,2,4,2" />
+                        <!-- 3. Badge de Formato -->
+                        <TextBlock
+                            Text="{x:Bind ViewModel.CurrentDocument.FileFormatBadge, Mode=OneWay}"
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            VerticalAlignment="Center"
+                            ToolTipService.ToolTip="{x:Bind FormatToolTipText, Mode=OneTime}" />
 
-                    <ToggleButton
-                        x:Uid="TouchDrawingToggle"
-                        IsChecked="{x:Bind ViewModel.IsTouchDrawingEnabled, Mode=TwoWay}">
-                        <FontIcon FontSize="14" Glyph="&#xED5F;" />
-                    </ToggleButton>
-                </StackPanel>
-            </Border>
+                        <!-- 4. Separador | -->
+                        <Border Width="1" Height="16" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="4,0" VerticalAlignment="Center" />
 
-            <!-- Controles de Zoom Flutuantes no Canto Inferior Direito (GNOME Papers) -->
-            <Border
-                HorizontalAlignment="Right"
-                VerticalAlignment="Bottom"
-                Margin="0,0,24,24"
-                Padding="4"
-                Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="8"
-                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
-                <StackPanel Orientation="Horizontal" Spacing="2">
-                    <Button
-                        x:Uid="ZoomOutButton"
-                        Padding="6,4,6,4"
-                        Click="OnZoomOutClick">
-                        <FontIcon FontSize="12" Glyph="&#xE738;" />
-                    </Button>
+                        <!-- 5. Botão Unificado Clicável de Informações e Tamanho [ ⓘ . Ícone Tamanho . XB ] -->
+                        <Button
+                            Style="{StaticResource SubtleButtonStyle}"
+                            Padding="6,2"
+                            Height="24"
+                            CornerRadius="4"
+                            Command="{x:Bind ViewModel.ShowPropertiesCommand}"
+                            ToolTipService.ToolTip="{x:Bind PropertiesToolTipText, Mode=OneTime}">
+                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                <FontIcon Glyph="&#xE946;" FontSize="12" />
+                                <FontIcon Glyph="&#xE74E;" FontSize="12" />
+                                <TextBlock
+                                    Text="{x:Bind ViewModel.CurrentDocument.FormattedFileSize, Mode=OneWay}"
+                                    FontSize="12"
+                                    VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
 
-                    <DropDownButton
-                        x:Uid="ZoomLevelBox"
-                        MinWidth="64"
-                        Padding="6,4,6,4"
-                        Content="{x:Bind ViewModel.FormattedZoomPercent, Mode=OneWay}">
-                        <DropDownButton.Flyout>
-                            <MenuFlyout Placement="Top">
-                                <MenuFlyoutItem
-                                    x:Uid="ZoomFitWidthButton"
-                                    Click="OnFitWidthClick" />
-                                <MenuFlyoutItem
-                                    x:Uid="ZoomFitPageButton"
-                                    Click="OnFitPageClick" />
-                                <MenuFlyoutSeparator />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="0.5" Text="50%" />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="0.75" Text="75%" />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="1.0" Text="100%" />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="1.25" Text="125%" />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="1.5" Text="150%" />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="2.0" Text="200%" />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="3.0" Text="300%" />
-                                <MenuFlyoutItem Click="OnZoomPresetClick" Tag="4.0" Text="400%" />
-                            </MenuFlyout>
-                        </DropDownButton.Flyout>
-                    </DropDownButton>
+                    <!-- Elementos Alinhados à Direita -->
+                    <StackPanel
+                        Grid.Column="1"
+                        Orientation="Horizontal"
+                        Spacing="4"
+                        VerticalAlignment="Center"
+                        HorizontalAlignment="Right">
 
-                    <Button
-                        x:Uid="ZoomInButton"
-                        Padding="6,4,6,4"
-                        Click="OnZoomInClick">
-                        <FontIcon FontSize="12" Glyph="&#xE710;" />
-                    </Button>
-                </StackPanel>
+                        <!-- 1. Toggle Exibição Dupla (Duas Páginas on/off) -->
+                        <ToggleButton
+                            Width="26"
+                            Height="24"
+                            Padding="0"
+                            MinWidth="26"
+                            MinHeight="24"
+                            CornerRadius="4"
+                            IsChecked="{x:Bind ViewModel.CurrentDocument.IsDoublePage, Mode=TwoWay}"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            ToolTipService.ToolTip="{x:Bind DoublePageToolTipText, Mode=OneTime}">
+                            <FontIcon Glyph="&#xE89A;" FontSize="13" />
+                        </ToggleButton>
+
+                        <!-- 2. Separador | -->
+                        <Border Width="1" Height="16" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="4,0" VerticalAlignment="Center" />
+
+                        <!-- 3. Toggle Rolagem Contínua (Contínuo on/off) -->
+                        <ToggleButton
+                            Width="26"
+                            Height="24"
+                            Padding="0"
+                            MinWidth="26"
+                            MinHeight="24"
+                            CornerRadius="4"
+                            IsChecked="{x:Bind ViewModel.CurrentDocument.IsContinuous, Mode=TwoWay}"
+                            Background="Transparent"
+                            BorderThickness="0"
+                            ToolTipService.ToolTip="{x:Bind ContinuousToolTipText, Mode=OneTime}">
+                            <FontIcon Glyph="&#xE8EA;" FontSize="13" />
+                        </ToggleButton>
+
+                        <!-- 4. Separador | -->
+                        <Border Width="1" Height="16" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="4,0" VerticalAlignment="Center" />
+
+                        <!-- 5. Bloco de Ajuste e Zoom -->
+                        <!-- Botão Fit Vertical (Ajustar à Página) -->
+                        <Button
+                            Style="{StaticResource SubtleButtonStyle}"
+                            Width="26"
+                            Height="24"
+                            Padding="0"
+                            MinWidth="26"
+                            MinHeight="24"
+                            CornerRadius="4"
+                            Click="OnFitPageClick"
+                            ToolTipService.ToolTip="{x:Bind FitVerticalToolTipText, Mode=OneTime}">
+                            <FontIcon Glyph="&#xE9A6;" FontSize="13" />
+                        </Button>
+
+                        <!-- Botão Fit Horizontal (Ajustar à Largura) -->
+                        <Button
+                            Style="{StaticResource SubtleButtonStyle}"
+                            Width="26"
+                            Height="24"
+                            Padding="0"
+                            MinWidth="26"
+                            MinHeight="24"
+                            CornerRadius="4"
+                            Click="OnFitWidthClick"
+                            ToolTipService.ToolTip="{x:Bind FitHorizontalToolTipText, Mode=OneTime}">
+                            <FontIcon Glyph="&#xE9A7;" FontSize="13" />
+                        </Button>
+
+                        <!-- Caixa Seletora de Zoom (100% ▾) -->
+                        <Button
+                            Style="{StaticResource SubtleButtonStyle}"
+                            Height="24"
+                            Padding="6,0"
+                            MinWidth="58"
+                            CornerRadius="4"
+                            ToolTipService.ToolTip="{x:Bind ZoomPresetToolTipText, Mode=OneTime}">
+                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                <TextBlock
+                                    Text="{x:Bind ViewModel.FormattedZoomPercent, Mode=OneWay}"
+                                    FontSize="12"
+                                    VerticalAlignment="Center" />
+                                <FontIcon Glyph="&#xE70D;" FontSize="9" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <Button.Flyout>
+                                <MenuFlyout Placement="Top">
+                                    <MenuFlyoutItem Text="50%" Click="OnZoomPresetClick" Tag="0.5" />
+                                    <MenuFlyoutItem Text="75%" Click="OnZoomPresetClick" Tag="0.75" />
+                                    <MenuFlyoutItem Text="100%" Click="OnZoomPresetClick" Tag="1.0" />
+                                    <MenuFlyoutItem Text="125%" Click="OnZoomPresetClick" Tag="1.25" />
+                                    <MenuFlyoutItem Text="150%" Click="OnZoomPresetClick" Tag="1.5" />
+                                    <MenuFlyoutItem Text="200%" Click="OnZoomPresetClick" Tag="2.0" />
+                                    <MenuFlyoutItem Text="300%" Click="OnZoomPresetClick" Tag="3.0" />
+                                    <MenuFlyoutItem Text="400%" Click="OnZoomPresetClick" Tag="4.0" />
+                                </MenuFlyout>
+                            </Button.Flyout>
+                        </Button>
+
+                        <!-- Botão - Zoom -->
+                        <Button
+                            Style="{StaticResource SubtleButtonStyle}"
+                            Width="26"
+                            Height="24"
+                            Padding="0"
+                            MinWidth="26"
+                            MinHeight="24"
+                            CornerRadius="4"
+                            Click="OnZoomOutClick"
+                            ToolTipService.ToolTip="{x:Bind ZoomOutToolTipText, Mode=OneTime}">
+                            <FontIcon Glyph="&#xE738;" FontSize="13" />
+                        </Button>
+
+                        <!-- Barra Horizontal de Zoom (Slider) -->
+                        <Slider
+                            x:Name="StatusBarZoomSlider"
+                            Width="88"
+                            Minimum="25"
+                            Maximum="500"
+                            StepFrequency="5"
+                            VerticalAlignment="Center"
+                            IsThumbToolTipEnabled="False"
+                            ValueChanged="OnStatusBarZoomSliderValueChanged"
+                            ToolTipService.ToolTip="{x:Bind ZoomSliderToolTipText, Mode=OneTime}" />
+
+                        <!-- Botão + Zoom -->
+                        <Button
+                            Style="{StaticResource SubtleButtonStyle}"
+                            Width="26"
+                            Height="24"
+                            Padding="0"
+                            MinWidth="26"
+                            MinHeight="24"
+                            CornerRadius="4"
+                            Click="OnZoomInClick"
+                            ToolTipService.ToolTip="{x:Bind ZoomInToolTipText, Mode=OneTime}">
+                            <FontIcon Glyph="&#xE710;" FontSize="13" />
+                        </Button>
+
+                        <!-- 6. Separador | -->
+                        <Border Width="1" Height="16" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="4,0" VerticalAlignment="Center" />
+
+                        <!-- 7. Bloco de Apresentação e Tela Cheia -->
+                        <!-- Botão Apresentação de Slides (F5) -->
+                        <Button
+                            Style="{StaticResource SubtleButtonStyle}"
+                            Width="26"
+                            Height="24"
+                            Padding="0"
+                            MinWidth="26"
+                            MinHeight="24"
+                            CornerRadius="4"
+                            Command="{x:Bind ViewModel.StartPresentationCommand}"
+                            ToolTipService.ToolTip="{x:Bind SlideshowToolTipText, Mode=OneTime}">
+                            <FontIcon Glyph="&#xE786;" FontSize="13" />
+                        </Button>
+
+                        <!-- Botão Tela Cheia (F11) -->
+                        <Button
+                            Style="{StaticResource SubtleButtonStyle}"
+                            Width="26"
+                            Height="24"
+                            Padding="0"
+                            MinWidth="26"
+                            MinHeight="24"
+                            CornerRadius="4"
+                            Command="{x:Bind ViewModel.ToggleFullScreenCommand}"
+                            ToolTipService.ToolTip="{x:Bind FullScreenToolTipText, Mode=OneTime}">
+                            <FontIcon Glyph="&#xE740;" FontSize="13" />
+                        </Button>
+                    </StackPanel>
+                </Grid>
             </Border>
         </Grid>
     </Grid>

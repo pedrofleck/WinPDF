@@ -48,6 +48,18 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty]
     public partial ViewMode ViewMode { get; set; } = ViewMode.Continuous;
 
+    partial void OnViewModeChanged(ViewMode value)
+    {
+        if (CurrentDocument is not null)
+        {
+            bool continuous = value == ViewMode.Continuous;
+            if (CurrentDocument.IsContinuous != continuous)
+            {
+                CurrentDocument.IsContinuous = continuous;
+            }
+        }
+    }
+
     /// <summary>
     /// Gets or sets the active interaction tool on the document canvas.
     /// </summary>
@@ -83,6 +95,14 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     [ObservableProperty]
     public partial bool IsDualPage { get; set; }
+
+    partial void OnIsDualPageChanged(bool value)
+    {
+        if (CurrentDocument is not null && CurrentDocument.IsDoublePage != value)
+        {
+            CurrentDocument.IsDoublePage = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets a value indicating whether odd pages are aligned on the left.
@@ -165,6 +185,8 @@ public sealed partial class ShellViewModel : ObservableObject
 
         if (newValue is not null)
         {
+            newValue.IsContinuous = (ViewMode == ViewMode.Continuous);
+            newValue.IsDoublePage = IsDualPage;
             newValue.PropertyChanged += OnDocumentPropertyChanged;
             newValue.SetThumbnailsActive(IsSidebarOpen && SidebarTab == SidebarTab.Thumbnails);
         }
@@ -183,6 +205,20 @@ public sealed partial class ShellViewModel : ObservableObject
         else if (e.PropertyName is nameof(DocumentViewModel.PageCount) or nameof(DocumentViewModel.ZoomFactor))
         {
             UpdateFormattedStrings();
+        }
+        else if (e.PropertyName == nameof(DocumentViewModel.IsContinuous))
+        {
+            if (CurrentDocument is not null)
+            {
+                ViewMode = CurrentDocument.IsContinuous ? ViewMode.Continuous : ViewMode.Paged;
+            }
+        }
+        else if (e.PropertyName == nameof(DocumentViewModel.IsDoublePage))
+        {
+            if (CurrentDocument is not null)
+            {
+                IsDualPage = CurrentDocument.IsDoublePage;
+            }
         }
     }
 

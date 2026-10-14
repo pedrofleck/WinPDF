@@ -5,10 +5,10 @@ Checklist de melhorias de usabilidade, ergonomia visual (Fluent 2) e recursos es
 ---
 
 ## 📦 Etapa QoL 1A: Barra de Status Inferior Nativa (Estilo Paint / Fotos / Notepad)
-- [ ] **Remoção dos Controles Antigos:**
+- [x] **Remoção dos Controles Antigos:**
   - Remover o seletor de páginas da barra de título superior (`MainWindow.xaml`), mantendo apenas o nome do documento limpo e centralizado.
   - Remover a pílula flutuante de zoom do `DocumentView.xaml`.
-- [ ] **Barra de Status Inferior Nativa (32 DIPs em Mica):**
+- [x] **Barra de Status Inferior Nativa (32 DIPs em Mica):**
   - Criar uma Status Bar fixa na base da janela com `Height="32"` integrada ao backdrop Mica (visível quando um documento está aberto e fora do modo Tela Cheia/Slides).
   - **Alinhados à Esquerda:**
     - Seletor de página compacto estilo *"Inline Pill"* (`Página [ X ] de Y`): `<TextBox>` camaleão com `Height="22"`, `MinHeight="22"`, largura adaptativa (`MinWidth="28"`, `MaxWidth="56"`), auto-select ao focar/clicar (ou via `Ctrl+G`), confirmação com `Enter` e cancelamento com `Esc`.

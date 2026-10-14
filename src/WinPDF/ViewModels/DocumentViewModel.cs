@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using WinPDF.Models;
 using WinPDF.Rendering;
 using WinPDF.Services;
@@ -53,10 +54,80 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Gets or sets the badge representing the document format.
+    /// </summary>
+    [ObservableProperty]
+    public partial string FileFormatBadge { get; set; } = "PDF";
+
+    /// <summary>
+    /// Gets a human-readable representation of the document file size (e.g. "845 KB", "2.4 MB").
+    /// </summary>
+    public string FormattedFileSize => FormatFileSize(FileSizeBytes);
+
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes <= 0)
+        {
+            return "0 KB";
+        }
+
+        if (bytes < 1024)
+        {
+            return $"{bytes} B";
+        }
+
+        if (bytes < 1024 * 1024)
+        {
+            return $"{bytes / 1024.0:F0} KB";
+        }
+
+        if (bytes < 1024 * 1024 * 1024)
+        {
+            return $"{bytes / (1024.0 * 1024.0):F1} MB";
+        }
+
+        return $"{bytes / (1024.0 * 1024.0 * 1024.0):F2} GB";
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether two-page / dual-page display mode is active.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsDoublePage { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether continuous vertical scrolling is active.
+    /// Synchronized with <see cref="ViewMode.Continuous"/> versus <see cref="ViewMode.Paged"/>.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsContinuous { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the current zoom factor (1.0 = 100%).
     /// </summary>
     [ObservableProperty]
     public partial double ZoomFactor { get; set; } = 1.0;
+
+    partial void OnZoomFactorChanged(double value)
+    {
+        OnPropertyChanged(nameof(ZoomPercentage));
+    }
+
+    /// <summary>
+    /// Gets or sets the zoom percentage (25.0 to 500.0) bound to zoom sliders and percentage labels.
+    /// </summary>
+    public double ZoomPercentage
+    {
+        get => Math.Round(ZoomFactor * 100.0, 1);
+        set
+        {
+            double factor = Math.Clamp(value / 100.0, 0.25, 8.0);
+            if (Math.Abs(ZoomFactor - factor) > 0.001)
+            {
+                ZoomFactor = factor;
+            }
+        }
+    }
 
     /// <summary>
     /// Gets or sets the clockwise rotation angle in degrees (0, 90, 180, 270).
@@ -75,6 +146,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     /// </summary>
     [ObservableProperty]
     public partial long FileSizeBytes { get; set; }
+
+    partial void OnFileSizeBytesChanged(long value)
+    {
+        OnPropertyChanged(nameof(FormattedFileSize));
+    }
 
     /// <summary>
     /// Gets or sets a value indicating whether the current page is pinned in user favorites/bookmarks.
@@ -309,11 +385,54 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Multiplies the current zoom factor by √2 (~1.414).
+    /// Event raised when fitting the document vertically to the current viewport is requested.
     /// </summary>
+    public event Action? FitVerticalRequested;
+
+    /// <summary>
+    /// Event raised when fitting the document horizontally to the current viewport is requested.
+    /// </summary>
+    public event Action? FitHorizontalRequested;
+
+    /// <summary>
+    /// Fits the active page vertically within the viewing viewport.
+    /// </summary>
+    [RelayCommand]
+    public void FitVertical()
+    {
+        if (FitVerticalRequested is not null)
+        {
+            FitVerticalRequested.Invoke();
+        }
+        else
+        {
+            ZoomFactor = 1.0;
+        }
+    }
+
+    /// <summary>
+    /// Fits the active page horizontally to the viewing viewport width.
+    /// </summary>
+    [RelayCommand]
+    public void FitHorizontal()
+    {
+        if (FitHorizontalRequested is not null)
+        {
+            FitHorizontalRequested.Invoke();
+        }
+        else
+        {
+            ZoomFactor = 1.25;
+        }
+    }
+
+    /// <summary>
+    /// Multiplies the current zoom factor by 1.25.
+    /// </summary>
+    [RelayCommand]
     public void ZoomIn()
     {
-        double newZoom = Math.Min(8.0, ZoomFactor * Math.Sqrt(2));
+        double newZoom = Math.Min(8.0, ZoomFactor * 1.25);
         if (Math.Abs(ZoomFactor - newZoom) > 0.0001)
         {
             ZoomFactor = newZoom;
@@ -321,14 +440,47 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Divides the current zoom factor by √2 (~1.414).
+    /// Divides the current zoom factor by 1.25.
     /// </summary>
+    [RelayCommand]
     public void ZoomOut()
     {
-        double newZoom = Math.Max(0.25, ZoomFactor / Math.Sqrt(2));
+        double newZoom = Math.Max(0.25, ZoomFactor / 1.25);
         if (Math.Abs(ZoomFactor - newZoom) > 0.0001)
         {
             ZoomFactor = newZoom;
+        }
+    }
+
+    /// <summary>
+    /// Sets an explicit zoom factor. Supports numeric and string parameter inputs (e.g. from XAML CommandParameter).
+    /// </summary>
+    /// <param name="parameter">The target zoom factor or string representation.</param>
+    [RelayCommand]
+    public void SetZoom(object? parameter)
+    {
+        double factor = 1.0;
+        if (parameter is double d)
+        {
+            factor = d;
+        }
+        else if (parameter is float f)
+        {
+            factor = f;
+        }
+        else if (parameter is int i)
+        {
+            factor = i;
+        }
+        else if (parameter is string s && double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double parsed))
+        {
+            factor = parsed;
+        }
+
+        double target = Math.Clamp(factor, 0.25, 8.0);
+        if (Math.Abs(ZoomFactor - target) > 0.0001)
+        {
+            ZoomFactor = target;
         }
     }
 

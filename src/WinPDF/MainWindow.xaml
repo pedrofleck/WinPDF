@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Window
     x:Class="WinPDF.MainWindow"
+    Title="WinPDF"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:converters="using:WinPDF.Converters"
@@ -33,7 +34,8 @@
             Grid.Row="0"
             Height="48"
             Padding="12,0,140,0"
-            Background="Transparent">
+            Background="Transparent"
+            Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.IsFullScreen), Mode=OneWay}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
@@ -139,52 +141,23 @@
                     Style="{StaticResource CaptionTextBlockStyle}" />
             </StackPanel>
 
-            <!-- Centro: Área de Arraste da Janela + Nome do Documento e Paginação -->
+            <!-- Centro: Área de Arraste da Janela + Nome do Documento -->
             <Grid
                 x:Name="TitleBarDragRegion"
                 Grid.Column="1"
                 HorizontalAlignment="Stretch"
                 VerticalAlignment="Stretch"
                 Background="Transparent">
-                <StackPanel
+                <!-- Nome do arquivo aberto centralizado -->
+                <TextBlock
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    Orientation="Horizontal"
-                    Spacing="8"
-                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
-                    <!-- Nome do arquivo aberto centralizado -->
-                    <TextBlock
-                        MaxWidth="280"
-                        VerticalAlignment="Center"
-                        FontWeight="SemiBold"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        Text="{x:Bind ViewModel.CurrentDocument.FileName, Mode=OneWay}"
-                        TextTrimming="CharacterEllipsis" />
-
-                    <!-- Indicador compacto estilo GNOME Papers: [ TextBox ] de N -->
-                    <StackPanel
-                        VerticalAlignment="Center"
-                        Orientation="Horizontal"
-                        Spacing="4">
-                        <TextBox
-                            x:Name="PageNumberBoxControl"
-                            x:Uid="PageNumberBox"
-                            Width="44"
-                            Height="28"
-                            Padding="2"
-                            HorizontalContentAlignment="Center"
-                            VerticalContentAlignment="Center"
-                            InputScope="Number"
-                            KeyDown="OnPageNumberBoxKeyDown"
-                            Text="{x:Bind ViewModel.CurrentDocument.CurrentPageNumber, Mode=TwoWay}" />
-
-                        <TextBlock
-                            VerticalAlignment="Center"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="{x:Bind ViewModel.FormattedPageCount, Mode=OneWay}" />
-                    </StackPanel>
-                </StackPanel>
+                    MaxWidth="400"
+                    FontWeight="SemiBold"
+                    Style="{StaticResource CaptionTextBlockStyle}"
+                    Text="{x:Bind ViewModel.CurrentDocument.FileName, Mode=OneWay}"
+                    TextTrimming="CharacterEllipsis"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}" />
             </Grid>
 
             <!-- Direita: Toggle Barra Anotações, Menu Documento (...), Configurações -->

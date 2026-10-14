@@ -461,7 +461,6 @@ public sealed partial class PdfPageCanvas : Grid
         if (_detailCanvas.Visibility != Visibility.Collapsed)
         {
             _detailCanvas.Visibility = Visibility.Collapsed;
-            _detailCanvas.DpiScale = 1.0f;
         }
 
         _detailBitmap?.Dispose();
@@ -795,7 +794,7 @@ public sealed partial class PdfPageCanvas : Grid
                 _detailCanvas.Height = patchDip.Height;
 
                 float targetDpiScale = (float)Math.Clamp(pixelScale / rasterScale, 1.0, 8.0);
-                if (Math.Abs(_detailCanvas.DpiScale - targetDpiScale) > 0.01f)
+                if (Math.Abs(_detailCanvas.DpiScale - targetDpiScale) > 0.25f)
                 {
                     _detailCanvas.DpiScale = targetDpiScale;
                 }

@@ -186,4 +186,20 @@
   <data name="Status_Saving" xml:space="preserve"><value>Saving…</value></data>
   <data name="Status_Saved" xml:space="preserve"><value>Saved</value></data>
   <data name="OpenFile_DragCaption" xml:space="preserve"><value>Open PDF</value></data>
+
+  <!-- ===================== Status Bar ===================== -->
+  <data name="StatusBar_PagePrefix" xml:space="preserve"><value>Page</value></data>
+  <data name="StatusBar_PageBoxToolTip" xml:space="preserve"><value>Current page (Ctrl+G to jump)</value></data>
+  <data name="StatusBar_FormatToolTip" xml:space="preserve"><value>Document format</value></data>
+  <data name="StatusBar_PropertiesToolTip" xml:space="preserve"><value>Document properties (Alt+Enter)</value></data>
+  <data name="StatusBar_DoublePageToolTip" xml:space="preserve"><value>Two pages</value></data>
+  <data name="StatusBar_ContinuousToolTip" xml:space="preserve"><value>Continuous scrolling</value></data>
+  <data name="StatusBar_FitVerticalToolTip" xml:space="preserve"><value>Fit to page</value></data>
+  <data name="StatusBar_FitHorizontalToolTip" xml:space="preserve"><value>Fit to width</value></data>
+  <data name="StatusBar_ZoomPresetToolTip" xml:space="preserve"><value>Zoom level</value></data>
+  <data name="StatusBar_ZoomOutToolTip" xml:space="preserve"><value>Zoom out</value></data>
+  <data name="StatusBar_ZoomSliderToolTip" xml:space="preserve"><value>Zoom slider</value></data>
+  <data name="StatusBar_ZoomInToolTip" xml:space="preserve"><value>Zoom in</value></data>
+  <data name="StatusBar_SlideshowToolTip" xml:space="preserve"><value>Slide show (F5)</value></data>
+  <data name="StatusBar_FullScreenToolTip" xml:space="preserve"><value>Full screen (F11)</value></data>
 </root>

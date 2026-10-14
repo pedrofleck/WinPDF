@@ -26,6 +26,50 @@ public sealed partial class DocumentView : Page
     private bool _isUpdatingPageFromScroll;
     private bool _isApplyingZoom;
     private bool _isUpdatingZoomFromScrollViewer;
+    private bool _isUpdatingSliderFromZoom;
+    private bool _isPageBoxEditing;
+
+    /// <summary>Gets the localized page prefix text.</summary>
+    public string PagePrefixText => ResourceStrings.Get(ResourceKeys.StatusBarPagePrefix);
+
+    /// <summary>Gets the localized page box tooltip.</summary>
+    public string PageBoxToolTipText => ResourceStrings.Get(ResourceKeys.StatusBarPageBoxToolTip);
+
+    /// <summary>Gets the localized format tooltip.</summary>
+    public string FormatToolTipText => ResourceStrings.Get(ResourceKeys.StatusBarFormatToolTip);
+
+    /// <summary>Gets the localized document properties tooltip.</summary>
+    public string PropertiesToolTipText => ResourceStrings.Get(ResourceKeys.StatusBarPropertiesToolTip);
+
+    /// <summary>Gets the localized two-page toggle tooltip.</summary>
+    public string DoublePageToolTipText => ResourceStrings.Get(ResourceKeys.StatusBarDoublePageToolTip);
+
+    /// <summary>Gets the localized continuous scroll toggle tooltip.</summary>
+    public string ContinuousToolTipText => ResourceStrings.Get(ResourceKeys.StatusBarContinuousToolTip);
+
+    /// <summary>Gets the localized fit vertical tooltip.</summary>
+    public string FitVerticalToolTipText => ResourceStrings.Get(ResourceKeys.StatusBarFitVerticalToolTip);
+
+    /// <summary>Gets the localized fit horizontal tooltip.</summary>
+    public string FitHorizontalToolTipText => ResourceStrings.Get(ResourceKeys.StatusBarFitHorizontalToolTip);
+
+    /// <summary>Gets the localized zoom preset tooltip.</summary>
+    public string ZoomPresetToolTipText => ResourceStrings.Get(ResourceKeys.StatusBarZoomPresetToolTip);
+
+    /// <summary>Gets the localized zoom out tooltip.</summary>
+    public string ZoomOutToolTipText => ResourceStrings.Get(ResourceKeys.StatusBarZoomOutToolTip);
+
+    /// <summary>Gets the localized zoom slider tooltip.</summary>
+    public string ZoomSliderToolTipText => ResourceStrings.Get(ResourceKeys.StatusBarZoomSliderToolTip);
+
+    /// <summary>Gets the localized zoom in tooltip.</summary>
+    public string ZoomInToolTipText => ResourceStrings.Get(ResourceKeys.StatusBarZoomInToolTip);
+
+    /// <summary>Gets the localized slideshow presentation tooltip.</summary>
+    public string SlideshowToolTipText => ResourceStrings.Get(ResourceKeys.StatusBarSlideshowToolTip);
+
+    /// <summary>Gets the localized full screen toggle tooltip.</summary>
+    public string FullScreenToolTipText => ResourceStrings.Get(ResourceKeys.StatusBarFullScreenToolTip);
 
     /// <summary>
     /// Gets the shell view model.
@@ -169,6 +213,13 @@ public sealed partial class DocumentView : Page
         {
             _observedDocument = doc;
             _observedDocument.PropertyChanged += OnCurrentDocumentPropertyChanged;
+            _observedDocument.FitVerticalRequested += OnFitPageRequested;
+            _observedDocument.FitHorizontalRequested += OnFitWidthRequested;
+            UpdateZoomSlider(doc.ZoomFactor);
+            if (StatusBarPageBox is not null)
+            {
+                StatusBarPageBox.Text = doc.CurrentPageNumber.ToString();
+            }
         }
     }
 
@@ -177,8 +228,20 @@ public sealed partial class DocumentView : Page
         if (_observedDocument is not null)
         {
             _observedDocument.PropertyChanged -= OnCurrentDocumentPropertyChanged;
+            _observedDocument.FitVerticalRequested -= OnFitPageRequested;
+            _observedDocument.FitHorizontalRequested -= OnFitWidthRequested;
             _observedDocument = null;
         }
+    }
+
+    private void OnFitPageRequested()
+    {
+        OnFitPageClick(this, new RoutedEventArgs());
+    }
+
+    private void OnFitWidthRequested()
+    {
+        OnFitWidthClick(this, new RoutedEventArgs());
     }
 
     private void OnCurrentDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -189,9 +252,19 @@ public sealed partial class DocumentView : Page
             {
                 ScrollToPage(_observedDocument.CurrentPageIndex);
             }
+
+            if (!_isPageBoxEditing && StatusBarPageBox is not null && _observedDocument is not null)
+            {
+                StatusBarPageBox.Text = _observedDocument.CurrentPageNumber.ToString();
+            }
         }
         else if (e.PropertyName == nameof(DocumentViewModel.ZoomFactor))
         {
+            if (_observedDocument is not null)
+            {
+                UpdateZoomSlider(_observedDocument.ZoomFactor);
+            }
+
             if (_isApplyingZoom || _isUpdatingZoomFromScrollViewer)
             {
                 return;
@@ -227,10 +300,24 @@ public sealed partial class DocumentView : Page
 
     private void OnPagedScrollViewerViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
     {
-        if (e.IsIntermediate || sender is not ScrollViewer)
+        if (e.IsIntermediate || sender is not ScrollViewer sv)
         {
             _zoomDebounceCts?.Cancel();
             return;
+        }
+
+        if (ViewModel.CurrentDocument is not null && Math.Abs(ViewModel.CurrentDocument.ZoomFactor - sv.ZoomFactor) > 0.01)
+        {
+            _isUpdatingZoomFromScrollViewer = true;
+            try
+            {
+                ViewModel.CurrentDocument.ZoomFactor = sv.ZoomFactor;
+                UpdateZoomSlider(sv.ZoomFactor);
+            }
+            finally
+            {
+                _isUpdatingZoomFromScrollViewer = false;
+            }
         }
 
         ScheduleViewportUpdate();
@@ -247,7 +334,7 @@ public sealed partial class DocumentView : Page
         {
             try
             {
-                await Task.Delay(80).ConfigureAwait(false);
+                await Task.Delay(120).ConfigureAwait(false);
                 if (cts.IsCancellationRequested)
                 {
                     return;
@@ -259,8 +346,6 @@ public sealed partial class DocumentView : Page
                     {
                         return;
                     }
-
-                    ContinuousScrollViewer.UpdateLayout();
 
                     double activeZoom = ViewModel.ViewMode == ViewMode.Continuous
                         ? ContinuousScrollViewer.ZoomFactor
@@ -290,6 +375,11 @@ public sealed partial class DocumentView : Page
 
     private void UpdateCurrentPageIndexFromViewport()
     {
+        if (ViewModel.ViewMode != ViewMode.Continuous || ContinuousScrollViewer.ViewportHeight <= 0)
+        {
+            return;
+        }
+
         if (ViewModel.CurrentDocument is null || ViewModel.CurrentDocument.Pages.Count == 0)
         {
             return;
@@ -315,6 +405,11 @@ public sealed partial class DocumentView : Page
         if (ViewModel.CurrentDocument is null || ViewModel.CurrentDocument.Pages.Count == 0)
         {
             return 0;
+        }
+
+        if (ViewModel.ViewMode != ViewMode.Continuous || ContinuousScrollViewer.ViewportHeight <= 0)
+        {
+            return ViewModel.CurrentDocument.CurrentPageIndex;
         }
 
         double zoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor);
@@ -392,6 +487,7 @@ public sealed partial class DocumentView : Page
                 _isUpdatingPageFromScroll = false;
             }
 
+            ApplyCurrentZoomToActivePagedScrollViewer();
             UpdateViewportPages(ViewModel.CurrentDocument.ZoomFactor);
         }
     }
@@ -463,6 +559,89 @@ public sealed partial class DocumentView : Page
         }
 
         return FindDescendant<ScrollViewer>(container);
+    }
+
+    private void ApplyCurrentZoomToActivePagedScrollViewer()
+    {
+        if (ViewModel.CurrentDocument is null)
+        {
+            return;
+        }
+
+        var sv = GetActivePagedScrollViewer();
+        if (sv is not null)
+        {
+            float targetZoom = (float)ViewModel.CurrentDocument.ZoomFactor;
+            if (targetZoom > 0.1f && Math.Abs(sv.ZoomFactor - targetZoom) > 0.01f)
+            {
+                sv.ChangeView(null, null, targetZoom, disableAnimation: true);
+            }
+        }
+    }
+
+    private void OnPagedScrollViewerLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is ScrollViewer sv && ViewModel.CurrentDocument is not null)
+        {
+            float targetZoom = (float)ViewModel.CurrentDocument.ZoomFactor;
+            if (targetZoom > 0.1f && Math.Abs(sv.ZoomFactor - targetZoom) > 0.01f)
+            {
+                sv.ChangeView(null, null, targetZoom, disableAnimation: true);
+            }
+        }
+    }
+
+    private void OnPagedFlipViewPointerWheelChanged(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        HandlePagedPointerWheel(e);
+    }
+
+    private void OnPagedScrollViewerPointerWheelChanged(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        HandlePagedPointerWheel(e);
+    }
+
+    private void HandlePagedPointerWheel(Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (ViewModel.ViewMode == ViewMode.Continuous || ViewModel.CurrentDocument is null)
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(PagedFlipView);
+        if ((e.KeyModifiers & Windows.System.VirtualKeyModifiers.Control) != 0)
+        {
+            int delta = point.Properties.MouseWheelDelta;
+            if (delta > 0)
+            {
+                OnZoomInClick(this, new RoutedEventArgs());
+            }
+            else if (delta < 0)
+            {
+                OnZoomOutClick(this, new RoutedEventArgs());
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        int mouseDelta = point.Properties.MouseWheelDelta;
+        if (mouseDelta < 0)
+        {
+            if (PagedFlipView.SelectedIndex < ViewModel.CurrentDocument.Pages.Count - 1)
+            {
+                PagedFlipView.SelectedIndex++;
+                e.Handled = true;
+            }
+        }
+        else if (mouseDelta > 0)
+        {
+            if (PagedFlipView.SelectedIndex > 0)
+            {
+                PagedFlipView.SelectedIndex--;
+                e.Handled = true;
+            }
+        }
     }
 
     private static T? FindDescendant<T>(DependencyObject parent) where T : DependencyObject
@@ -640,6 +819,106 @@ public sealed partial class DocumentView : Page
         finally
         {
             deferral.Complete();
+        }
+    }
+
+    private void OnStatusBarPageBoxGotFocus(object sender, RoutedEventArgs e)
+    {
+        _isPageBoxEditing = true;
+        StatusBarPageBox.SelectAll();
+    }
+
+    private void OnStatusBarPageBoxKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            e.Handled = true;
+            _isPageBoxEditing = false;
+            if (int.TryParse(StatusBarPageBox.Text.Trim(), out int pageNumber) && ViewModel.CurrentDocument is not null)
+            {
+                int targetIndex = Math.Clamp(pageNumber - 1, 0, ViewModel.CurrentDocument.PageCount - 1);
+                ViewModel.CurrentDocument.GoToPage(targetIndex);
+                ScrollToPage(targetIndex);
+                StatusBarPageBox.Text = (targetIndex + 1).ToString();
+            }
+            else if (ViewModel.CurrentDocument is not null)
+            {
+                StatusBarPageBox.Text = ViewModel.CurrentDocument.CurrentPageNumber.ToString();
+            }
+
+            ReturnFocusToViewer();
+        }
+        else if (e.Key == Windows.System.VirtualKey.Escape)
+        {
+            e.Handled = true;
+            _isPageBoxEditing = false;
+            if (ViewModel.CurrentDocument is not null)
+            {
+                StatusBarPageBox.Text = ViewModel.CurrentDocument.CurrentPageNumber.ToString();
+            }
+
+            ReturnFocusToViewer();
+        }
+    }
+
+    private void OnStatusBarPageBoxLostFocus(object sender, RoutedEventArgs e)
+    {
+        _isPageBoxEditing = false;
+        if (ViewModel.CurrentDocument is not null)
+        {
+            StatusBarPageBox.Text = ViewModel.CurrentDocument.CurrentPageNumber.ToString();
+        }
+    }
+
+    private void OnPageBoxAcceleratorInvoked(Microsoft.UI.Xaml.Input.KeyboardAccelerator sender, Microsoft.UI.Xaml.Input.KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        StatusBarPageBox.Focus(FocusState.Programmatic);
+        StatusBarPageBox.SelectAll();
+    }
+
+    private void ReturnFocusToViewer()
+    {
+        if (ViewModel.ViewMode == ViewMode.Continuous)
+        {
+            ContinuousScrollViewer.Focus(FocusState.Programmatic);
+        }
+        else
+        {
+            PagedFlipView.Focus(FocusState.Programmatic);
+        }
+    }
+
+    private void OnStatusBarZoomSliderValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_isUpdatingSliderFromZoom || ViewModel.CurrentDocument is null)
+        {
+            return;
+        }
+
+        double newFactor = Math.Clamp(e.NewValue / 100.0, 0.25, 5.0);
+        if (Math.Abs(ViewModel.CurrentDocument.ZoomFactor - newFactor) > 0.01)
+        {
+            ApplyZoomAroundCenter((float)newFactor);
+        }
+    }
+
+    private void UpdateZoomSlider(double zoomFactor)
+    {
+        if (StatusBarZoomSlider is null)
+        {
+            return;
+        }
+
+        _isUpdatingSliderFromZoom = true;
+        try
+        {
+            double percentage = Math.Clamp(zoomFactor * 100.0, StatusBarZoomSlider.Minimum, StatusBarZoomSlider.Maximum);
+            StatusBarZoomSlider.Value = percentage;
+        }
+        finally
+        {
+            _isUpdatingSliderFromZoom = false;
         }
     }
 }

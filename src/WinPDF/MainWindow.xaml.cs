@@ -89,6 +89,8 @@ public sealed partial class MainWindow : Window
             MainContentContainer.BorderThickness = new Thickness(0, 1, 0, 0);
         };
 
+        AppWindow.Changed += OnAppWindowChanged;
+
         if (Content is FrameworkElement root)
         {
             root.Loaded += (_, _) =>
@@ -249,7 +251,6 @@ public sealed partial class MainWindow : Window
                 SidebarToggleButton,
                 OpenFileBtn,
                 SearchBtn,
-                PageNumberBoxControl,
                 AnnotationToolsToggleBtn,
                 DocumentMenuBtn,
                 SettingsBtn
@@ -291,6 +292,9 @@ public sealed partial class MainWindow : Window
     {
         if (e.PropertyName == nameof(ShellViewModel.CurrentDocument))
         {
+            var docName = ViewModel.CurrentDocument?.FileName;
+            Title = string.IsNullOrEmpty(docName) ? "WinPDF" : $"{docName} — WinPDF";
+
             DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsFullScreen))
@@ -340,11 +344,63 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void OnAppWindowChanged(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowChangedEventArgs args)
+    {
+        if (args.DidPresenterChange)
+        {
+            bool isFullScreen = AppWindow.Presenter.Kind == Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen;
+            if (ViewModel.IsFullScreen != isFullScreen)
+            {
+                ViewModel.IsFullScreen = isFullScreen;
+            }
+        }
+    }
+
+    private bool _sidebarOpenBeforeFullScreen;
+
     private void UpdateFullScreenState(bool isFullScreen)
     {
-        AppWindow.SetPresenter(isFullScreen
-            ? AppWindowPresenterKind.FullScreen
-            : AppWindowPresenterKind.Default);
+        if (isFullScreen)
+        {
+            _sidebarOpenBeforeFullScreen = ViewModel.IsSidebarOpen;
+            if (ViewModel.IsSidebarOpen)
+            {
+                _isInternalSidebarToggle = true;
+                try
+                {
+                    ViewModel.IsSidebarOpen = false;
+                }
+                finally
+                {
+                    _isInternalSidebarToggle = false;
+                }
+            }
+
+            AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
+        }
+        else
+        {
+            AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Default);
+            if (_sidebarOpenBeforeFullScreen)
+            {
+                _sidebarOpenBeforeFullScreen = false;
+                _isInternalSidebarToggle = true;
+                try
+                {
+                    ViewModel.IsSidebarOpen = true;
+                }
+                finally
+                {
+                    _isInternalSidebarToggle = false;
+                }
+            }
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                UpdateTitleBarInsets();
+                UpdateTitleBarNonClientRegions();
+            });
+        }
     }
 
     private void UpdateTitleBarTheme()
@@ -501,27 +557,6 @@ public sealed partial class MainWindow : Window
         finally
         {
             deferral.Complete();
-        }
-    }
-
-    private void OnPageNumberBoxKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
-    {
-        if (e.Key == Windows.System.VirtualKey.Enter)
-        {
-            if (sender is TextBox textBox)
-            {
-                if (int.TryParse(textBox.Text, out int pageNumber) && ViewModel.CurrentDocument is not null)
-                {
-                    ViewModel.CurrentDocument.CurrentPageNumber = pageNumber;
-                    textBox.Text = ViewModel.CurrentDocument.CurrentPageNumber.ToString();
-                }
-                else if (ViewModel.CurrentDocument is not null)
-                {
-                    textBox.Text = ViewModel.CurrentDocument.CurrentPageNumber.ToString();
-                }
-            }
-            e.Handled = true;
-            MainContentFrame.Focus(FocusState.Programmatic);
         }
     }
 }
