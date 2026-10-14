@@ -113,6 +113,7 @@
                             MaxZoomFactor="8.0"
                             MinZoomFactor="0.25"
                             VerticalScrollBarVisibility="Hidden"
+                            ViewChanged="OnPagedScrollViewerViewChanged"
                             ZoomMode="Enabled">
                             <Border
                                 Width="{x:Bind DisplayWidthDip, Mode=OneWay}"

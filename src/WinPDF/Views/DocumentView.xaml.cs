@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Globalization;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Foundation;
 using Windows.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
@@ -63,7 +64,7 @@ public sealed partial class DocumentView : Page
 
         if (ViewModel.CurrentDocument is not null)
         {
-            UpdateAllCanvasesZoom(ViewModel.CurrentDocument.ZoomFactor);
+            UpdateViewportPages(ViewModel.CurrentDocument.ZoomFactor);
         }
     }
 
@@ -84,7 +85,7 @@ public sealed partial class DocumentView : Page
             ?? (ViewModel.ViewMode == ViewMode.Continuous ? ContinuousScrollViewer.ZoomFactor : 1.0);
         if (targetZoom > 0.05)
         {
-            canvas.UpdateViewportZoom(targetZoom);
+            ApplyViewportToCanvas(canvas, targetZoom);
         }
     }
 
@@ -93,18 +94,36 @@ public sealed partial class DocumentView : Page
         _activeCanvases.Remove(canvas);
     }
 
-    private void UpdateAllCanvasesZoom(double newZoom)
+    private void UpdateViewportPages(double currentZoom)
     {
-        foreach (var canvas in _activeCanvases)
+        if (_activeCanvases.Count > 0)
         {
-            canvas.UpdateViewportZoom(newZoom);
+            foreach (var canvas in _activeCanvases.ToArray())
+            {
+                ApplyViewportToCanvas(canvas, currentZoom);
+            }
         }
-
-        FindAndApplyCanvases(ContinuousPagesRepeater, newZoom);
-        FindAndApplyCanvases(PagedFlipView, newZoom);
+        else
+        {
+            FindAndApplyCanvases(ContinuousPagesRepeater, currentZoom);
+            FindAndApplyCanvases(PagedFlipView, currentZoom);
+        }
     }
 
-    private static void FindAndApplyCanvases(DependencyObject? parent, double newZoom)
+    private static void ApplyViewportToCanvas(PdfPageCanvas canvas, double currentZoom)
+    {
+        Rect visible = canvas.GetVisibleRectInPageDips();
+        if (visible.IsEmpty || visible.Width <= 1.0 || visible.Height <= 1.0)
+        {
+            canvas.DestroyVirtualCanvas();
+        }
+        else
+        {
+            canvas.UpdateViewportZoom(currentZoom);
+        }
+    }
+
+    private static void FindAndApplyCanvases(DependencyObject? parent, double currentZoom)
     {
         if (parent is null)
         {
@@ -117,11 +136,11 @@ public sealed partial class DocumentView : Page
             DependencyObject child = VisualTreeHelper.GetChild(parent, i);
             if (child is PdfPageCanvas canvas)
             {
-                canvas.UpdateViewportZoom(newZoom);
+                ApplyViewportToCanvas(canvas, currentZoom);
             }
             else
             {
-                FindAndApplyCanvases(child, newZoom);
+                FindAndApplyCanvases(child, currentZoom);
             }
         }
     }
@@ -192,7 +211,7 @@ public sealed partial class DocumentView : Page
                 {
                     ApplyZoomAroundCenter((float)_observedDocument.ZoomFactor);
                 }
-                UpdateAllCanvasesZoom(_observedDocument.ZoomFactor);
+                UpdateViewportPages(_observedDocument.ZoomFactor);
             }
         }
     }
@@ -213,7 +232,7 @@ public sealed partial class DocumentView : Page
         // Update current page index from center of viewport
         UpdateCurrentPageIndexFromViewport();
 
-        // 150 ms gesture debounce before applying quantized zoom to visible pages
+        // 100 ms gesture debounce before applying quantized zoom to visible pages
         _zoomDebounceCts?.Cancel();
         _zoomDebounceCts?.Dispose();
         var cts = new CancellationTokenSource();
@@ -223,7 +242,7 @@ public sealed partial class DocumentView : Page
         {
             try
             {
-                await Task.Delay(150, cts.Token);
+                await Task.Delay(100).ConfigureAwait(false);
                 if (cts.IsCancellationRequested)
                 {
                     return;
@@ -250,7 +269,60 @@ public sealed partial class DocumentView : Page
                         }
                     }
 
-                    UpdateAllCanvasesZoom(newZoom);
+                    UpdateViewportPages(newZoom);
+                });
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        });
+    }
+
+    private void OnPagedScrollViewerViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
+    {
+        if (e.IsIntermediate || sender is not ScrollViewer pagedSv)
+        {
+            _zoomDebounceCts?.Cancel();
+            return;
+        }
+
+        _zoomDebounceCts?.Cancel();
+        _zoomDebounceCts?.Dispose();
+        var cts = new CancellationTokenSource();
+        _zoomDebounceCts = cts;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(100).ConfigureAwait(false);
+                if (cts.IsCancellationRequested)
+                {
+                    return;
+                }
+
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (cts.IsCancellationRequested || ViewModel.CurrentDocument is null)
+                    {
+                        return;
+                    }
+
+                    double newZoom = pagedSv.ZoomFactor;
+                    if (Math.Abs(ViewModel.CurrentDocument.ZoomFactor - newZoom) > 0.01)
+                    {
+                        _isUpdatingZoomFromScrollViewer = true;
+                        try
+                        {
+                            ViewModel.CurrentDocument.ZoomFactor = newZoom;
+                        }
+                        finally
+                        {
+                            _isUpdatingZoomFromScrollViewer = false;
+                        }
+                    }
+
+                    UpdateViewportPages(newZoom);
                 });
             }
             catch (OperationCanceledException)
@@ -362,6 +434,8 @@ public sealed partial class DocumentView : Page
             {
                 _isUpdatingPageFromScroll = false;
             }
+
+            UpdateViewportPages(ViewModel.CurrentDocument.ZoomFactor);
         }
     }
 
@@ -410,7 +484,7 @@ public sealed partial class DocumentView : Page
             }
 
             ViewModel.SetZoom(newZoom);
-            UpdateAllCanvasesZoom(newZoom);
+            UpdateViewportPages(newZoom);
         }
         finally
         {

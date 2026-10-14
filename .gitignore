@@ -34,3 +34,9 @@ project.lock.json
 *.log
 TestResults/
 *.pfx
+
+# Publish
+publish/
+
+# local stuff
+local-todo.md

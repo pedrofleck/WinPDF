@@ -121,8 +121,8 @@ public abstract class TileCacheEntry
 /// </remarks>
 public sealed class TileCache : IDisposable
 {
-    /// <summary>Default total budget: 256 MB.</summary>
-    public const long DefaultMaxBytes = 256L * 1024 * 1024;
+    /// <summary>Default total budget: 128 MB.</summary>
+    public const long DefaultMaxBytes = 128L * 1024 * 1024;
 
     /// <summary>Default budget reserved for the Level 0 pool: 64 MB.</summary>
     public const long DefaultMaxBaseBytes = 64L * 1024 * 1024;

@@ -16,11 +16,13 @@ using WinPDF.ViewModels;
 namespace WinPDF.Controls;
 
 /// <summary>
-/// Native Win2D canvas rendering a single PDF page with zero-LOH uploads, hybrid full-page / 512×512 tiles,
-/// fallback background blitting during zoom, and true 0.0% CPU/GPU consumption when stationary.
+/// Native Win2D canvas rendering a single PDF page with zero-LOH uploads, on-demand high-resolution
+/// virtual tiles, fallback background blitting during zoom, and true 0.0% CPU/GPU consumption when stationary.
 /// </summary>
-public sealed class PdfPageCanvas : Grid
+public sealed partial class PdfPageCanvas : Grid
 {
+    private const int MaxTilesPerPass = 36;
+
     /// <summary>
     /// Identifies the <see cref="PageInfo"/> dependency property.
     /// </summary>
@@ -51,12 +53,12 @@ public sealed class PdfPageCanvas : Grid
             typeof(PdfPageCanvas),
             new PropertyMetadata(1.0, OnZoomFactorPropertyChanged));
 
-    private readonly CanvasControl _canvasControl;
+    private readonly CanvasControl _baseCanvas;
     private readonly IPdfService _pdfService;
     private readonly TileCache _tileCache;
 
+    private CanvasVirtualControl? _virtualCanvas;
     private CanvasBitmapEntry? _baseBitmapEntry;
-    private CanvasBitmapEntry? _activeFullPageEntry;
     private CancellationTokenSource? _baseCts;
     private CancellationTokenSource? _renderCts;
     private DocumentViewModel? _observedDocument;
@@ -185,7 +187,8 @@ public sealed class PdfPageCanvas : Grid
         _pdfService = App.CurrentApp.Services.GetRequiredService<IPdfService>();
         _tileCache = App.CurrentApp.Services.GetRequiredService<TileCache>();
 
-        _canvasControl = new CanvasControl
+        // PROIBIÇÃO ABSOLUTA: DpiScale do _baseCanvas fixo em 1.0f para sempre.
+        _baseCanvas = new CanvasControl
         {
             UseSharedDevice = true,
             ClearColor = Windows.UI.Color.FromArgb(255, 255, 255, 255),
@@ -194,10 +197,10 @@ public sealed class PdfPageCanvas : Grid
             VerticalAlignment = VerticalAlignment.Stretch,
         };
 
-        _canvasControl.CreateResources += OnCreateResources;
-        _canvasControl.Draw += OnDraw;
+        _baseCanvas.CreateResources += OnCreateResources;
+        _baseCanvas.Draw += OnBaseCanvasDraw;
 
-        Children.Add(_canvasControl);
+        Children.Add(_baseCanvas);
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -220,6 +223,7 @@ public sealed class PdfPageCanvas : Grid
                 ZoomFactor = scrollViewer.ZoomFactor;
             }
         }
+
         TryLoadCachedBitmaps();
         UpdateRender();
         CanvasLoaded?.Invoke(this);
@@ -230,6 +234,7 @@ public sealed class PdfPageCanvas : Grid
         _isUnloaded = true;
         CanvasUnloaded?.Invoke(this);
         CancelInFlightRenders();
+        DestroyVirtualCanvas();
         UnsubscribeFromDocument();
         ReleaseBitmaps();
     }
@@ -256,9 +261,9 @@ public sealed class PdfPageCanvas : Grid
 
     private void UnsubscribeFromDocument()
     {
-        if (_observedDocument is not null)
+        if (_observedDocument is { } doc)
         {
-            _observedDocument.PropertyChanged -= OnObservedDocumentPropertyChanged;
+            doc.PropertyChanged -= OnObservedDocumentPropertyChanged;
             _observedDocument = null;
         }
     }
@@ -280,11 +285,12 @@ public sealed class PdfPageCanvas : Grid
         if (d is PdfPageCanvas canvas)
         {
             canvas.CancelInFlightRenders();
+            canvas.DestroyVirtualCanvas();
             canvas.ReleaseBitmaps();
             canvas._loadedPageIndex = canvas.PageInfo?.Index ?? -1;
             canvas.UpdateDimensions();
             canvas.TryLoadCachedBitmaps();
-            canvas._canvasControl.Invalidate();
+            canvas._baseCanvas.Invalidate();
             canvas.UpdateRender();
         }
     }
@@ -294,9 +300,10 @@ public sealed class PdfPageCanvas : Grid
         if (d is PdfPageCanvas canvas)
         {
             canvas.CancelInFlightRenders();
+            canvas.DestroyVirtualCanvas();
             canvas.ReleaseBitmaps();
             canvas.TryLoadCachedBitmaps();
-            canvas._canvasControl.Invalidate();
+            canvas._baseCanvas.Invalidate();
             canvas.UpdateRender();
         }
     }
@@ -315,8 +322,14 @@ public sealed class PdfPageCanvas : Grid
         {
             Width = PageInfo.DisplayWidthDip;
             Height = PageInfo.DisplayHeightDip;
-            _canvasControl.Width = PageInfo.DisplayWidthDip;
-            _canvasControl.Height = PageInfo.DisplayHeightDip;
+            _baseCanvas.Width = PageInfo.DisplayWidthDip;
+            _baseCanvas.Height = PageInfo.DisplayHeightDip;
+
+            if (_virtualCanvas is not null)
+            {
+                _virtualCanvas.Width = PageInfo.DisplayWidthDip;
+                _virtualCanvas.Height = PageInfo.DisplayHeightDip;
+            }
         }
     }
 
@@ -328,8 +341,7 @@ public sealed class PdfPageCanvas : Grid
             _tileCache.HandleDeviceLost();
             _baseBitmapEntry?.Release();
             _baseBitmapEntry = null;
-            _activeFullPageEntry?.Release();
-            _activeFullPageEntry = null;
+            DestroyVirtualCanvas();
         }
 
         if (_pendingRender || _baseBitmapEntry is null)
@@ -374,7 +386,7 @@ public sealed class PdfPageCanvas : Grid
         }
     }
 
-    private void OnDraw(CanvasControl sender, CanvasDrawEventArgs args)
+    private void OnBaseCanvasDraw(CanvasControl sender, CanvasDrawEventArgs args)
     {
         if (PageInfo is null)
         {
@@ -384,6 +396,7 @@ public sealed class PdfPageCanvas : Grid
         if (_loadedPageIndex != PageInfo.Index)
         {
             CancelInFlightRenders();
+            DestroyVirtualCanvas();
             ReleaseBitmaps();
             _loadedPageIndex = PageInfo.Index;
             UpdateRender();
@@ -393,10 +406,10 @@ public sealed class PdfPageCanvas : Grid
         var ds = args.DrawingSession;
         Rect pageRect = new(0, 0, PageInfo.DisplayWidthDip, PageInfo.DisplayHeightDip);
 
-        // 1. Draw base white card
+        // 1. Folha branca base
         ds.FillRectangle(pageRect, Windows.UI.Color.FromArgb(255, 255, 255, 255));
 
-        // 2. Draw Level 0 base bitmap as fallback (never flicker, always smooth preview)
+        // 2. Bitmap base Nível 0 (Zq = 1.0f) como pré-visualização contínua e suave durante gestos
         if (_baseBitmapEntry is { IsDisposed: false, Bitmap: { } baseBmp })
         {
             try
@@ -410,33 +423,62 @@ public sealed class PdfPageCanvas : Grid
                 UpdateRender();
             }
         }
+    }
 
-        ZoomLevel level = ZoomQuantizer.Resolve(EffectiveZoom);
+    /// <summary>
+    /// Destroys the virtual canvas overlay and releases 100% of its DirectX VRAM immediately.
+    /// </summary>
+    public void DestroyVirtualCanvas()
+    {
+        _renderCts?.Cancel();
+        _renderCts?.Dispose();
+        _renderCts = null;
 
-        if (level.Mode == PageRenderMode.FullPage)
+        if (_virtualCanvas is not null)
         {
-            if (!level.IsBaseLevel && _activeFullPageEntry is { IsDisposed: false, Bitmap: { } fullBmp })
-            {
-                try
-                {
-                    ds.DrawImage(fullBmp, pageRect);
-                }
-                catch (ObjectDisposedException)
-                {
-                    _activeFullPageEntry?.Release();
-                    _activeFullPageEntry = null;
-                    UpdateRender();
-                }
-            }
-        }
-        else
-        {
-            // High magnification: draw all cached tiles on top
-            DrawCachedTiles(ds, level);
+            _virtualCanvas.RegionsInvalidated -= OnVirtualCanvasRegionsInvalidated;
+            _virtualCanvas.RemoveFromVisualTree();
+            Children.Remove(_virtualCanvas);
+            _virtualCanvas = null;
         }
     }
 
-    private void DrawCachedTiles(CanvasDrawingSession ds, ZoomLevel level)
+    private void EnsureVirtualCanvasCreated(double Zq)
+    {
+        if (PageInfo is null)
+        {
+            return;
+        }
+
+        float targetDpiScale = (float)Math.Clamp(Zq, 1.0, 8.0);
+
+        if (_virtualCanvas is null)
+        {
+            _virtualCanvas = new CanvasVirtualControl
+            {
+                UseSharedDevice = true,
+                ClearColor = Windows.UI.Color.FromArgb(0, 0, 0, 0),
+                DpiScale = targetDpiScale,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                VerticalAlignment = VerticalAlignment.Stretch,
+                Width = PageInfo.DisplayWidthDip,
+                Height = PageInfo.DisplayHeightDip,
+            };
+
+            _virtualCanvas.RegionsInvalidated += OnVirtualCanvasRegionsInvalidated;
+            Children.Add(_virtualCanvas);
+        }
+        else
+        {
+            if (Math.Abs(_virtualCanvas.DpiScale - targetDpiScale) > 0.01f)
+            {
+                _virtualCanvas.DpiScale = targetDpiScale;
+            }
+            _virtualCanvas.Invalidate();
+        }
+    }
+
+    private void OnVirtualCanvasRegionsInvalidated(CanvasVirtualControl sender, CanvasRegionsInvalidatedEventArgs args)
     {
         if (PageInfo is null || EffectiveDocumentId <= 0)
         {
@@ -445,6 +487,7 @@ public sealed class PdfPageCanvas : Grid
 
         double rasterizationScale = XamlRoot?.RasterizationScale ?? 1.0;
         int scalePercent = (int)Math.Round(rasterizationScale * 100);
+        ZoomLevel level = ZoomQuantizer.Resolve(EffectiveZoom);
         double Zq = level.Factor;
         int step = level.Step;
         float effectiveScale = (float)(Zq * rasterizationScale);
@@ -452,41 +495,51 @@ public sealed class PdfPageCanvas : Grid
         (int pageWidth, int pageHeight) = RenderGeometry.GetPagePixelSize(PageInfo, 0, Zq, rasterizationScale);
         (int cols, int rows) = RenderGeometry.GetTileGrid(pageWidth, pageHeight);
 
-        for (int ty = 0; ty < rows; ty++)
+        foreach (Rect region in args.InvalidatedRegions)
         {
-            for (int tx = 0; tx < cols; tx++)
+            using CanvasDrawingSession ds = sender.CreateDrawingSession(region);
+
+            int startTileX = Math.Max(0, (int)Math.Floor(region.X * effectiveScale / RenderGeometry.TileSizePx));
+            int startTileY = Math.Max(0, (int)Math.Floor(region.Y * effectiveScale / RenderGeometry.TileSizePx));
+            int endTileX = Math.Min(cols - 1, (int)Math.Floor(Math.Max(region.X, region.X + region.Width - 0.001) * effectiveScale / RenderGeometry.TileSizePx));
+            int endTileY = Math.Min(rows - 1, (int)Math.Floor(Math.Max(region.Y, region.Y + region.Height - 0.001) * effectiveScale / RenderGeometry.TileSizePx));
+
+            for (int ty = startTileY; ty <= endTileY; ty++)
             {
-                TileKey key = new(
-                    EffectiveDocumentId,
-                    PageInfo.Index,
-                    TileKind.Tile,
-                    step,
-                    tx,
-                    ty,
-                    0,
-                    0,
-                    scalePercent);
-
-                if (_tileCache.TryGet(in key, out TileCacheEntry? entry))
+                for (int tx = startTileX; tx <= endTileX; tx++)
                 {
-                    if (entry is CanvasBitmapEntry { IsDisposed: false, Bitmap: { } tileBmp })
-                    {
-                        (int leftPx, int topPx, int widthPx, int heightPx) = RenderGeometry.GetTileRect(pageWidth, pageHeight, tx, ty);
-                        Rect tileRectDip = new(
-                            leftPx / effectiveScale,
-                            topPx / effectiveScale,
-                            widthPx / effectiveScale,
-                            heightPx / effectiveScale);
+                    TileKey key = new(
+                        EffectiveDocumentId,
+                        PageInfo.Index,
+                        TileKind.Tile,
+                        step,
+                        tx,
+                        ty,
+                        0,
+                        0,
+                        scalePercent);
 
-                        try
+                    if (_tileCache.TryGet(in key, out TileCacheEntry? entry))
+                    {
+                        if (entry is CanvasBitmapEntry { IsDisposed: false, Bitmap: { } tileBmp })
                         {
-                            ds.DrawImage(tileBmp, tileRectDip);
+                            (int leftPx, int topPx, int widthPx, int heightPx) = RenderGeometry.GetTileRect(pageWidth, pageHeight, tx, ty);
+                            Rect tileRectDip = new(
+                                leftPx / effectiveScale,
+                                topPx / effectiveScale,
+                                widthPx / effectiveScale,
+                                heightPx / effectiveScale);
+
+                            try
+                            {
+                                ds.DrawImage(tileBmp, tileRectDip);
+                            }
+                            catch (ObjectDisposedException)
+                            {
+                            }
                         }
-                        catch (ObjectDisposedException)
-                        {
-                        }
+                        entry?.Release();
                     }
-                    entry?.Release();
                 }
             }
         }
@@ -507,13 +560,12 @@ public sealed class PdfPageCanvas : Grid
 
         _pendingRender = false;
 
-        // Try load from cache first
+        // 1. Garantir que o bitmap base Nível 0 esteja carregado ou requisitado
         if (_baseBitmapEntry is null)
         {
             TryLoadCachedBitmaps();
         }
 
-        // Ensure Level 0 base bitmap is requested or loaded
         if (_baseBitmapEntry is null)
         {
             _baseCts?.Cancel();
@@ -522,45 +574,28 @@ public sealed class PdfPageCanvas : Grid
             _ = RenderBaseBitmapAsync(_baseCts.Token);
         }
 
-        double rasterizationScale = XamlRoot?.RasterizationScale ?? 1.0;
-        ZoomLevel level = ZoomQuantizer.Resolve(EffectiveZoom);
+        double zoom = EffectiveZoom;
+
+        // 2. Trava de Visibilidade e Zoom:
+        Rect visibleDip = GetVisibleRectInPageDips();
+        if (zoom <= 1.05 || visibleDip.IsEmpty)
+        {
+            DestroyVirtualCanvas();
+            return;
+        }
+
+        // 3. Página visível e em zoom alto: ativa CanvasVirtualControl sob demanda
+        ZoomLevel level = ZoomQuantizer.Resolve(zoom);
         double Zq = level.Factor;
 
-        // Ensure CanvasControl backing surface resolution matches quantized zoom Zq
-        float maxDim = (float)Math.Max(PageInfo.DisplayWidthDip, PageInfo.DisplayHeightDip);
-        float maxSafeDpiScale = (maxDim > 0 && rasterizationScale > 0)
-            ? (float)(16384.0 / (maxDim * rasterizationScale))
-            : 8.0f;
-        float targetDpiScale = (float)Math.Clamp(Zq, 0.25, Math.Min(8.0, maxSafeDpiScale));
-
-        if (Math.Abs(_canvasControl.DpiScale - targetDpiScale) > 0.01f)
-        {
-            _canvasControl.DpiScale = targetDpiScale;
-        }
+        EnsureVirtualCanvasCreated(Zq);
 
         _renderCts?.Cancel();
         _renderCts?.Dispose();
         _renderCts = new CancellationTokenSource();
         var ct = _renderCts.Token;
 
-        if (level.Mode == PageRenderMode.FullPage)
-        {
-            if (level.IsBaseLevel)
-            {
-                // Level 0 is already the sharp base representation, zero CPU work needed
-                _activeFullPageEntry?.Release();
-                _activeFullPageEntry = null;
-                _canvasControl.Invalidate();
-            }
-            else
-            {
-                _ = RenderFullPageAsync(level, ct);
-            }
-        }
-        else
-        {
-            _ = RenderTilesAsync(level, ct);
-        }
+        _ = RenderTilesThrottledAsync(level, visibleDip, ct);
     }
 
     private async Task RenderBaseBitmapAsync(CancellationToken ct)
@@ -595,7 +630,7 @@ public sealed class PdfPageCanvas : Grid
                 {
                     _baseBitmapEntry?.Release();
                     _baseBitmapEntry = canvasEntry;
-                    _canvasControl.Invalidate();
+                    _baseCanvas.Invalidate();
                     return;
                 }
             }
@@ -627,20 +662,20 @@ public sealed class PdfPageCanvas : Grid
 
             DispatcherQueue.TryEnqueue(() =>
             {
-                if (ct.IsCancellationRequested || _isUnloaded || PageInfo?.Index != targetPageIndex || EffectiveDocumentId != targetDocId)
-                {
-                    return;
-                }
-
-                CanvasDevice? device = _canvasControl.Device ?? CanvasDevice.GetSharedDevice();
-                if (device is null)
+                if (_isUnloaded || PageInfo?.Index != targetPageIndex || EffectiveDocumentId != targetDocId)
                 {
                     return;
                 }
 
                 try
                 {
-                    CanvasBitmap bitmap = CanvasBitmap.CreateFromBytes(
+                    CanvasDevice? device = CanvasDevice.GetSharedDevice();
+                    if (device is null)
+                    {
+                        return;
+                    }
+
+                    var bitmap = CanvasBitmap.CreateFromBytes(
                         device,
                         pixelData,
                         width,
@@ -650,9 +685,16 @@ public sealed class PdfPageCanvas : Grid
                     CanvasBitmapEntry entry = new(bitmap);
                     _tileCache.Add(in baseKey, entry);
 
-                    _baseBitmapEntry?.Release();
-                    _baseBitmapEntry = entry;
-                    _canvasControl.Invalidate();
+                    if (!ct.IsCancellationRequested)
+                    {
+                        _baseBitmapEntry?.Release();
+                        _baseBitmapEntry = entry;
+                        _baseCanvas.Invalidate();
+                    }
+                    else
+                    {
+                        entry.Release();
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -669,7 +711,7 @@ public sealed class PdfPageCanvas : Grid
         }
     }
 
-    private async Task RenderFullPageAsync(ZoomLevel level, CancellationToken ct)
+    private async Task RenderTilesThrottledAsync(ZoomLevel level, Rect visibleDip, CancellationToken ct)
     {
         if (PageInfo is not { } pageInfo || EffectiveDocumentId <= 0)
         {
@@ -683,230 +725,173 @@ public sealed class PdfPageCanvas : Grid
         int scalePercent = (int)Math.Round(rasterizationScale * 100);
         double Zq = level.Factor;
         int step = level.Step;
+        float effectiveScale = (float)(Zq * rasterizationScale);
 
-        TileKey key = new(
-            targetDocId,
-            targetPageIndex,
-            TileKind.FullPage,
-            ZoomStep: step,
-            TileX: 0,
-            TileY: 0,
-            RenderFlags: 0,
-            Rotation: 0,
-            ScalePercent: scalePercent);
+        (int pageWidth, int pageHeight) = RenderGeometry.GetPagePixelSize(pageInfo, 0, Zq, rasterizationScale);
+        (int cols, int rows) = RenderGeometry.GetTileGrid(pageWidth, pageHeight);
 
-        if (_tileCache.TryGet(in key, out TileCacheEntry? cached))
+        // 1. Margem de pré-carregamento (1 tile ao redor do viewport: ~256/Zq DIPs)
+        double marginDip = 256.0 / Zq;
+        double prefetchLeft = Math.Max(0, visibleDip.X - marginDip);
+        double prefetchTop = Math.Max(0, visibleDip.Y - marginDip);
+        double prefetchRight = Math.Min(pageInfo.DisplayWidthDip, visibleDip.X + visibleDip.Width + marginDip);
+        double prefetchBottom = Math.Min(pageInfo.DisplayHeightDip, visibleDip.Y + visibleDip.Height + marginDip);
+
+        int startTileX = Math.Max(0, (int)Math.Floor(prefetchLeft * effectiveScale / RenderGeometry.TileSizePx));
+        int startTileY = Math.Max(0, (int)Math.Floor(prefetchTop * effectiveScale / RenderGeometry.TileSizePx));
+        int endTileX = Math.Min(cols - 1, (int)Math.Floor(prefetchRight * effectiveScale / RenderGeometry.TileSizePx));
+        int endTileY = Math.Min(rows - 1, (int)Math.Floor(prefetchBottom * effectiveScale / RenderGeometry.TileSizePx));
+
+        // 2. Trava física rígida de no máximo 36 tiles por passe
+        if ((endTileX - startTileX + 1) * (endTileY - startTileY + 1) > MaxTilesPerPass)
         {
-            if (cached is CanvasBitmapEntry canvasEntry)
-            {
-                if (PageInfo?.Index == targetPageIndex && EffectiveDocumentId == targetDocId && !_isUnloaded)
-                {
-                    _activeFullPageEntry?.Release();
-                    _activeFullPageEntry = canvasEntry;
-                    _canvasControl.Invalidate();
-                    return;
-                }
-            }
-            cached?.Release();
+            int centerTileX = (int)Math.Floor((visibleDip.X + visibleDip.Width / 2.0) * effectiveScale / RenderGeometry.TileSizePx);
+            int centerTileY = (int)Math.Floor((visibleDip.Y + visibleDip.Height / 2.0) * effectiveScale / RenderGeometry.TileSizePx);
+            startTileX = Math.Max(0, centerTileX - 3);
+            endTileX = Math.Min(cols - 1, startTileX + 5);
+            startTileY = Math.Max(0, centerTileY - 3);
+            endTileY = Math.Min(rows - 1, startTileY + 5);
         }
 
-        (int pixelWidth, int pixelHeight) = RenderGeometry.ComputeFullPagePixelSize(pageInfo, Zq, rasterizationScale, 0);
+        // 3. Separar em tiles visíveis estritos (prioridade 1) e tiles do anel de prefetch (prioridade 2)
+        int visStartX = Math.Max(0, (int)Math.Floor(visibleDip.X * effectiveScale / RenderGeometry.TileSizePx));
+        int visStartY = Math.Max(0, (int)Math.Floor(visibleDip.Y * effectiveScale / RenderGeometry.TileSizePx));
+        int visEndX = Math.Min(cols - 1, (int)Math.Floor(Math.Max(visibleDip.X, visibleDip.X + visibleDip.Width - 0.001) * effectiveScale / RenderGeometry.TileSizePx));
+        int visEndY = Math.Min(rows - 1, (int)Math.Floor(Math.Max(visibleDip.Y, visibleDip.Y + visibleDip.Height - 0.001) * effectiveScale / RenderGeometry.TileSizePx));
 
-        try
+        List<(int tx, int ty)> orderedTiles = [];
+        List<(int tx, int ty)> prefetchList = [];
+
+        for (int ty = startTileY; ty <= endTileY; ty++)
         {
-            PdfBitmapLease lease = await _pdfService.RenderPageAsync(
+            for (int tx = startTileX; tx <= endTileX; tx++)
+            {
+                if (tx >= visStartX && tx <= visEndX && ty >= visStartY && ty <= visEndY)
+                {
+                    orderedTiles.Add((tx, ty));
+                }
+                else
+                {
+                    prefetchList.Add((tx, ty));
+                }
+            }
+        }
+
+        orderedTiles.AddRange(prefetchList);
+
+        // 4. Renderização controlada e sequencial, checando cancelamento a cada tile
+        foreach ((int tx, int ty) in orderedTiles)
+        {
+            if (ct.IsCancellationRequested || _isUnloaded || _virtualCanvas is null)
+            {
+                return;
+            }
+
+            TileKey key = new(
                 targetDocId,
                 targetPageIndex,
-                pixelWidth,
-                pixelHeight,
-                highPriority: true,
-                ct).ConfigureAwait(false);
+                TileKind.Tile,
+                step,
+                tx,
+                ty,
+                0,
+                0,
+                scalePercent);
 
-            if (ct.IsCancellationRequested)
+            if (_tileCache.TryGet(in key, out TileCacheEntry? existing))
+            {
+                existing?.Release();
+                continue;
+            }
+
+            (int leftPx, int topPx, int widthPx, int heightPx) = RenderGeometry.GetTileRect(pageWidth, pageHeight, tx, ty);
+
+            PdfBitmapLease lease;
+            try
+            {
+                lease = await _pdfService.RenderRegionAsync(
+                    targetDocId,
+                    targetPageIndex,
+                    startXPx: leftPx,
+                    startYPx: topPx,
+                    widthPx: widthPx,
+                    heightPx: heightPx,
+                    totalWidthPx: pageWidth,
+                    totalHeightPx: pageHeight,
+                    highPriority: true,
+                    ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Tile render failed: {ex.Message}");
+                continue;
+            }
+
+            if (ct.IsCancellationRequested || _isUnloaded || _virtualCanvas is null)
             {
                 lease.Dispose();
                 return;
             }
 
             byte[] pixelData = lease.ToPixelArray();
-            int width = lease.Width;
-            int height = lease.Height;
+            int leaseW = lease.Width;
+            int leaseH = lease.Height;
             lease.Dispose();
 
             DispatcherQueue.TryEnqueue(() =>
             {
-                if (ct.IsCancellationRequested || _isUnloaded || PageInfo?.Index != targetPageIndex || EffectiveDocumentId != targetDocId)
-                {
-                    return;
-                }
-
-                CanvasDevice? device = _canvasControl.Device ?? CanvasDevice.GetSharedDevice();
-                if (device is null)
+                if (_isUnloaded || PageInfo?.Index != targetPageIndex || EffectiveDocumentId != targetDocId)
                 {
                     return;
                 }
 
                 try
                 {
-                    CanvasBitmap bitmap = CanvasBitmap.CreateFromBytes(
-                        device,
-                        pixelData,
-                        width,
-                        height,
-                        DirectXPixelFormat.B8G8R8A8UIntNormalized);
-
-                    CanvasBitmapEntry entry = new(bitmap);
-                    _tileCache.Add(in key, entry);
-
-                    _activeFullPageEntry?.Release();
-                    _activeFullPageEntry = entry;
-                    _canvasControl.Invalidate();
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Full page upload failed: {ex.Message}");
-                }
-            });
-        }
-        catch (OperationCanceledException)
-        {
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"Full page render failed: {ex.Message}");
-        }
-    }
-
-    private async Task RenderTilesAsync(ZoomLevel level, CancellationToken ct)
-    {
-        if (PageInfo is not { } pageInfo || EffectiveDocumentId <= 0)
-        {
-            return;
-        }
-
-        int targetPageIndex = pageInfo.Index;
-        long targetDocId = EffectiveDocumentId;
-
-        double rasterizationScale = XamlRoot?.RasterizationScale ?? 1.0;
-        int scalePercent = (int)Math.Round(rasterizationScale * 100);
-        double Zq = level.Factor;
-        int step = level.Step;
-
-        (int pageWidth, int pageHeight) = RenderGeometry.GetPagePixelSize(pageInfo, 0, Zq, rasterizationScale);
-        (int cols, int rows) = RenderGeometry.GetTileGrid(pageWidth, pageHeight);
-
-        float effectiveScale = (float)(Zq * rasterizationScale);
-        Rect visibleRect = GetVisibleRectInPageDips();
-        if (visibleRect.IsEmpty || visibleRect.Width <= 0 || visibleRect.Height <= 0)
-        {
-            visibleRect = new Rect(0, 0, pageInfo.DisplayWidthDip, pageInfo.DisplayHeightDip);
-        }
-
-        int startTileX = Math.Max(0, (int)Math.Floor(visibleRect.X * effectiveScale / RenderGeometry.TileSizePx));
-        int startTileY = Math.Max(0, (int)Math.Floor(visibleRect.Y * effectiveScale / RenderGeometry.TileSizePx));
-        int endTileX = Math.Min(cols - 1, (int)Math.Floor((visibleRect.X + visibleRect.Width) * effectiveScale / RenderGeometry.TileSizePx));
-        int endTileY = Math.Min(rows - 1, (int)Math.Floor((visibleRect.Y + visibleRect.Height) * effectiveScale / RenderGeometry.TileSizePx));
-
-        for (int ty = startTileY; ty <= endTileY; ty++)
-        {
-            for (int tx = startTileX; tx <= endTileX; tx++)
-            {
-                if (ct.IsCancellationRequested || _isUnloaded)
-                {
-                    return;
-                }
-
-                (int leftPx, int topPx, int widthPx, int heightPx) = RenderGeometry.GetTileRect(pageWidth, pageHeight, tx, ty);
-
-                TileKey key = new(
-                    targetDocId,
-                    targetPageIndex,
-                    TileKind.Tile,
-                    step,
-                    tx,
-                    ty,
-                    0,
-                    0,
-                    scalePercent);
-
-                if (_tileCache.TryGet(in key, out TileCacheEntry? existing))
-                {
-                    existing?.Release();
-                    continue;
-                }
-
-                try
-                {
-                    PdfBitmapLease lease = await _pdfService.RenderRegionAsync(
-                        targetDocId,
-                        targetPageIndex,
-                        startXPx: leftPx,
-                        startYPx: topPx,
-                        widthPx: widthPx,
-                        heightPx: heightPx,
-                        totalWidthPx: pageWidth,
-                        totalHeightPx: pageHeight,
-                        highPriority: true,
-                        ct).ConfigureAwait(false);
-
-                    if (ct.IsCancellationRequested)
+                    CanvasDevice? device = CanvasDevice.GetSharedDevice();
+                    if (device is null)
                     {
-                        lease.Dispose();
                         return;
                     }
 
-                    byte[] pixelData = lease.ToPixelArray();
-                    int leaseWidth = lease.Width;
-                    int leaseHeight = lease.Height;
-                    lease.Dispose();
+                    var cb = CanvasBitmap.CreateFromBytes(
+                        device,
+                        pixelData,
+                        leaseW,
+                        leaseH,
+                        DirectXPixelFormat.B8G8R8A8UIntNormalized);
 
-                    DispatcherQueue.TryEnqueue(() =>
+                    CanvasBitmapEntry entry = new(cb);
+                    _tileCache.Add(in key, entry);
+                    entry.Release();
+
+                    if (!ct.IsCancellationRequested && _virtualCanvas is not null)
                     {
-                        if (ct.IsCancellationRequested || _isUnloaded || PageInfo?.Index != targetPageIndex || EffectiveDocumentId != targetDocId)
-                        {
-                            return;
-                        }
+                        Rect tileRectDip = new(
+                            leftPx / effectiveScale,
+                            topPx / effectiveScale,
+                            widthPx / effectiveScale,
+                            heightPx / effectiveScale);
 
-                        CanvasDevice? device = _canvasControl.Device ?? CanvasDevice.GetSharedDevice();
-                        if (device is null)
-                        {
-                            return;
-                        }
-
-                        try
-                        {
-                            CanvasBitmap cb = CanvasBitmap.CreateFromBytes(
-                                device,
-                                pixelData,
-                                leaseWidth,
-                                leaseHeight,
-                                DirectXPixelFormat.B8G8R8A8UIntNormalized);
-
-                            CanvasBitmapEntry entry = new(cb);
-                            _tileCache.Add(in key, entry);
-                            entry.Release();
-
-                            _canvasControl.Invalidate();
-                        }
-                        catch (Exception ex)
-                        {
-                            Debug.WriteLine($"Tile upload failed: {ex.Message}");
-                        }
-                    });
-                }
-                catch (OperationCanceledException)
-                {
-                    return;
+                        _virtualCanvas.Invalidate(tileRectDip);
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Debug.WriteLine($"Tile render failed: {ex.Message}");
+                    Debug.WriteLine($"Tile upload failed: {ex.Message}");
                 }
-            }
+            });
         }
     }
 
-    private Rect GetVisibleRectInPageDips()
+    /// <summary>
+    /// Calculates the visible portion of this page in page DIPs intersecting the parent ScrollViewer viewport.
+    /// Returns <see cref="Rect.Empty"/> if off-screen.
+    /// </summary>
+    public Rect GetVisibleRectInPageDips()
     {
         if (PageInfo is null)
         {
@@ -922,38 +907,64 @@ public sealed class PdfPageCanvas : Grid
             }
 
             var transform = TransformToVisual(scrollViewer);
-            Point pageTopLeftInScrollViewer = transform.TransformPoint(new Point(0, 0));
-            double zoom = Math.Max(0.1, scrollViewer.ZoomFactor);
+            Point pageP0 = transform.TransformPoint(new Point(0, 0));
+            Point pageP1 = transform.TransformPoint(new Point(PageInfo.DisplayWidthDip, PageInfo.DisplayHeightDip));
 
-            double viewLeft = scrollViewer.HorizontalOffset;
-            double viewTop = scrollViewer.VerticalOffset;
-            double viewWidth = scrollViewer.ViewportWidth;
-            double viewHeight = scrollViewer.ViewportHeight;
+            double pageLeftInViewport = Math.Min(pageP0.X, pageP1.X);
+            double pageTopInViewport = Math.Min(pageP0.Y, pageP1.Y);
+            double pageRightInViewport = Math.Max(pageP0.X, pageP1.X);
+            double pageBottomInViewport = Math.Max(pageP0.Y, pageP1.Y);
 
-            double visibleLeft = Math.Max(0, (viewLeft - pageTopLeftInScrollViewer.X) / zoom);
-            double visibleTop = Math.Max(0, (viewTop - pageTopLeftInScrollViewer.Y) / zoom);
-            double visibleRight = Math.Min(PageInfo.DisplayWidthDip, (viewLeft + viewWidth - pageTopLeftInScrollViewer.X) / zoom);
-            double visibleBottom = Math.Min(PageInfo.DisplayHeightDip, (viewTop + viewHeight - pageTopLeftInScrollViewer.Y) / zoom);
+            double pageWidthInViewport = pageRightInViewport - pageLeftInViewport;
+            double pageHeightInViewport = pageBottomInViewport - pageTopInViewport;
 
-            if (visibleRight <= visibleLeft || visibleBottom <= visibleTop)
+            if (pageWidthInViewport <= 0.001 || pageHeightInViewport <= 0.001)
             {
                 return Rect.Empty;
             }
 
-            return new Rect(visibleLeft, visibleTop, visibleRight - visibleLeft, visibleBottom - visibleTop);
+            double viewportWidth = scrollViewer.ViewportWidth > 0 ? scrollViewer.ViewportWidth : scrollViewer.ActualWidth;
+            double viewportHeight = scrollViewer.ViewportHeight > 0 ? scrollViewer.ViewportHeight : scrollViewer.ActualHeight;
+
+            if (viewportWidth <= 0.001 || viewportHeight <= 0.001)
+            {
+                return Rect.Empty;
+            }
+
+            double intersectLeft = Math.Max(0, pageLeftInViewport);
+            double intersectTop = Math.Max(0, pageTopInViewport);
+            double intersectRight = Math.Min(viewportWidth, pageRightInViewport);
+            double intersectBottom = Math.Min(viewportHeight, pageBottomInViewport);
+
+            double intersectW = intersectRight - intersectLeft;
+            double intersectH = intersectBottom - intersectTop;
+
+            if (intersectW <= 1.0 || intersectH <= 1.0)
+            {
+                return Rect.Empty;
+            }
+
+            double visLeft = (intersectLeft - pageLeftInViewport) / pageWidthInViewport * PageInfo.DisplayWidthDip;
+            double visTop = (intersectTop - pageTopInViewport) / pageHeightInViewport * PageInfo.DisplayHeightDip;
+            double visWidth = intersectW / pageWidthInViewport * PageInfo.DisplayWidthDip;
+            double visHeight = intersectH / pageHeightInViewport * PageInfo.DisplayHeightDip;
+
+            visLeft = Math.Clamp(visLeft, 0, PageInfo.DisplayWidthDip);
+            visTop = Math.Clamp(visTop, 0, PageInfo.DisplayHeightDip);
+            visWidth = Math.Clamp(visWidth, 0, PageInfo.DisplayWidthDip - visLeft);
+            visHeight = Math.Clamp(visHeight, 0, PageInfo.DisplayHeightDip - visTop);
+
+            if (visWidth <= 1.0 || visHeight <= 1.0)
+            {
+                return Rect.Empty;
+            }
+
+            return new Rect(visLeft, visTop, visWidth, visHeight);
         }
         catch
         {
-            return new Rect(0, 0, PageInfo.DisplayWidthDip, PageInfo.DisplayHeightDip);
+            return Rect.Empty;
         }
-    }
-
-    private static bool RectIntersects(Rect a, Rect b)
-    {
-        return a.X < b.X + b.Width &&
-               a.X + a.Width > b.X &&
-               a.Y < b.Y + b.Height &&
-               a.Y + a.Height > b.Y;
     }
 
     private static T? FindAncestor<T>(DependencyObject current) where T : DependencyObject
@@ -985,8 +996,5 @@ public sealed class PdfPageCanvas : Grid
     {
         _baseBitmapEntry?.Release();
         _baseBitmapEntry = null;
-
-        _activeFullPageEntry?.Release();
-        _activeFullPageEntry = null;
     }
 }
