@@ -29,8 +29,15 @@ public partial class App : Application
     /// </summary>
     public App()
     {
+        UnhandledException += OnAppUnhandledException;
         InitializeComponent();
         _services = ConfigureServices();
+    }
+
+    private void OnAppUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
+    {
+        System.Diagnostics.Debug.WriteLine($"[CRITICAL] Unhandled XAML exception caught safely: {e.Message}\n{e.Exception}");
+        e.Handled = true;
     }
 
     private static IServiceProvider ConfigureServices()
@@ -59,6 +66,12 @@ public partial class App : Application
     /// <param name="args">Details about the launch request and arguments.</param>
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        if (_mainWindow is not null)
+        {
+            _mainWindow.Activate();
+            return;
+        }
+
         _mainWindow = new MainWindow();
 
         // Initialize window context for pickers and dialogs

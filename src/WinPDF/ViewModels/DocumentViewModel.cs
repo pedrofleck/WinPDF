@@ -282,6 +282,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         if (Thumbnails.Count > 0)
         {
             Thumbnails[0].IsSelected = true;
+            Thumbnails[0].IsCurrentPage = true;
         }
 
         foreach (OutlineItem item in outline)
@@ -309,22 +310,30 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         return viewModel;
     }
 
-    // Fits the page's aspect ratio inside the sidebar card (140x180 DIPs minus its 4 DIP inner margin).
+    // Fits the page's aspect ratio within a max box of 112 × 148 DIPs.
     private static (double Width, double Height) FitThumbnail(PdfPageInfo page)
     {
-        double width = page.DisplayWidthDip;
-        double height = page.DisplayHeightDip;
-        if (width <= 0 || height <= 0)
+        double widthPt = page.WidthPt > 0 ? page.WidthPt : page.DisplayWidthDip;
+        double heightPt = page.HeightPt > 0 ? page.HeightPt : page.DisplayHeightDip;
+        if (widthPt <= 0 || heightPt <= 0)
         {
-            return (ThumbnailBoxWidthDip, ThumbnailBoxHeightDip);
+            return (112.0, 148.0);
         }
 
-        double scale = Math.Min(ThumbnailBoxWidthDip / width, ThumbnailBoxHeightDip / height);
-        return (Math.Max(1, Math.Round(width * scale)), Math.Max(1, Math.Round(height * scale)));
+        double aspect = widthPt / heightPt;
+        if (aspect <= 1.0)
+        {
+            double h = 148.0;
+            double w = Math.Clamp(Math.Round(148.0 * aspect), 60.0, 112.0);
+            return (w, h);
+        }
+        else
+        {
+            double w = 112.0;
+            double h = Math.Clamp(Math.Round(112.0 / aspect), 60.0, 148.0);
+            return (w, h);
+        }
     }
-
-    private const double ThumbnailBoxWidthDip = 132;
-    private const double ThumbnailBoxHeightDip = 172;
 
     private readonly IPdfService _pdfService;
     private readonly TileCache _tileCache;
@@ -333,7 +342,21 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     private double _thumbnailScale = 1.0;
     private bool _isDisposed;
 
-    private int _previousSelectedThumbnailIndex = 0;
+    /// <summary>
+    /// Gets or sets the fractional page index currently visible at the center of the viewport (e.g. 3.5).
+    /// </summary>
+    [ObservableProperty]
+    public partial double FractionalPageIndex { get; set; }
+
+    /// <summary>
+    /// Gets or sets the last horizontal scroll offset saved for state preservation.
+    /// </summary>
+    public double LastHorizontalOffset { get; set; }
+
+    /// <summary>
+    /// Gets or sets the last vertical scroll offset saved for state preservation.
+    /// </summary>
+    public double LastVerticalOffset { get; set; }
 
     partial void OnCurrentPageIndexChanged(int value)
     {
@@ -344,17 +367,12 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             UpdateDisplayedRows();
         }
 
-        if (_previousSelectedThumbnailIndex >= 0 && _previousSelectedThumbnailIndex < Thumbnails.Count && _previousSelectedThumbnailIndex != value)
+        for (int i = 0; i < Thumbnails.Count; i++)
         {
-            Thumbnails[_previousSelectedThumbnailIndex].IsSelected = false;
+            bool isCur = (i == value);
+            Thumbnails[i].IsSelected = isCur;
+            Thumbnails[i].IsCurrentPage = isCur;
         }
-
-        if (value >= 0 && value < Thumbnails.Count)
-        {
-            Thumbnails[value].IsSelected = true;
-        }
-
-        _previousSelectedThumbnailIndex = value;
 
         UpdateIsCurrentPageBookmarked();
     }

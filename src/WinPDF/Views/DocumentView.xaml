@@ -74,16 +74,17 @@
                 <ScrollViewer
                     x:Name="ContinuousScrollViewer"
                     HorizontalScrollBarVisibility="Auto"
+                    HorizontalScrollMode="Enabled"
+                    VerticalScrollMode="Enabled"
                     MaxZoomFactor="8.0"
                     MinZoomFactor="0.25"
                     VerticalScrollBarVisibility="Visible"
                     ViewChanging="OnScrollViewerViewChanging"
                     ViewChanged="OnScrollViewerViewChanged"
-                    PointerWheelChanged="OnScrollViewerPointerWheelChanged"
                     ZoomMode="Enabled">
                     <ItemsRepeater
                         x:Name="ContinuousPagesRepeater"
-                        Margin="{x:Bind converters:UiHelpers.RepeaterMargin(ViewModel.IsPresentationMode), Mode=OneWay}"
+                        Margin="{x:Bind converters:UiHelpers.RepeaterMargin(ViewModel.IsPresentationMode, ViewModel.CurrentDocument.IsContinuous), Mode=OneWay}"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         ItemsSource="{x:Bind ViewModel.CurrentDocument.DisplayedRows, Mode=OneWay}">
@@ -137,73 +138,123 @@
                     </ItemsRepeater>
                 </ScrollViewer>
 
-                <!-- Botões de Navegação Lateral (Modo Não Contínuo / Slide) -->
-                <Button
-                    x:Name="PrevPageFloatingButton"
+                <!-- Faixas Laterais de 80 DIPs de Navegação Estilo 'Fotos' -->
+                <Grid
+                    x:Name="PrevPageZone"
                     HorizontalAlignment="Left"
-                    VerticalAlignment="Center"
-                    Margin="16,0,0,0"
-                    Width="40"
-                    Height="60"
-                    CornerRadius="20"
-                    Click="OnPrevPageFloatingClick"
-                    Style="{StaticResource SubtleButtonStyle}"
-                    Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1"
+                    VerticalAlignment="Stretch"
+                    Width="80"
+                    Background="Transparent"
                     Translation="0,0,24"
+                    PointerEntered="OnPrevZonePointerEntered"
+                    PointerExited="OnPrevZonePointerExited"
+                    Tapped="OnPrevZoneTapped"
                     Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.CurrentDocument.IsContinuous), Mode=OneWay}">
-                    <FontIcon Glyph="&#xE76B;" FontSize="16" />
-                </Button>
+                    <Border
+                        x:Name="PrevPageArrowPill"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Width="36"
+                        Height="64"
+                        CornerRadius="6"
+                        Opacity="0"
+                        Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1">
+                        <Border.OpacityTransition>
+                            <ScalarTransition Duration="0:0:0.15" />
+                        </Border.OpacityTransition>
+                        <FontIcon Glyph="&#xE76B;" FontSize="16" Foreground="{ThemeResource TextFillColorPrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                </Grid>
 
-                <Button
-                    x:Name="NextPageFloatingButton"
+                <Grid
+                    x:Name="NextPageZone"
                     HorizontalAlignment="Right"
-                    VerticalAlignment="Center"
-                    Margin="0,0,16,0"
-                    Width="40"
-                    Height="60"
-                    CornerRadius="20"
-                    Click="OnNextPageFloatingClick"
-                    Style="{StaticResource SubtleButtonStyle}"
-                    Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1"
+                    VerticalAlignment="Stretch"
+                    Width="80"
+                    Background="Transparent"
                     Translation="0,0,24"
+                    PointerEntered="OnNextZonePointerEntered"
+                    PointerExited="OnNextZonePointerExited"
+                    Tapped="OnNextZoneTapped"
                     Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.CurrentDocument.IsContinuous), Mode=OneWay}">
-                    <FontIcon Glyph="&#xE76C;" FontSize="16" />
-                </Button>
+                    <Border
+                        x:Name="NextPageArrowPill"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Width="36"
+                        Height="64"
+                        CornerRadius="6"
+                        Opacity="0"
+                        Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1">
+                        <Border.OpacityTransition>
+                            <ScalarTransition Duration="0:0:0.15" />
+                        </Border.OpacityTransition>
+                        <FontIcon Glyph="&#xE76C;" FontSize="16" Foreground="{ThemeResource TextFillColorPrimaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                </Grid>
 
-                <!-- Botão Flutuante de Sair da Apresentação (F5 / Esc) -->
+                <!-- Aviso Inicial de Modo Apresentação (Desaparece após 3s) -->
                 <Border
                     x:Name="ExitPresentationOverlay"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Top"
-                    Margin="0,16,0,0"
+                    Margin="0,24,0,0"
                     CornerRadius="8"
                     Background="#D0181818"
                     BorderBrush="#40FFFFFF"
                     BorderThickness="1"
                     Translation="0,0,32"
+                    IsHitTestVisible="False"
                     Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsPresentationMode), Mode=OneWay}">
+                    <Border.OpacityTransition>
+                        <ScalarTransition Duration="0:0:0.4" />
+                    </Border.OpacityTransition>
                     <Border.Shadow>
                         <ThemeShadow />
                     </Border.Shadow>
-                    <Button
-                        Style="{StaticResource SubtleButtonStyle}"
-                        Command="{x:Bind ViewModel.ExitPresentationCommand}"
-                        Padding="12,6"
-                        CornerRadius="8">
-                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                            <FontIcon Glyph="&#xE711;" FontSize="13" Foreground="White" />
-                            <TextBlock
-                                Text="{x:Bind ExitPresentationText, Mode=OneTime}"
-                                FontSize="12"
-                                Foreground="White"
-                                VerticalAlignment="Center" />
-                        </StackPanel>
-                    </Button>
+                    <StackPanel Orientation="Horizontal" Spacing="8" Padding="14,8" VerticalAlignment="Center">
+                        <FontIcon Glyph="&#xE711;" FontSize="13" Foreground="White" />
+                        <TextBlock
+                            Text="{x:Bind ExitPresentationText, Mode=OneTime}"
+                            FontSize="12"
+                            Foreground="White"
+                            VerticalAlignment="Center" />
+                    </StackPanel>
                 </Border>
+
+                <!-- Zona Superior Clicável de 80 DIPs para Sair da Apresentação com Botão Sutil ao Hover -->
+                <Grid
+                    x:Name="ExitPresentationTopZone"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Top"
+                    Height="80"
+                    Background="Transparent"
+                    Translation="0,0,33"
+                    PointerEntered="OnExitPresentationZonePointerEntered"
+                    PointerExited="OnExitPresentationZonePointerExited"
+                    Tapped="OnExitPresentationZoneTapped"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsPresentationMode), Mode=OneWay}">
+                    <Border
+                        x:Name="ExitPresentationCloseBtnPill"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Width="44"
+                        Height="32"
+                        CornerRadius="0,0,8,8"
+                        Opacity="0"
+                        Background="#80181818"
+                        BorderBrush="#30FFFFFF"
+                        BorderThickness="1,0,1,1">
+                        <Border.OpacityTransition>
+                            <ScalarTransition Duration="0:0:0.15" />
+                        </Border.OpacityTransition>
+                        <FontIcon Glyph="&#xE711;" FontSize="14" Foreground="White" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                </Grid>
 
                 <!-- Barra Flutuante de Ferramentas de Anotação (Topo Centralizado) -->
                 <Border
@@ -350,11 +401,12 @@
                             Command="{x:Bind ViewModel.ShowPropertiesCommand}"
                             ToolTipService.ToolTip="{x:Bind PropertiesToolTipText, Mode=OneTime}">
                             <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                <FontIcon Glyph="&#xE946;" FontSize="12" />
-                                <FontIcon Glyph="&#xE74E;" FontSize="12" />
+                                <FontIcon Glyph="&#xE946;" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <FontIcon Glyph="&#xE74E;" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <TextBlock
                                     Text="{x:Bind ViewModel.CurrentDocument.FormattedFileSize, Mode=OneWay}"
                                     FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                     VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>

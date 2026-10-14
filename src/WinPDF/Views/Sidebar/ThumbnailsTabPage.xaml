@@ -4,6 +4,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:WinPDF.Controls"
+    xmlns:converters="using:WinPDF.Converters"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="using:WinPDF.ViewModels"
@@ -11,49 +12,71 @@
     mc:Ignorable="d">
 
     <Grid Background="Transparent">
-        <ListView
-            x:Name="ThumbnailsList"
-            Padding="4"
-            ItemsSource="{x:Bind ViewModel.CurrentDocument.Thumbnails, Mode=OneWay}"
-            ContainerContentChanging="OnThumbnailsContainerContentChanging"
-            SelectionChanged="OnThumbnailSelectionChanged"
-            SelectionMode="Single">
-            <ListView.ItemsPanel>
-                <ItemsPanelTemplate>
-                    <ItemsStackPanel Orientation="Vertical" />
-                </ItemsPanelTemplate>
-            </ListView.ItemsPanel>
-            <ListView.ItemTemplate>
-                <DataTemplate x:DataType="vm:ThumbnailItemViewModel">
-                    <StackPanel
-                        Margin="4,6,4,6"
-                        HorizontalAlignment="Center"
-                        Spacing="4">
-                        <Border
-                            Width="140"
-                            Height="180"
-                            Background="{ThemeResource LayerFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            CornerRadius="4">
-                            <Grid>
-                                <FontIcon
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center"
-                                    FontSize="32"
-                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                    Glyph="&#xE8A5;" />
-                                <controls:ThumbnailPresenter Item="{x:Bind}" />
-                            </Grid>
-                        </Border>
-                        <TextBlock
+        <ScrollViewer
+            x:Name="ThumbnailsScrollViewer"
+            MinWidth="120"
+            Padding="12,8,12,8"
+            HorizontalScrollBarVisibility="Disabled"
+            VerticalScrollBarVisibility="Auto"
+            SizeChanged="OnThumbnailsScrollViewerSizeChanged"
+            PointerEntered="OnThumbnailsPointerEntered"
+            PointerExited="OnThumbnailsPointerExited"
+            PointerWheelChanged="OnThumbnailsPointerWheelChanged"
+            ViewChanging="OnThumbnailsScrollViewerViewChanging">
+            <ItemsRepeater
+                x:Name="ThumbnailsRepeater"
+                ItemsSource="{x:Bind ViewModel.CurrentDocument.Thumbnails, Mode=OneWay}"
+                ElementPrepared="OnThumbnailsElementPrepared"
+                ElementClearing="OnThumbnailsElementClearing">
+                <ItemsRepeater.Layout>
+                    <UniformGridLayout
+                        x:Name="ThumbnailsLayout"
+                        MinItemWidth="50"
+                        MinRowSpacing="8"
+                        MinColumnSpacing="10"
+                        ItemsStretch="Fill"
+                        MaximumRowsOrColumns="2" />
+                </ItemsRepeater.Layout>
+                <ItemsRepeater.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ThumbnailItemViewModel">
+                        <StackPanel
+                            DataContext="{x:Bind}"
+                            Spacing="4"
                             HorizontalAlignment="Center"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Style="{StaticResource CaptionTextBlockStyle}"
-                            Text="{x:Bind DisplayNumber}" />
-                    </StackPanel>
-                </DataTemplate>
-            </ListView.ItemTemplate>
-        </ListView>
+                            VerticalAlignment="Top"
+                            Tapped="OnThumbnailTapped"
+                            Background="Transparent"
+                            IsHitTestVisible="True">
+                            <Border
+                                Width="{x:Bind WidthDip, Mode=OneWay}"
+                                Height="{x:Bind HeightDip, Mode=OneWay}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                BorderBrush="{x:Bind converters:UiHelpers.ThumbnailBorderBrush(IsCurrentPage), Mode=OneWay}"
+                                BorderThickness="{x:Bind converters:UiHelpers.ThumbnailBorderThickness(IsCurrentPage), Mode=OneWay}"
+                                CornerRadius="4"
+                                IsHitTestVisible="True">
+                                <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Background="Transparent">
+                                    <FontIcon
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        FontSize="28"
+                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                        Glyph="&#xE8A5;" />
+                                    <controls:ThumbnailPresenter Item="{x:Bind}" />
+                                </Grid>
+                            </Border>
+                            <TextBlock
+                                HorizontalAlignment="Center"
+                                Text="{x:Bind DisplayNumber}"
+                                Style="{StaticResource CaptionTextBlockStyle}"
+                                FontWeight="{x:Bind converters:UiHelpers.ThumbnailFontWeight(IsCurrentPage), Mode=OneWay}"
+                                Foreground="{x:Bind converters:UiHelpers.ThumbnailNumberForeground(IsCurrentPage), Mode=OneWay}" />
+                        </StackPanel>
+                    </DataTemplate>
+                </ItemsRepeater.ItemTemplate>
+            </ItemsRepeater>
+        </ScrollViewer>
     </Grid>
 </Page>

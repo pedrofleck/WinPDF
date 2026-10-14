@@ -57,6 +57,7 @@
   <data name="Menu_OddPagesLeft.Text" xml:space="preserve"><value>Odd pages on left</value></data>
   <data name="Menu_Rtl.Text" xml:space="preserve"><value>Right-to-left document</value></data>
   <data name="Menu_Rotate.Text" xml:space="preserve"><value>Rotate</value></data>
+  <data name="Menu_NightMode.Text" xml:space="preserve"><value>Night mode</value></data>
   <data name="Menu_DocumentProperties.Text" xml:space="preserve"><value>Document properties</value></data>
   <data name="FilePicker_PdfFileType" xml:space="preserve"><value>PDF document</value></data>
 

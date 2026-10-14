@@ -84,6 +84,25 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty]
     public partial AppThemePreference CurrentTheme { get; set; } = AppThemePreference.System;
 
+    partial void OnCurrentThemeChanged(AppThemePreference value)
+    {
+        OnPropertyChanged(nameof(IsNightMode));
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether dark night mode is currently active.
+    /// </summary>
+    public bool IsNightMode => CurrentTheme == AppThemePreference.Dark;
+
+    /// <summary>
+    /// Toggles between night / dark mode and light mode.
+    /// </summary>
+    [RelayCommand]
+    public void ToggleNightMode()
+    {
+        CurrentTheme = (CurrentTheme == AppThemePreference.Dark) ? AppThemePreference.Light : AppThemePreference.Dark;
+    }
+
     /// <summary>
     /// Gets or sets a value indicating whether the full-page settings view is open.
     /// </summary>
@@ -159,6 +178,8 @@ public sealed partial class ShellViewModel : ObservableObject
         }
     }
 
+    private bool _sidebarOpenBeforePresentation;
+
     /// <summary>
     /// Gets or sets a value indicating whether slide presentation mode is active (F5).
     /// </summary>
@@ -170,6 +191,12 @@ public sealed partial class ShellViewModel : ObservableObject
         if (CurrentDocument is not null)
         {
             CurrentDocument.IsPresentationMode = value;
+        }
+
+        if (!value && _sidebarOpenBeforePresentation)
+        {
+            IsSidebarOpen = true;
+            _sidebarOpenBeforePresentation = false;
         }
     }
 
@@ -425,6 +452,7 @@ public sealed partial class ShellViewModel : ObservableObject
             return;
         }
 
+        _sidebarOpenBeforePresentation = IsSidebarOpen;
         IsSidebarOpen = false;
         CurrentDocument.IsContinuous = false;
         CurrentDocument.IsDoublePage = false;

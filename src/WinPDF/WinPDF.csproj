@@ -8,12 +8,13 @@
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <RootNamespace>WinPDF</RootNamespace>
     <AssemblyName>WinPDF</AssemblyName>
-    <Version>0.1.1-alpha.1</Version>
+    <Version>0.2.0-alpha.2</Version>
     <Product>WinPDF</Product>
     <AssemblyTitle>WinPDF</AssemblyTitle>
     <Description>Lightweight Fluent 2 PDF Reader</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <Platforms>x64;x86;ARM64</Platforms>
+    <ApplicationIcon>Assets\appicon.ico</ApplicationIcon>
     <RuntimeIdentifiers>win-x64;win-x86;win-arm64</RuntimeIdentifiers>
     <UseWinUI>true</UseWinUI>
     <EnableMsixTooling>true</EnableMsixTooling>
@@ -28,6 +29,9 @@
 
     <!-- Required by [LibraryImport] source-generated PDFium bindings. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- Prevent generated Debugger.Break on unhandled exceptions so App.UnhandledException handles them gracefully -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_BREAK_ON_UNHANDLED_EXCEPTION</DefineConstants>
   </PropertyGroup>
 
   <!-- Default to x64 when no platform is supplied (WinUI cannot build as AnyCPU). -->

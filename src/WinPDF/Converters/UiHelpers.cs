@@ -142,7 +142,27 @@ public static class UiHelpers
             ? new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 0, 0, 0))
             : (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["SolidBackgroundFillColorBaseBrush"];
 
-    /// <summary>Returns page repeater margin depending on presentation mode.</summary>
-    public static Thickness RepeaterMargin(bool isPresentation) =>
-        isPresentation ? new Thickness(0) : new Thickness(24);
+    /// <summary>Returns page repeater margin depending on presentation mode and continuous scrolling.</summary>
+    public static Thickness RepeaterMargin(bool isPresentation, bool isContinuous) =>
+        (isPresentation || !isContinuous) ? new Thickness(0) : new Thickness(24);
+
+    /// <summary>Returns border thickness for thumbnail card depending on current page state.</summary>
+    public static Thickness ThumbnailBorderThickness(bool isCurrent) =>
+        isCurrent ? new Thickness(2) : new Thickness(1);
+
+    /// <summary>Returns border brush for thumbnail card depending on current page state.</summary>
+    public static Microsoft.UI.Xaml.Media.Brush ThumbnailBorderBrush(bool isCurrent) =>
+        isCurrent
+            ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["AccentFillColorDefaultBrush"]
+            : (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
+
+    /// <summary>Returns font weight for thumbnail number label depending on current page state.</summary>
+    public static Windows.UI.Text.FontWeight ThumbnailFontWeight(bool isCurrent) =>
+        isCurrent ? Microsoft.UI.Text.FontWeights.Bold : Microsoft.UI.Text.FontWeights.Normal;
+
+    /// <summary>Returns foreground brush for thumbnail number label depending on current page state.</summary>
+    public static Microsoft.UI.Xaml.Media.Brush ThumbnailNumberForeground(bool isCurrent) =>
+        isCurrent
+            ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["AccentTextFillColorPrimaryBrush"]
+            : (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
 }

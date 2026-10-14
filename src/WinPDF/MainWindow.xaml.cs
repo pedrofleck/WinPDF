@@ -23,7 +23,7 @@ namespace WinPDF;
 public sealed partial class MainWindow : Window
 {
     private const double CompactBreakpoint = 768.0;
-    private const double MinSidebarWidth = 220.0;
+    private const double MinSidebarWidth = 180.0;
     private const double MaxSidebarWidth = 480.0;
     private const double DefaultSidebarWidth = 260.0;
 
@@ -51,6 +51,8 @@ public sealed partial class MainWindow : Window
         // Custom TitleBar integration with Mica
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
+
+        AppWindow.SetIcon("Assets/appicon.ico");
 
         if (AppWindowTitleBar.IsCustomizationSupported())
         {
@@ -95,6 +97,7 @@ public sealed partial class MainWindow : Window
         {
             root.Loaded += (_, _) =>
             {
+                SetInitialWindowBounds();
                 UpdateTitleBarTheme();
                 UpdateTitleBarInsets();
                 UpdateTitleBarNonClientRegions();
@@ -113,6 +116,39 @@ public sealed partial class MainWindow : Window
                     };
                 }
             };
+        }
+    }
+
+    private bool _hasSetInitialBounds;
+
+    private void SetInitialWindowBounds()
+    {
+        if (_hasSetInitialBounds)
+        {
+            return;
+        }
+
+        _hasSetInitialBounds = true;
+        double scale = Content?.XamlRoot?.RasterizationScale ?? 1.0;
+        var displayArea = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary);
+
+        int targetWidthDip = 1280;
+        int targetHeightDip = 800;
+
+        int targetWidthPx = (int)Math.Round(targetWidthDip * scale);
+        int targetHeightPx = (int)Math.Round(targetHeightDip * scale);
+
+        if (displayArea is not null)
+        {
+            targetWidthPx = Math.Min(targetWidthPx, (int)(displayArea.WorkArea.Width * 0.90));
+            targetHeightPx = Math.Min(targetHeightPx, (int)(displayArea.WorkArea.Height * 0.90));
+            int x = displayArea.WorkArea.X + ((displayArea.WorkArea.Width - targetWidthPx) / 2);
+            int y = displayArea.WorkArea.Y + ((displayArea.WorkArea.Height - targetHeightPx) / 2);
+            AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(x, y, targetWidthPx, targetHeightPx));
+        }
+        else
+        {
+            AppWindow.Resize(new Windows.Graphics.SizeInt32(targetWidthPx, targetHeightPx));
         }
     }
 
@@ -341,7 +377,14 @@ public sealed partial class MainWindow : Window
             }
             else
             {
-                MainContentFrame.Navigate(typeof(DocumentView), ViewModel, new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromLeft });
+                if (MainContentFrame.CanGoBack)
+                {
+                    MainContentFrame.GoBack(new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromLeft });
+                }
+                else
+                {
+                    MainContentFrame.Navigate(typeof(DocumentView), ViewModel, new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromLeft });
+                }
             }
 
             DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
@@ -370,7 +413,7 @@ public sealed partial class MainWindow : Window
     {
         if (isFullScreen)
         {
-            if (ViewModel.IsPresentationMode)
+            if (!ViewModel.IsPresentationMode)
             {
                 _sidebarOpenBeforeFullScreen = ViewModel.IsSidebarOpen;
                 if (ViewModel.IsSidebarOpen)
@@ -392,7 +435,7 @@ public sealed partial class MainWindow : Window
         else
         {
             AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Default);
-            if (_sidebarOpenBeforeFullScreen)
+            if (!ViewModel.IsPresentationMode && _sidebarOpenBeforeFullScreen)
             {
                 _sidebarOpenBeforeFullScreen = false;
                 _isInternalSidebarToggle = true;
@@ -513,16 +556,6 @@ public sealed partial class MainWindow : Window
     private void OnPrintClick(object sender, RoutedEventArgs e)
     {
         _ = ViewModel.PrintAsync();
-    }
-
-    private void OnPresentationClick(object sender, RoutedEventArgs e)
-    {
-        ViewModel.StartPresentation();
-    }
-
-    private void OnContinuousMenuClick(object sender, RoutedEventArgs e)
-    {
-        ViewModel.SetViewMode(ViewMode.Continuous);
     }
 
     private void OnWindowDragOver(object sender, DragEventArgs e)

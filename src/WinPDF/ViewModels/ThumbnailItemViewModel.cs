@@ -25,6 +25,12 @@ public sealed partial class ThumbnailItemViewModel : ObservableObject
     public partial bool IsSelected { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether this thumbnail is the currently active page in the document.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsCurrentPage { get; set; }
+
+    /// <summary>
     /// Gets or sets the aspect ratio width for the thumbnail placeholder card.
     /// </summary>
     [ObservableProperty]

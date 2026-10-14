@@ -194,34 +194,14 @@
                     <FontIcon FontSize="16" Glyph="&#xE712;" />
                     <Button.Flyout>
                         <MenuFlyout Placement="BottomEdgeAlignedRight">
-                            <MenuFlyoutItem x:Uid="Menu_Print" Click="OnPrintClick">
+                            <MenuFlyoutItem x:Uid="Menu_SaveAs" Command="{x:Bind ViewModel.SaveAsCommand}">
                                 <MenuFlyoutItem.Icon>
-                                    <FontIcon Glyph="&#xE749;" />
+                                    <FontIcon Glyph="&#xE74E;" />
                                 </MenuFlyoutItem.Icon>
                                 <MenuFlyoutItem.KeyboardAccelerators>
-                                    <KeyboardAccelerator Key="P" Modifiers="Control" />
+                                    <KeyboardAccelerator Key="S" Modifiers="Control" />
                                 </MenuFlyoutItem.KeyboardAccelerators>
                             </MenuFlyoutItem>
-
-                            <MenuFlyoutItem x:Uid="Menu_FullScreen" Command="{x:Bind ViewModel.ToggleFullScreenCommand}">
-                                <MenuFlyoutItem.Icon>
-                                    <FontIcon Glyph="&#xE740;" />
-                                </MenuFlyoutItem.Icon>
-                                <MenuFlyoutItem.KeyboardAccelerators>
-                                    <KeyboardAccelerator Key="F11" />
-                                </MenuFlyoutItem.KeyboardAccelerators>
-                            </MenuFlyoutItem>
-
-                            <MenuFlyoutItem x:Uid="Menu_Presentation" Click="OnPresentationClick">
-                                <MenuFlyoutItem.Icon>
-                                    <FontIcon Glyph="&#xE714;" />
-                                </MenuFlyoutItem.Icon>
-                                <MenuFlyoutItem.KeyboardAccelerators>
-                                    <KeyboardAccelerator Key="F5" />
-                                </MenuFlyoutItem.KeyboardAccelerators>
-                            </MenuFlyoutItem>
-
-                            <MenuFlyoutSeparator />
 
                             <MenuFlyoutItem x:Uid="Menu_OpenCopy" Command="{x:Bind ViewModel.OpenCopyCommand}">
                                 <MenuFlyoutItem.Icon>
@@ -241,45 +221,14 @@
                                 </MenuFlyoutItem.KeyboardAccelerators>
                             </MenuFlyoutItem>
 
-                            <MenuFlyoutItem x:Uid="Menu_SaveAs" Command="{x:Bind ViewModel.SaveAsCommand}">
+                            <MenuFlyoutItem x:Uid="Menu_Print" Click="OnPrintClick">
                                 <MenuFlyoutItem.Icon>
-                                    <FontIcon Glyph="&#xE74E;" />
+                                    <FontIcon Glyph="&#xE749;" />
                                 </MenuFlyoutItem.Icon>
                                 <MenuFlyoutItem.KeyboardAccelerators>
-                                    <KeyboardAccelerator Key="S" Modifiers="Control" />
+                                    <KeyboardAccelerator Key="P" Modifiers="Control" />
                                 </MenuFlyoutItem.KeyboardAccelerators>
                             </MenuFlyoutItem>
-
-                            <MenuFlyoutSeparator />
-
-                            <ToggleMenuFlyoutItem
-                                x:Uid="Menu_Continuous"
-                                Click="OnContinuousMenuClick"
-                                IsChecked="{x:Bind converters:UiHelpers.IsContinuous(ViewModel.ViewMode), Mode=OneWay}">
-                                <ToggleMenuFlyoutItem.KeyboardAccelerators>
-                                    <KeyboardAccelerator Key="C" />
-                                </ToggleMenuFlyoutItem.KeyboardAccelerators>
-                            </ToggleMenuFlyoutItem>
-
-                            <ToggleMenuFlyoutItem
-                                x:Uid="Menu_DualPage"
-                                IsChecked="{x:Bind ViewModel.IsDualPage, Mode=TwoWay}">
-                                <ToggleMenuFlyoutItem.KeyboardAccelerators>
-                                    <KeyboardAccelerator Key="D" />
-                                </ToggleMenuFlyoutItem.KeyboardAccelerators>
-                            </ToggleMenuFlyoutItem>
-
-                            <ToggleMenuFlyoutItem
-                                x:Uid="Menu_OddPagesLeft"
-                                IsChecked="{x:Bind ViewModel.IsOddPagesLeft, Mode=TwoWay}">
-                                <ToggleMenuFlyoutItem.KeyboardAccelerators>
-                                    <KeyboardAccelerator Key="O" />
-                                </ToggleMenuFlyoutItem.KeyboardAccelerators>
-                            </ToggleMenuFlyoutItem>
-
-                            <ToggleMenuFlyoutItem
-                                x:Uid="Menu_Rtl"
-                                IsChecked="{x:Bind ViewModel.IsRightToLeft, Mode=TwoWay}" />
 
                             <MenuFlyoutSeparator />
 
@@ -292,12 +241,23 @@
                                 </MenuFlyoutItem.KeyboardAccelerators>
                             </MenuFlyoutItem>
 
-                            <MenuFlyoutItem x:Uid="Menu_DocumentProperties" Command="{x:Bind ViewModel.ShowPropertiesCommand}">
+                            <ToggleMenuFlyoutItem
+                                x:Uid="Menu_NightMode"
+                                Command="{x:Bind ViewModel.ToggleNightModeCommand}"
+                                IsChecked="{x:Bind ViewModel.IsNightMode, Mode=OneWay}">
+                                <ToggleMenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE708;" />
+                                </ToggleMenuFlyoutItem.Icon>
+                            </ToggleMenuFlyoutItem>
+
+                            <MenuFlyoutSeparator />
+
+                            <MenuFlyoutItem x:Uid="Menu_FullScreen" Command="{x:Bind ViewModel.ToggleFullScreenCommand}">
                                 <MenuFlyoutItem.Icon>
-                                    <FontIcon Glyph="&#xE946;" />
+                                    <FontIcon Glyph="&#xE740;" />
                                 </MenuFlyoutItem.Icon>
                                 <MenuFlyoutItem.KeyboardAccelerators>
-                                    <KeyboardAccelerator Key="Enter" Modifiers="Menu" />
+                                    <KeyboardAccelerator Key="F11" />
                                 </MenuFlyoutItem.KeyboardAccelerators>
                             </MenuFlyoutItem>
                         </MenuFlyout>
@@ -364,8 +324,8 @@
                                 <SelectorBarItem
                                     x:Name="ThumbnailsSelectorItem"
                                     x:Uid="Sidebar_Thumbnails"
-                                    Margin="4,0"
-                                    Padding="8,6">
+                                    Margin="2,0"
+                                    Padding="6,6">
                                     <SelectorBarItem.Icon>
                                         <FontIcon FontSize="20" Glyph="&#xF0E2;" />
                                     </SelectorBarItem.Icon>
@@ -373,8 +333,8 @@
                                 <SelectorBarItem
                                     x:Name="OutlineSelectorItem"
                                     x:Uid="Sidebar_Outline"
-                                    Margin="4,0"
-                                    Padding="8,6">
+                                    Margin="2,0"
+                                    Padding="6,6">
                                     <SelectorBarItem.Icon>
                                         <FontIcon FontSize="20" Glyph="&#xE8FD;" />
                                     </SelectorBarItem.Icon>
@@ -382,8 +342,8 @@
                                 <SelectorBarItem
                                     x:Name="AnnotationsSelectorItem"
                                     x:Uid="Sidebar_Annotations"
-                                    Margin="4,0"
-                                    Padding="8,6">
+                                    Margin="2,0"
+                                    Padding="6,6">
                                     <SelectorBarItem.Icon>
                                         <FontIcon FontSize="20" Glyph="&#xE8F2;" />
                                     </SelectorBarItem.Icon>
@@ -391,8 +351,8 @@
                                 <SelectorBarItem
                                     x:Name="BookmarksSelectorItem"
                                     x:Uid="Sidebar_Bookmarks"
-                                    Margin="4,0"
-                                    Padding="8,6">
+                                    Margin="2,0"
+                                    Padding="6,6">
                                     <SelectorBarItem.Icon>
                                         <FontIcon FontSize="20" Glyph="&#xE8A4;" />
                                     </SelectorBarItem.Icon>
@@ -400,8 +360,8 @@
                                 <SelectorBarItem
                                     x:Name="AttachmentsSelectorItem"
                                     x:Uid="Sidebar_Attachments"
-                                    Margin="4,0"
-                                    Padding="8,6">
+                                    Margin="2,0"
+                                    Padding="6,6">
                                     <SelectorBarItem.Icon>
                                         <FontIcon FontSize="20" Glyph="&#xE723;" />
                                     </SelectorBarItem.Icon>
@@ -410,10 +370,10 @@
                         </Border>
                     </Grid>
 
-                    <!-- Splitter Arrastável (8 DIPs) em TODA a Altura Vertical -->
+                    <!-- Splitter Arrastável (6 DIPs) em TODA a Altura Vertical com Splitter Invisível -->
                     <controls:SplitterContainer
                         Grid.Column="1"
-                        Width="8"
+                        Width="6"
                         HorizontalAlignment="Stretch"
                         VerticalAlignment="Stretch"
                         HorizontalContentAlignment="Stretch"
@@ -421,7 +381,7 @@
                         Background="Transparent">
                         <Thumb
                             x:Name="SidebarSplitter"
-                            Width="8"
+                            Width="6"
                             HorizontalAlignment="Stretch"
                             VerticalAlignment="Stretch"
                             Background="Transparent"
@@ -429,18 +389,10 @@
                             <Thumb.Template>
                                 <ControlTemplate TargetType="Thumb">
                                     <Grid
+                                        Width="6"
                                         Background="Transparent"
                                         HorizontalAlignment="Stretch"
-                                        VerticalAlignment="Stretch">
-                                        <!-- Pílula visual central discreta (4×32 DIPs) -->
-                                        <Border
-                                            Width="4"
-                                            Height="32"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center"
-                                            Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
-                                            CornerRadius="2" />
-                                    </Grid>
+                                        VerticalAlignment="Stretch" />
                                 </ControlTemplate>
                             </Thumb.Template>
                         </Thumb>
@@ -460,7 +412,7 @@
                 <Frame
                     x:Name="MainContentFrame"
                     Background="Transparent"
-                    IsNavigationStackEnabled="False" />
+                    IsNavigationStackEnabled="True" />
             </Border>
         </SplitView>
     </Grid>

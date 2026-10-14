@@ -4,7 +4,7 @@ Checklist de melhorias de usabilidade, ergonomia visual (Fluent 2) e recursos es
 
 ---
 
-## 📦 Etapa QoL 1A: Barra de Status Inferior Nativa (Estilo Paint / Fotos / Notepad)
+## 📦 Etapa QoL 1: Barra de Status Inferior Nativa (Estilo Paint / Fotos / Notepad)
 - [x] **Remoção dos Controles Antigos:**
   - Remover o seletor de páginas da barra de título superior (`MainWindow.xaml`), mantendo apenas o nome do documento limpo e centralizado.
   - Remover a pílula flutuante de zoom do `DocumentView.xaml`.
@@ -28,30 +28,30 @@ Checklist de melhorias de usabilidade, ergonomia visual (Fluent 2) e recursos es
 ---
 
 ## 📦 Etapa QoL 2: Matriz de Modos de Exibição, Preservação de Estado e Splitter Limpo
-- [ ] **Matriz Funcional de Modos de Exibição (2×2 via Toggles da Barra Inferior):**
+- [x] **Matriz Funcional de Modos de Exibição (2×2 via Toggles da Barra Inferior):**
   - **Contínuo ON + Duplo OFF:** Rolagem vertical contínua de 1 coluna.
   - **Contínuo OFF + Duplo OFF:** Modo Slide / Página Única (com *swipe* horizontal em telas de toque e botões discretos `<` e `>` nas extremidades esquerda/direita ao passar o mouse).
   - **Contínuo ON + Duplo ON:** Rolagem vertical contínua exibindo pares de páginas lado a lado.
   - **Contínuo OFF + Duplo ON:** Modo Livro paginado exibindo 2 páginas lado a lado por vez.
-- [ ] **Preservar Posição e Estado do Documento ao Abrir/Fechar Configurações:**
+- [x] **Preservar Posição e Estado do Documento ao Abrir/Fechar Configurações:**
   - Manter `CurrentPageIndex`, `VerticalOffset`, `HorizontalOffset` e `ZoomFactor` intactos ao alternar para a `SettingsView` e voltar.
-- [ ] **Divisor da Barra Lateral (Splitter) Invisível:**
+- [x] **Divisor da Barra Lateral (Splitter) Invisível:**
   - Remover a pílula visual aparente do `SplitterContainer`, mantendo apenas a área transparente de redimensionamento (`SizeWestEast`).
 
 ---
 
 ## 📦 Pacote QoL 3: Barra Lateral 2.0 (2 Colunas, Proporção Real e Sincronização)
-- [ ] **Layout de 2 Colunas para Miniaturas:** Expandir a barra lateral esquerda para exibir 2 tiles por linha.
-- [ ] **Proporção Real da Página nas Miniaturas:** Respeitar o `AspectRatio` real (`WidthPt / HeightPt`) de cada folha sem forçar A4.
-- [ ] **Sincronização Automática da Barra Lateral:** Acompanhar a página atual com `ScrollIntoView` suave durante a rolagem do documento.
+- [x] **Layout de 2 Colunas para Miniaturas:** Expandir a barra lateral esquerda para exibir 2 tiles por linha.
+- [x] **Proporção Real da Página nas Miniaturas:** Respeitar o `AspectRatio` real (`WidthPt / HeightPt`) de cada folha sem forçar A4.
+- [x] **Sincronização Automática da Barra Lateral:** Acompanhar a página atual com `ScrollIntoView` suave durante a rolagem do documento.
 
 ---
 
-## 📦 Pacote QoL 4: Teclado, Botão Direito, Modo Noturno OLED e Rotação
+## 📦 Pacote QoL 4: Teclado, Botão Direito, Modo Noturno e Rotação
 - [ ] **Correção de Foco e Controle por Teclas Direcionais (`Up`, `Down`, `Left`, `Right`).**
 - [ ] **Atalhos Clássicos:** `PageDown`/`PageUp`, `Espaço`/`Shift+Espaço`, `Home`/`End`, `Ctrl+Roda do Mouse`, `Ctrl+0`, `F11`, `F5`, `Ctrl+R` / `Ctrl+Shift+R`.
 - [ ] **Menu de Contexto (Botão Direito do Mouse na Página).**
-- [ ] **Modo Noturno de Leitura na GPU (Inversão Inteligente OLED via Win2D, 0% CPU).**
+- [ ] **Modo Noturno de Leitura na GPU (Inversão Inteligente via Win2D).**
 
 ---
 
@@ -60,3 +60,6 @@ Checklist de melhorias de usabilidade, ergonomia visual (Fluent 2) e recursos es
 - [ ] **Opção "Reabrir último documento ao iniciar" nas Configurações.**
 - [ ] **Propriedades do Documento Reais (`Alt+Enter` e Clique na Barra Inferior via `FPDF_GetMetaText`).**
 - [ ] **Ações de Arquivo (`Ctrl+S` Salvar Como e `Ctrl+Shift+N` Abrir uma Cópia).**
+
+## Etapa de implementação de abas
+Todo
