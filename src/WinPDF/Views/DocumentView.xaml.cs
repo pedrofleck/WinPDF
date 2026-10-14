@@ -112,15 +112,7 @@ public sealed partial class DocumentView : Page
 
     private static void ApplyViewportToCanvas(PdfPageCanvas canvas, double currentZoom)
     {
-        Rect visible = canvas.GetVisibleRectInPageDips();
-        if (visible.IsEmpty || visible.Width <= 1.0 || visible.Height <= 1.0)
-        {
-            canvas.DestroyVirtualCanvas();
-        }
-        else
-        {
-            canvas.UpdateViewportZoom(currentZoom);
-        }
+        canvas.UpdateViewport(currentZoom);
     }
 
     private static void FindAndApplyCanvases(DependencyObject? parent, double currentZoom)
@@ -229,63 +221,23 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        // Update current page index from center of viewport
         UpdateCurrentPageIndexFromViewport();
-
-        // 100 ms gesture debounce before applying quantized zoom to visible pages
-        _zoomDebounceCts?.Cancel();
-        _zoomDebounceCts?.Dispose();
-        var cts = new CancellationTokenSource();
-        _zoomDebounceCts = cts;
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await Task.Delay(100).ConfigureAwait(false);
-                if (cts.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                DispatcherQueue.TryEnqueue(() =>
-                {
-                    if (cts.IsCancellationRequested || ViewModel.CurrentDocument is null)
-                    {
-                        return;
-                    }
-
-                    double newZoom = ContinuousScrollViewer.ZoomFactor;
-                    if (Math.Abs(ViewModel.CurrentDocument.ZoomFactor - newZoom) > 0.01)
-                    {
-                        _isUpdatingZoomFromScrollViewer = true;
-                        try
-                        {
-                            ViewModel.CurrentDocument.ZoomFactor = newZoom;
-                        }
-                        finally
-                        {
-                            _isUpdatingZoomFromScrollViewer = false;
-                        }
-                    }
-
-                    UpdateViewportPages(newZoom);
-                });
-            }
-            catch (OperationCanceledException)
-            {
-            }
-        });
+        ScheduleViewportUpdate();
     }
 
     private void OnPagedScrollViewerViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
     {
-        if (e.IsIntermediate || sender is not ScrollViewer pagedSv)
+        if (e.IsIntermediate || sender is not ScrollViewer)
         {
             _zoomDebounceCts?.Cancel();
             return;
         }
 
+        ScheduleViewportUpdate();
+    }
+
+    private void ScheduleViewportUpdate()
+    {
         _zoomDebounceCts?.Cancel();
         _zoomDebounceCts?.Dispose();
         var cts = new CancellationTokenSource();
@@ -295,7 +247,7 @@ public sealed partial class DocumentView : Page
         {
             try
             {
-                await Task.Delay(100).ConfigureAwait(false);
+                await Task.Delay(80).ConfigureAwait(false);
                 if (cts.IsCancellationRequested)
                 {
                     return;
@@ -308,13 +260,18 @@ public sealed partial class DocumentView : Page
                         return;
                     }
 
-                    double newZoom = pagedSv.ZoomFactor;
-                    if (Math.Abs(ViewModel.CurrentDocument.ZoomFactor - newZoom) > 0.01)
+                    ContinuousScrollViewer.UpdateLayout();
+
+                    double activeZoom = ViewModel.ViewMode == ViewMode.Continuous
+                        ? ContinuousScrollViewer.ZoomFactor
+                        : (GetActivePagedScrollViewer()?.ZoomFactor ?? ViewModel.CurrentDocument.ZoomFactor);
+
+                    if (Math.Abs(ViewModel.CurrentDocument.ZoomFactor - activeZoom) > 0.01)
                     {
                         _isUpdatingZoomFromScrollViewer = true;
                         try
                         {
-                            ViewModel.CurrentDocument.ZoomFactor = newZoom;
+                            ViewModel.CurrentDocument.ZoomFactor = activeZoom;
                         }
                         finally
                         {
@@ -322,7 +279,7 @@ public sealed partial class DocumentView : Page
                         }
                     }
 
-                    UpdateViewportPages(newZoom);
+                    UpdateViewportPages(activeZoom);
                 });
             }
             catch (OperationCanceledException)

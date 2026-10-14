@@ -164,41 +164,23 @@ before execution (and checked between pages/tiles).
   C-States (C8/C10) and the display panel to activate Panel Self-Refresh (PSR).
 - The dedicated `PdfiumService` thread blocks asynchronously via `ChannelReader.WaitToReadAsync()`.
 
-### 4.2 Hybrid Full-Page vs. Tiles Rendering (CPU Preservation)
+### 4.2 Hybrid Level 0 Base and Single Viewport Patch Rendering (CPU & VRAM Preservation)
 
 In PDFium, each call to `FPDF_RenderPageBitmap` traverses the entire page display list (vectors,
 fonts, raster objects) on the CPU. Indiscriminate tiling at regular zoom multiplies CPU load.
 
-1. **Standard Reading (`ZoomFactor <= 1.5`):**
-   - **Do NOT split into tiles.** Render the complete page in **a single rasterization call** at
-     quantized zoom `Zq`.
-   - **At `Zq == 1.0`:** The Level 0 base bitmap is already the final sharp representation.
-     Do **not** re-render after the 150 ms gesture debounce.
-2. **High Zoom / Magnification (`ZoomFactor > 1.5`):**
-   - Switch to 512×512 tiles using `CanvasVirtualControl.RegionsInvalidated`.
-   - Rasterize only dirty tiles intersecting the visible viewport.
-
-**During a gesture** (pinch, pan, inertia, swipe):
-DirectManipulation scales/translates the `ScrollViewer` content on the compositor. The UI thread
-does nothing; existing bitmaps are stretched by the GPU (slightly blurry while zooming in, never
-janky). No `Invalidate()`, no layout change, no PDFium call.
-
-**After the gesture:**
-`ScrollViewer.ViewChanged` with `IsIntermediate == false` → start a **150 ms debounce** (restarted
-by any new `ViewChanging`). When it fires:
-
-1. Compute `Z = ScrollViewer.ZoomFactor`, quantize to `Zq` (steps of √2: …, 0.71, 1, 1.41, 2, 2.83, 4…)
-   to maximize tile reuse.
-2. If `Zq <= 1.5`:
-   - If `Zq == 1.0` and Level 0 bitmap exists: do nothing (already sharp, save CPU).
-   - Otherwise, render full page at `Zq` in a single job.
-3. If `Zq > 1.5`:
-   - For each visible page: set `PdfPageCanvas.DpiScale = Zq` (`CanvasVirtualControl` property).
-   - `CanvasVirtualControl.RegionsInvalidated` provides dirty regions → map to tile keys
-     `(page, Zq, tileX, tileY)` → draw from `TileCache` if present, otherwise draw Level 0 stretched
-     and enqueue tile jobs.
-4. When jobs complete, `CanvasBitmap` is created off-thread and the UI thread calls
-   `Invalidate(dirtyRectDip)`.
+1. **Level 0 Base Bitmap (`ZoomFactor <= 1.05` or background preview):**
+   - Render the complete page in **a single rasterization call** at base resolution (1.0x).
+   - Displayed via `_baseCanvas` (`CanvasControl`) with `DpiScale = 1.0f` fixed forever.
+   - Cached in `TileCache` (`TileKind.FullPage, ZoomStep: 0`). Guarantees no page is ever blank during fast scroll.
+2. **High Zoom / Magnification (`ZoomFactor > 1.05`):**
+   - Displayed via `_detailCanvas` (`CanvasControl`), positioned over the visible viewport via `_detailTranslate`.
+   - On gesture completion (80 ms debounce via `ScheduleViewportUpdate()`):
+     - Compute visible page intersection `GetVisibleRectInPageDips()` using linear proportion from `TransformBounds`.
+     - Expand with 20% prefetch margin.
+     - Render in **a single high-priority PDFium call** (`RenderRegionAsync`), capped at physical display bounds (~10–15 MB VRAM).
+     - Upload `CanvasBitmap` via `CanvasDevice.GetSharedDevice()` and position `_detailCanvas`.
+   - Off-screen pages immediately collapse `_detailCanvas` and release high-res VRAM via `ReleaseHighResPatch()`.
 
 ### 4.3 Caches & Lazy Sidebar Loading
 
