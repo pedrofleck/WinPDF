@@ -152,6 +152,11 @@ public sealed partial class ThumbnailsTabPage : Page
 
     private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (!ViewModel.IsSidebarOpen || ViewModel.SidebarTab != Models.SidebarTab.Thumbnails)
+        {
+            return;
+        }
+
         if (e.PropertyName is nameof(DocumentViewModel.FractionalPageIndex) or nameof(DocumentViewModel.CurrentPageIndex))
         {
             // Scrolling the document resets any user scroll lock on sidebar and snaps into synchronization.
@@ -165,7 +170,7 @@ public sealed partial class ThumbnailsTabPage : Page
 
     private void OnThumbnailsScrollViewerSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (Math.Abs(e.NewSize.Width - e.PreviousSize.Width) > 1.0 && e.NewSize.Width > 0)
+        if (Math.Abs(e.NewSize.Width - e.PreviousSize.Width) > 1.0 && e.NewSize.Width > 50.0)
         {
             UpdateThumbnailSizes(e.NewSize.Width);
             DispatcherQueue.TryEnqueue(() =>
@@ -201,9 +206,9 @@ public sealed partial class ThumbnailsTabPage : Page
         }
 
         ThumbnailsLayout.ItemsStretch = UniformGridLayoutItemsStretch.Fill;
-        // Keep MinItemWidth safe at 50 to prevent divide-by-zero crash in UniformGridLayout
+        // Keep MinItemWidth safe at 50 and MinItemHeight at 60 to prevent divide-by-zero crashes
         ThumbnailsLayout.MinItemWidth = 50.0;
-        ThumbnailsLayout.MinItemHeight = 0.0;
+        ThumbnailsLayout.MinItemHeight = 60.0;
 
         double colWidth = (numCols == 1)
             ? availableW
@@ -258,7 +263,12 @@ public sealed partial class ThumbnailsTabPage : Page
 
     private void UpdateTargetScrollPosition(bool allowAnimation = false)
     {
-        if (_isUserScrollingSidebar || ViewModel.CurrentDocument is not { PageCount: > 0 } doc || ThumbnailsScrollViewer.ViewportHeight <= 0)
+        if (_isUserScrollingSidebar ||
+            !ViewModel.IsSidebarOpen ||
+            ViewModel.SidebarTab != Models.SidebarTab.Thumbnails ||
+            ViewModel.CurrentDocument is not { PageCount: > 0 } doc ||
+            ThumbnailsScrollViewer.ViewportHeight <= 0 ||
+            ThumbnailsScrollViewer.ActualWidth < 50.0)
         {
             return;
         }
@@ -382,7 +392,11 @@ public sealed partial class ThumbnailsTabPage : Page
 
     private void OnCompositionTargetRendering(object? sender, object e)
     {
-        if (ThumbnailsScrollViewer is null || _isStoryboardRunning || _isUserScrollingSidebar)
+        if (ThumbnailsScrollViewer is null ||
+            _isStoryboardRunning ||
+            _isUserScrollingSidebar ||
+            !ViewModel.IsSidebarOpen ||
+            ViewModel.SidebarTab != Models.SidebarTab.Thumbnails)
         {
             StopSmoothScrollLoop();
             return;

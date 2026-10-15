@@ -21,8 +21,8 @@ using WinPDF.ViewModels;
 namespace WinPDF.Controls;
 
 /// <summary>
-/// Native Win2D canvas rendering a single PDF page with zero-LOH uploads, unified single-SwapChain architecture,
-/// fallback background blitting during zoom/scroll, and true 0.0% CPU/GPU consumption when stationary.
+/// Native Win2D canvas rendering a single PDF page with Viewbox-insulated base canvas, single viewport detail patch,
+/// zero-LOH uploads, fallback background blitting during zoom/scroll, and true 0.0% CPU/GPU consumption when stationary.
 /// </summary>
 public sealed partial class PdfPageCanvas : Grid
 {
@@ -76,7 +76,10 @@ public sealed partial class PdfPageCanvas : Grid
             typeof(PdfPageCanvas),
             new PropertyMetadata(0, OnRotationAnglePropertyChanged));
 
-    private readonly CanvasControl _canvas;
+    private readonly CanvasControl _baseCanvas;
+    private readonly Viewbox _baseViewbox;
+    private readonly CanvasControl _detailCanvas;
+    private readonly TranslateTransform _detailTranslate;
     private readonly IPdfService _pdfService;
     private readonly TileCache _tileCache;
 
@@ -211,7 +214,7 @@ public sealed partial class PdfPageCanvas : Grid
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="PdfPageCanvas"/> class with a single unified CanvasControl.
+    /// Initializes a new instance of the <see cref="PdfPageCanvas"/> class.
     /// </summary>
     public PdfPageCanvas()
     {
@@ -221,7 +224,8 @@ public sealed partial class PdfPageCanvas : Grid
         _pdfService = App.CurrentApp.Services.GetRequiredService<IPdfService>();
         _tileCache = App.CurrentApp.Services.GetRequiredService<TileCache>();
 
-        _canvas = new CanvasControl
+        // PROIBIÇÃO ABSOLUTA: DpiScale do _baseCanvas fixo em 1.0f para sempre.
+        _baseCanvas = new CanvasControl
         {
             UseSharedDevice = true,
             ClearColor = Windows.UI.Color.FromArgb(255, 255, 255, 255),
@@ -230,13 +234,49 @@ public sealed partial class PdfPageCanvas : Grid
             VerticalAlignment = VerticalAlignment.Stretch,
         };
 
-        _canvas.CreateResources += OnCreateResources;
-        _canvas.Draw += OnCanvasDraw;
+        _baseCanvas.CreateResources += OnCreateResources;
+        _baseCanvas.Draw += OnBaseCanvasDraw;
 
-        Children.Add(_canvas);
+        _baseViewbox = new Viewbox
+        {
+            Stretch = Stretch.Fill,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Child = _baseCanvas,
+        };
+
+        _detailTranslate = new TranslateTransform();
+        _detailCanvas = new CanvasControl
+        {
+            UseSharedDevice = true,
+            ClearColor = Windows.UI.Color.FromArgb(0, 0, 0, 0),
+            DpiScale = 1.0f,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Top,
+            Visibility = Visibility.Collapsed,
+            IsHitTestVisible = false,
+            RenderTransform = _detailTranslate,
+        };
+
+        _detailCanvas.Draw += OnDetailCanvasDraw;
+
+        Children.Add(_baseViewbox);
+        Children.Add(_detailCanvas);
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
+    }
+
+    /// <inheritdoc/>
+    protected override Size MeasureOverride(Size availableSize)
+    {
+        if (double.IsNaN(availableSize.Width) || double.IsNaN(availableSize.Height) ||
+            availableSize.Width <= 0 || availableSize.Height <= 0)
+        {
+            return new Size(0, 0);
+        }
+
+        return base.MeasureOverride(availableSize);
     }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
@@ -343,10 +383,14 @@ public sealed partial class PdfPageCanvas : Grid
     {
         if (d is PdfPageCanvas canvas)
         {
-            canvas._canvas.ClearColor = canvas.IsNightMode
+            canvas._baseCanvas.ClearColor = canvas.IsNightMode
                 ? Windows.UI.Color.FromArgb(255, 18, 18, 18)
                 : Windows.UI.Color.FromArgb(255, 255, 255, 255);
-            canvas._canvas.Invalidate();
+            canvas._baseCanvas.Invalidate();
+            if (canvas._detailCanvas.Visibility == Visibility.Visible)
+            {
+                canvas._detailCanvas.Invalidate();
+            }
         }
     }
 
@@ -356,7 +400,7 @@ public sealed partial class PdfPageCanvas : Grid
         {
             canvas.ReleaseHighResPatch();
             canvas.UpdateDimensions();
-            canvas._canvas.Invalidate();
+            canvas._baseCanvas.Invalidate();
         }
     }
 
@@ -372,7 +416,7 @@ public sealed partial class PdfPageCanvas : Grid
             if (canvas.PageInfo is not null)
             {
                 canvas.TryLoadCachedBitmaps();
-                canvas._canvas.Invalidate();
+                canvas._baseCanvas.Invalidate();
                 canvas.UpdateRender();
             }
         }
@@ -388,7 +432,7 @@ public sealed partial class PdfPageCanvas : Grid
             if (canvas.PageInfo is not null)
             {
                 canvas.TryLoadCachedBitmaps();
-                canvas._canvas.Invalidate();
+                canvas._baseCanvas.Invalidate();
                 canvas.UpdateRender();
             }
         }
@@ -407,20 +451,18 @@ public sealed partial class PdfPageCanvas : Grid
         if (PageInfo is not null)
         {
             bool swap = (RotationAngle % 180 != 0);
-            double effW = swap ? PageInfo.DisplayHeightDip : PageInfo.DisplayWidthDip;
-            double effH = swap ? PageInfo.DisplayWidthDip : PageInfo.DisplayHeightDip;
+            double effW = Math.Max(1.0, swap ? PageInfo.DisplayHeightDip : PageInfo.DisplayWidthDip);
+            double effH = Math.Max(1.0, swap ? PageInfo.DisplayWidthDip : PageInfo.DisplayHeightDip);
 
             Width = effW;
             Height = effH;
-            _canvas.Width = effW;
-            _canvas.Height = effH;
+            _baseCanvas.Width = effW;
+            _baseCanvas.Height = effH;
+            Visibility = Visibility.Visible;
         }
         else
         {
-            Width = 0;
-            Height = 0;
-            _canvas.Width = 0;
-            _canvas.Height = 0;
+            Visibility = Visibility.Collapsed;
         }
     }
 
@@ -442,7 +484,7 @@ public sealed partial class PdfPageCanvas : Grid
 
         if (_level0Bitmap is not null)
         {
-            _canvas.Invalidate();
+            _baseCanvas.Invalidate();
         }
         else if (_needsLevel0Render || PageInfo is not null)
         {
@@ -483,7 +525,7 @@ public sealed partial class PdfPageCanvas : Grid
         }
     }
 
-    private void OnCanvasDraw(CanvasControl sender, CanvasDrawEventArgs args)
+    private void OnBaseCanvasDraw(CanvasControl sender, CanvasDrawEventArgs args)
     {
         if (PageInfo is null)
         {
@@ -501,8 +543,8 @@ public sealed partial class PdfPageCanvas : Grid
         }
 
         var ds = args.DrawingSession;
-        double w = sender.ActualWidth > 0 ? sender.ActualWidth : Width;
-        double h = sender.ActualHeight > 0 ? sender.ActualHeight : Height;
+        double w = sender.ActualWidth > 0 ? sender.ActualWidth : sender.Width;
+        double h = sender.ActualHeight > 0 ? sender.ActualHeight : sender.Height;
         if (w <= 0 || h <= 0)
         {
             return;
@@ -542,23 +584,36 @@ public sealed partial class PdfPageCanvas : Grid
                     _level0Bitmap = null;
                 }
             }
-
-            // 4. Desenhar Patch de alta resolução sobre a região visível (apenas sem rotação do usuário)
-            if (RotationAngle == 0 && _detailBitmap is { } detailBmp && !_detailRectDip.IsEmpty && _detailRectDip.Width > 0 && _detailRectDip.Height > 0)
-            {
-                try
-                {
-                    DrawBitmapWithNightMode(ds, detailBmp, _detailRectDip, detailBmp.Bounds);
-                }
-                catch (Exception ex) when (ex is ObjectDisposedException or COMException)
-                {
-                    _detailBitmap = null;
-                }
-            }
         }
         finally
         {
             ds.Transform = oldTransform;
+        }
+    }
+
+    private void OnDetailCanvasDraw(CanvasControl sender, CanvasDrawEventArgs args)
+    {
+        if (_detailBitmap is not { } detailBmp || _detailRectDip.IsEmpty || _detailRectDip.Width <= 0 || _detailRectDip.Height <= 0)
+        {
+            return;
+        }
+
+        var ds = args.DrawingSession;
+        double w = sender.Width > 0 ? sender.Width : sender.ActualWidth;
+        double h = sender.Height > 0 ? sender.Height : sender.ActualHeight;
+        if (w <= 0 || h <= 0)
+        {
+            return;
+        }
+
+        Rect destRect = new(0, 0, w, h);
+        try
+        {
+            DrawBitmapWithNightMode(ds, detailBmp, destRect, detailBmp.Bounds);
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or COMException)
+        {
+            _detailBitmap = null;
         }
     }
 
@@ -600,7 +655,7 @@ public sealed partial class PdfPageCanvas : Grid
             _detailBitmap = null;
             _detailRectDip = Rect.Empty;
             _renderedZoom = 1.0;
-            _canvas.Invalidate();
+            _detailCanvas.Visibility = Visibility.Collapsed;
             old?.Dispose();
         }
     }
@@ -725,7 +780,7 @@ public sealed partial class PdfPageCanvas : Grid
                 if (PageInfo?.Index == targetPageIndex && EffectiveDocumentId == targetDocId && !_isUnloaded)
                 {
                     _level0Bitmap = canvasEntry.Bitmap;
-                    _canvas.Invalidate();
+                    _baseCanvas.Invalidate();
 
                     if (EffectiveZoom > 1.05)
                     {
@@ -779,7 +834,7 @@ public sealed partial class PdfPageCanvas : Grid
                     return;
                 }
 
-                if (_canvas.Device is null)
+                if (_baseCanvas.Device is null)
                 {
                     _needsLevel0Render = true;
                     lease.Dispose();
@@ -795,7 +850,7 @@ public sealed partial class PdfPageCanvas : Grid
                     try
                     {
                         newBitmap = CanvasBitmap.CreateFromBytes(
-                            _canvas,
+                            _baseCanvas,
                             buffer,
                             entry.Width,
                             entry.Height,
@@ -811,7 +866,7 @@ public sealed partial class PdfPageCanvas : Grid
 
                     CanvasBitmap? oldBitmap = _level0Bitmap;
                     _level0Bitmap = newBitmap;
-                    _canvas.Invalidate();
+                    _baseCanvas.Invalidate();
                     oldBitmap?.Dispose();
 
                     if (EffectiveZoom > 1.05)
@@ -909,7 +964,7 @@ public sealed partial class PdfPageCanvas : Grid
                     return;
                 }
 
-                if (_canvas.Device is null)
+                if (_detailCanvas.Device is null)
                 {
                     lease.Dispose();
                     return;
@@ -924,7 +979,7 @@ public sealed partial class PdfPageCanvas : Grid
                     try
                     {
                         newBitmap = CanvasBitmap.CreateFromBytes(
-                            _canvas,
+                            _detailCanvas,
                             buffer,
                             entry.Width,
                             entry.Height,
@@ -939,7 +994,14 @@ public sealed partial class PdfPageCanvas : Grid
                     _detailBitmap = newBitmap;
                     _detailRectDip = patchDip;
                     _renderedZoom = currentZoom;
-                    _canvas.Invalidate();
+
+                    _detailTranslate.X = patchDip.X;
+                    _detailTranslate.Y = patchDip.Y;
+                    _detailCanvas.Width = Math.Max(1.0, patchDip.Width);
+                    _detailCanvas.Height = Math.Max(1.0, patchDip.Height);
+
+                    _detailCanvas.Visibility = Visibility.Visible;
+                    _detailCanvas.Invalidate();
                     oldDetail?.Dispose();
                 }
             }

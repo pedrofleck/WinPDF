@@ -107,11 +107,7 @@
                                         Background="{ThemeResource LayerFillColorDefaultBrush}"
                                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                         BorderThickness="{x:Bind converters:UiHelpers.PresentationBorderThickness(IsPresentationMode), Mode=OneTime}"
-                                        CornerRadius="{x:Bind converters:UiHelpers.PresentationCornerRadius(IsPresentationMode), Mode=OneTime}"
-                                        Translation="0,0,16">
-                                        <Border.Shadow>
-                                            <ThemeShadow />
-                                        </Border.Shadow>
+                                        CornerRadius="{x:Bind converters:UiHelpers.PresentationCornerRadius(IsPresentationMode), Mode=OneTime}">
                                         <controls:PdfPageCanvas
                                             PageInfo="{x:Bind LeftPage, Mode=OneTime}"
                                             IsNightMode="{x:Bind IsNightMode, Mode=OneTime}"
@@ -128,11 +124,7 @@
                                         Background="{ThemeResource LayerFillColorDefaultBrush}"
                                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                         BorderThickness="{x:Bind converters:UiHelpers.PresentationBorderThickness(IsPresentationMode), Mode=OneTime}"
-                                        CornerRadius="{x:Bind converters:UiHelpers.PresentationCornerRadius(IsPresentationMode), Mode=OneTime}"
-                                        Translation="0,0,16">
-                                        <Border.Shadow>
-                                            <ThemeShadow />
-                                        </Border.Shadow>
+                                        CornerRadius="{x:Bind converters:UiHelpers.PresentationCornerRadius(IsPresentationMode), Mode=OneTime}">
                                         <controls:PdfPageCanvas
                                             Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasRightPage), Mode=OneTime}"
                                             PageInfo="{x:Bind RightPage, Mode=OneTime}"
@@ -214,15 +206,11 @@
                     Background="#D0181818"
                     BorderBrush="#40FFFFFF"
                     BorderThickness="1"
-                    Translation="0,0,32"
                     IsHitTestVisible="False"
                     Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsPresentationMode), Mode=OneWay}">
                     <Border.OpacityTransition>
                         <ScalarTransition Duration="0:0:0.4" />
                     </Border.OpacityTransition>
-                    <Border.Shadow>
-                        <ThemeShadow />
-                    </Border.Shadow>
                     <StackPanel Orientation="Horizontal" Spacing="8" Padding="14,8" VerticalAlignment="Center">
                         <FontIcon Glyph="&#xE711;" FontSize="13" Foreground="White" />
                         <TextBlock

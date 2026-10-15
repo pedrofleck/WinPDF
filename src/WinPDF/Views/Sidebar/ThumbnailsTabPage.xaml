@@ -29,9 +29,10 @@
                 ElementPrepared="OnThumbnailsElementPrepared"
                 ElementClearing="OnThumbnailsElementClearing">
                 <ItemsRepeater.Layout>
-                    <UniformGridLayout
+                    <controls:SafeUniformGridLayout
                         x:Name="ThumbnailsLayout"
                         MinItemWidth="50"
+                        MinItemHeight="60"
                         MinRowSpacing="8"
                         MinColumnSpacing="10"
                         ItemsStretch="Fill"

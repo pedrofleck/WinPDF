@@ -343,7 +343,7 @@ public sealed partial class DocumentView : Page
     private void OnScrollViewerViewChanging(object? sender, ScrollViewerViewChangingEventArgs e)
     {
         _zoomDebounceCts?.Cancel();
-        if (ViewModel.CurrentDocument is not null)
+        if (ViewModel.CurrentDocument is not null && Math.Abs(e.NextView.ZoomFactor - ContinuousScrollViewer.ZoomFactor) < 0.001)
         {
             ViewModel.CurrentDocument.FractionalPageIndex = CalculateFractionalPageIndex();
         }
@@ -355,7 +355,10 @@ public sealed partial class DocumentView : Page
         {
             ViewModel.CurrentDocument.LastHorizontalOffset = ContinuousScrollViewer.HorizontalOffset;
             ViewModel.CurrentDocument.LastVerticalOffset = ContinuousScrollViewer.VerticalOffset;
-            ViewModel.CurrentDocument.FractionalPageIndex = CalculateFractionalPageIndex();
+            if (!e.IsIntermediate)
+            {
+                ViewModel.CurrentDocument.FractionalPageIndex = CalculateFractionalPageIndex();
+            }
         }
 
         if (e.IsIntermediate)
@@ -370,7 +373,7 @@ public sealed partial class DocumentView : Page
 
     private void OnScrollViewerSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (_isApplyingFitZoom)
+        if (_isApplyingFitZoom || e.NewSize.Width <= 0 || e.NewSize.Height <= 0)
         {
             return;
         }

@@ -1,8 +1,11 @@
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using WinPDF.Rendering;
 using WinPDF.Services;
 using WinPDF.ViewModels;
+
+[assembly: DefaultDllImportSearchPaths(DllImportSearchPath.AssemblyDirectory | DllImportSearchPath.System32)]
 
 namespace WinPDF;
 
@@ -11,6 +14,7 @@ namespace WinPDF;
 /// </summary>
 public partial class App : Application
 {
+    private static readonly object s_logLock = new();
     private readonly IServiceProvider _services;
     private MainWindow? _mainWindow;
 
@@ -30,14 +34,68 @@ public partial class App : Application
     public App()
     {
         UnhandledException += OnAppUnhandledException;
+        AppDomain.CurrentDomain.UnhandledException += OnCurrentDomainUnhandledException;
+        TaskScheduler.UnobservedTaskException += OnTaskSchedulerUnobservedTaskException;
+
         InitializeComponent();
         _services = ConfigureServices();
+
+        string[] cmdArgs = Environment.GetCommandLineArgs();
+        for (int i = 1; i < cmdArgs.Length; i++)
+        {
+            if (string.Equals(cmdArgs[i], "--autotest", StringComparison.OrdinalIgnoreCase))
+            {
+                WinPDF.Services.Diagnostics.AutoTestRunner.InitializeMonitoring();
+                break;
+            }
+        }
     }
 
     private void OnAppUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
-        System.Diagnostics.Debug.WriteLine($"[CRITICAL] Unhandled XAML exception caught safely: {e.Message}\n{e.Exception}");
+        LogException("XamlUnhandledException", e.Exception, e.Message);
         e.Handled = true;
+    }
+
+    private void OnCurrentDomainUnhandledException(object sender, System.UnhandledExceptionEventArgs e)
+    {
+        LogException("AppDomainUnhandledException", e.ExceptionObject as Exception);
+    }
+
+    private void OnTaskSchedulerUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
+    {
+        LogException("UnobservedTaskException", e.Exception);
+        e.SetObserved();
+    }
+
+    private static void LogException(string source, Exception? ex, string? message = null)
+    {
+        try
+        {
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string logDir = System.IO.Path.Combine(appData, "WinPDF", "logs");
+            System.IO.Directory.CreateDirectory(logDir);
+            string logPath = System.IO.Path.Combine(logDir, "crash.log");
+
+            lock (s_logLock)
+            {
+                if (System.IO.File.Exists(logPath))
+                {
+                    System.IO.FileInfo fileInfo = new(logPath);
+                    if (fileInfo.Length > 2 * 1024 * 1024)
+                    {
+                        string oldLog = System.IO.Path.Combine(logDir, "crash.old.log");
+                        System.IO.File.Move(logPath, oldLog, overwrite: true);
+                    }
+                }
+
+                string logEntry = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [{source}] {message}\n{ex}\n{new string('-', 60)}\n";
+                System.IO.File.AppendAllText(logPath, logEntry);
+            }
+        }
+        catch
+        {
+        }
     }
 
     private static IServiceProvider ConfigureServices()
@@ -78,6 +136,30 @@ public partial class App : Application
         IWindowContext windowContext = _services.GetRequiredService<IWindowContext>();
         windowContext.Initialize(_mainWindow);
 
+        // Check for automated diagnostic test mode
+        string[] cmdArgs = Environment.GetCommandLineArgs();
+        bool isAutoTest = false;
+        string? autoTestPdf = null;
+        for (int i = 1; i < cmdArgs.Length; i++)
+        {
+            if (string.Equals(cmdArgs[i], "--autotest", StringComparison.OrdinalIgnoreCase))
+            {
+                isAutoTest = true;
+                if (i + 1 < cmdArgs.Length && !cmdArgs[i + 1].StartsWith('-'))
+                {
+                    autoTestPdf = cmdArgs[i + 1].Trim('\"', ' ');
+                }
+                break;
+            }
+        }
+
+        if (isAutoTest)
+        {
+            _mainWindow.Activate();
+            WinPDF.Services.Diagnostics.AutoTestRunner.Run(_mainWindow, autoTestPdf);
+            return;
+        }
+
         // Check command-line activation for file paths
         if (!string.IsNullOrWhiteSpace(args.Arguments))
         {
@@ -95,6 +177,22 @@ public partial class App : Application
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Failed to parse launch arguments: {ex.Message}");
+            }
+        }
+        else if (cmdArgs.Length > 1)
+        {
+            try
+            {
+                string candidate = cmdArgs[1].Trim('\"', ' ');
+                if (!candidate.StartsWith('-') && System.IO.File.Exists(candidate) &&
+                    string.Equals(System.IO.Path.GetExtension(candidate), ".pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    ShellViewModel shellViewModel = _services.GetRequiredService<ShellViewModel>();
+                    _ = shellViewModel.OpenFilePathAsync(System.IO.Path.GetFullPath(candidate));
+                }
+            }
+            catch
+            {
             }
         }
 

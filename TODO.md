@@ -44,14 +44,15 @@ Checklist de melhorias de usabilidade, ergonomia visual (Fluent 2) e recursos es
 - [x] **Layout de 2 Colunas para Miniaturas:** Expandir a barra lateral esquerda para exibir 2 tiles por linha.
 - [x] **Proporção Real da Página nas Miniaturas:** Respeitar o `AspectRatio` real (`WidthPt / HeightPt`) de cada folha sem forçar A4.
 - [x] **Sincronização Automática da Barra Lateral:** Acompanhar a página atual com `ScrollIntoView` suave durante a rolagem do documento.
+- [x] **Modo Noturno de Leitura na GPU (Inversão Inteligente via Win2D).**
 
 ---
 
-## 📦 Pacote QoL 4: Teclado, Botão Direito, Modo Noturno e Rotação
+## 📦 Pacote QoL 4: Teclado, Botão Direito, Modo Noturno e Pesquisa
 - [ ] **Correção de Foco e Controle por Teclas Direcionais (`Up`, `Down`, `Left`, `Right`).**
 - [ ] **Atalhos Clássicos:** `PageDown`/`PageUp`, `Espaço`/`Shift+Espaço`, `Home`/`End`, `Ctrl+Roda do Mouse`, `Ctrl+0`, `F11`, `F5`, `Ctrl+R` / `Ctrl+Shift+R`.
 - [ ] **Menu de Contexto (Botão Direito do Mouse na Página).**
-- [ ] **Modo Noturno de Leitura na GPU (Inversão Inteligente via Win2D).**
+- [ ] **Botão de Pesquisa no Documento Funcional (Ctrl + F):** Botão de pesquisa abre uma barra no topo da interface, logo abaixo da titlebar e centralizada, com uma barra de busca, botões anterior e próximo e botão para diferenciar maiúscula de minúscula.
 
 ---
 

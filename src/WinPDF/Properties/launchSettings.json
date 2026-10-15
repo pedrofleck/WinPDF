@@ -1,11 +1,20 @@
 {
   "profiles": {
     "WinPDF (Unpackaged)": {
-      "commandName": "Project"
+      "commandName": "Project",
+      "nativeDebugging": true
     },
     "WinPDF (Unpackaged, open file)": {
       "commandName": "Project",
       "commandLineArgs": "\"%USERPROFILE%\\Documents\\sample.pdf\""
+    },
+    "WinPDF (Automated Diagnostics)": {
+      "commandName": "Project",
+      "commandLineArgs": "--autotest"
+    },
+    "WinPDF (Package)": {
+      "commandName": "MsixPackage",
+      "nativeDebugging": true
     }
   }
 }
