@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.Diagnostics;
+using System.Numerics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Graphics.Canvas;
+using Microsoft.Graphics.Canvas.Effects;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -50,6 +52,26 @@ public sealed partial class PdfPageCanvas : Grid
             typeof(double),
             typeof(PdfPageCanvas),
             new PropertyMetadata(1.0, OnZoomFactorPropertyChanged));
+
+    /// <summary>
+    /// Identifies the <see cref="IsNightMode"/> dependency property.
+    /// </summary>
+    public static readonly DependencyProperty IsNightModeProperty =
+        DependencyProperty.Register(
+            nameof(IsNightMode),
+            typeof(bool),
+            typeof(PdfPageCanvas),
+            new PropertyMetadata(false, OnIsNightModePropertyChanged));
+
+    /// <summary>
+    /// Identifies the <see cref="RotationAngle"/> dependency property.
+    /// </summary>
+    public static readonly DependencyProperty RotationAngleProperty =
+        DependencyProperty.Register(
+            nameof(RotationAngle),
+            typeof(int),
+            typeof(PdfPageCanvas),
+            new PropertyMetadata(0, OnRotationAnglePropertyChanged));
 
     private readonly CanvasControl _baseCanvas;
     private readonly CanvasControl _detailCanvas;
@@ -105,6 +127,24 @@ public sealed partial class PdfPageCanvas : Grid
     {
         get => (double)GetValue(ZoomFactorProperty);
         set => SetValue(ZoomFactorProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether night/dark reading mode is enabled.
+    /// </summary>
+    public bool IsNightMode
+    {
+        get => (bool)GetValue(IsNightModeProperty);
+        set => SetValue(IsNightModeProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the view rotation angle in degrees (0, 90, 180, 270).
+    /// </summary>
+    public int RotationAngle
+    {
+        get => (int)GetValue(RotationAngleProperty);
+        set => SetValue(RotationAngleProperty, value);
     }
 
     /// <summary>
@@ -222,6 +262,8 @@ public sealed partial class PdfPageCanvas : Grid
         if (_observedDocument is not null)
         {
             ZoomFactor = _observedDocument.ZoomFactor;
+            IsNightMode = _observedDocument.IsNightMode;
+            RotationAngle = _observedDocument.Rotation;
         }
         else
         {
@@ -291,6 +333,42 @@ public sealed partial class PdfPageCanvas : Grid
                 ZoomFactor = _observedDocument.ZoomFactor;
             }
         }
+        else if (e.PropertyName == nameof(DocumentViewModel.IsNightMode))
+        {
+            if (_observedDocument is not null)
+            {
+                IsNightMode = _observedDocument.IsNightMode;
+            }
+        }
+        else if (e.PropertyName == nameof(DocumentViewModel.Rotation))
+        {
+            if (_observedDocument is not null)
+            {
+                RotationAngle = _observedDocument.Rotation;
+            }
+        }
+    }
+
+    private static void OnIsNightModePropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is PdfPageCanvas canvas)
+        {
+            canvas._baseCanvas.ClearColor = canvas.IsNightMode
+                ? Windows.UI.Color.FromArgb(255, 18, 18, 18)
+                : Windows.UI.Color.FromArgb(255, 255, 255, 255);
+            canvas._baseCanvas.Invalidate();
+            canvas._detailCanvas.Invalidate();
+        }
+    }
+
+    private static void OnRotationAnglePropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is PdfPageCanvas canvas)
+        {
+            canvas.ReleaseHighResPatch();
+            canvas.UpdateDimensions();
+            canvas._baseCanvas.Invalidate();
+        }
     }
 
     private static void OnPageInfoPropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -333,10 +411,14 @@ public sealed partial class PdfPageCanvas : Grid
     {
         if (PageInfo is not null)
         {
-            Width = PageInfo.DisplayWidthDip;
-            Height = PageInfo.DisplayHeightDip;
-            _baseCanvas.Width = PageInfo.DisplayWidthDip;
-            _baseCanvas.Height = PageInfo.DisplayHeightDip;
+            bool swap = (RotationAngle % 180 != 0);
+            double effW = swap ? PageInfo.DisplayHeightDip : PageInfo.DisplayWidthDip;
+            double effH = swap ? PageInfo.DisplayWidthDip : PageInfo.DisplayHeightDip;
+
+            Width = effW;
+            Height = effH;
+            _baseCanvas.Width = effW;
+            _baseCanvas.Height = effH;
         }
     }
 
@@ -420,24 +502,57 @@ public sealed partial class PdfPageCanvas : Grid
         }
 
         var ds = args.DrawingSession;
-        Rect pageRect = new(0, 0, PageInfo.DisplayWidthDip, PageInfo.DisplayHeightDip);
+        bool swap = (RotationAngle % 180 != 0);
+        double effW = swap ? PageInfo.DisplayHeightDip : PageInfo.DisplayWidthDip;
+        double effH = swap ? PageInfo.DisplayWidthDip : PageInfo.DisplayHeightDip;
+        double origW = PageInfo.DisplayWidthDip;
+        double origH = PageInfo.DisplayHeightDip;
 
-        // 1. Folha branca base
-        ds.FillRectangle(pageRect, Windows.UI.Color.FromArgb(255, 255, 255, 255));
+        Rect pageRect = new(0, 0, effW, effH);
 
-        // 2. Bitmap base Nível 0 (Zq = 1.0f) como pré-visualização contínua e suave durante gestos
-        if (_baseBitmapEntry is { IsDisposed: false, Bitmap: { } baseBmp })
+        // 1. Folha base: branca no modo normal, OLED escuro #121212 no modo noturno
+        ds.FillRectangle(pageRect, IsNightMode
+            ? Windows.UI.Color.FromArgb(255, 18, 18, 18)
+            : Windows.UI.Color.FromArgb(255, 255, 255, 255));
+
+        // 2. Bitmap base Nível 0 (Zq = 1.0f) com rotação centrada e InvertEffect no modo noturno
+        var oldTransform = ds.Transform;
+        try
         {
-            try
+            if (RotationAngle != 0)
             {
-                ds.DrawImage(baseBmp, pageRect);
+                float angleRad = (float)(RotationAngle * Math.PI / 180.0);
+                Vector2 center = new((float)effW / 2f, (float)effH / 2f);
+                ds.Transform = Matrix3x2.CreateRotation(angleRad, center) * oldTransform;
             }
-            catch (ObjectDisposedException)
+
+            Rect drawRect = new((effW - origW) / 2.0, (effH - origH) / 2.0, origW, origH);
+
+            if (_baseBitmapEntry is { IsDisposed: false, Bitmap: { } baseBmp })
             {
-                _baseBitmapEntry?.Release();
-                _baseBitmapEntry = null;
-                UpdateRender();
+                try
+                {
+                    if (IsNightMode)
+                    {
+                        using var invert = new InvertEffect { Source = baseBmp };
+                        ds.DrawImage(invert, drawRect, baseBmp.Bounds);
+                    }
+                    else
+                    {
+                        ds.DrawImage(baseBmp, drawRect);
+                    }
+                }
+                catch (ObjectDisposedException)
+                {
+                    _baseBitmapEntry?.Release();
+                    _baseBitmapEntry = null;
+                    UpdateRender();
+                }
             }
+        }
+        finally
+        {
+            ds.Transform = oldTransform;
         }
     }
 
@@ -447,7 +562,16 @@ public sealed partial class PdfPageCanvas : Grid
         {
             try
             {
-                args.DrawingSession.DrawImage(_detailBitmap, new Rect(0, 0, _renderedPatchDip.Width, _renderedPatchDip.Height));
+                Rect destRect = new(0, 0, _renderedPatchDip.Width, _renderedPatchDip.Height);
+                if (IsNightMode)
+                {
+                    using var invert = new InvertEffect { Source = _detailBitmap };
+                    args.DrawingSession.DrawImage(invert, destRect, _detailBitmap.Bounds);
+                }
+                else
+                {
+                    args.DrawingSession.DrawImage(_detailBitmap, destRect);
+                }
             }
             catch (ObjectDisposedException)
             {
@@ -496,6 +620,40 @@ public sealed partial class PdfPageCanvas : Grid
 
         ZoomFactor = currentZoom;
 
+        Rect visibleDip = GetVisibleRectInPageDips();
+
+        // Caso 1 — Página fora da tela (visibleDip.IsEmpty ou dimensão <= 0) OU sem zoom (currentZoom <= 1.05) OU com rotação:
+        if (currentZoom <= 1.05 || visibleDip.IsEmpty || visibleDip.Width <= 0 || visibleDip.Height <= 0 || RotationAngle != 0)
+        {
+            ReleaseHighResPatch();
+
+            // Se a página não intersetar o viewport e estiver a mais de 1.5 viewports de distância vertical, descarte também _baseBitmapEntry
+            if ((visibleDip.IsEmpty || visibleDip.Width <= 0 || visibleDip.Height <= 0) && IsFarFromViewport())
+            {
+                if (_baseBitmapEntry is not null)
+                {
+                    _baseBitmapEntry.Release();
+                    _baseBitmapEntry = null;
+                    _baseCanvas.Invalidate();
+                }
+                return;
+            }
+
+            // Se estiver próxima (< 1.5 viewports) mas ainda sem _baseBitmapEntry, recarregue sob demanda
+            if (_baseBitmapEntry is null)
+            {
+                TryLoadCachedBitmaps();
+                if (_baseBitmapEntry is null && !_isUnloaded)
+                {
+                    _baseCts?.Cancel();
+                    _baseCts?.Dispose();
+                    _baseCts = new CancellationTokenSource();
+                    _ = RenderBaseBitmapAsync(_baseCts.Token);
+                }
+            }
+            return;
+        }
+
         // 1. Garantir que o bitmap base Nível 0 esteja carregado ou requisitado
         if (_baseBitmapEntry is null)
         {
@@ -508,15 +666,6 @@ public sealed partial class PdfPageCanvas : Grid
             _baseCts?.Dispose();
             _baseCts = new CancellationTokenSource();
             _ = RenderBaseBitmapAsync(_baseCts.Token);
-        }
-
-        Rect visibleDip = GetVisibleRectInPageDips();
-
-        // Caso 1 — Página fora da tela (visibleDip.IsEmpty) OU sem zoom (currentZoom <= 1.05):
-        if (currentZoom <= 1.05 || visibleDip.IsEmpty)
-        {
-            ReleaseHighResPatch();
-            return;
         }
 
         // Caso 2 — Página visível na tela (!visibleDip.IsEmpty) E com zoom (currentZoom > 1.05):
@@ -823,13 +972,13 @@ public sealed partial class PdfPageCanvas : Grid
     /// </summary>
     public Rect GetVisibleRectInPageDips()
     {
-        if (PageInfo is null || !IsLoaded || ActualWidth <= 0 || ActualHeight <= 0)
+        if (PageInfo is null || !IsLoaded)
         {
             return Rect.Empty;
         }
 
-        double pageW = PageInfo.DisplayWidthDip;
-        double pageH = PageInfo.DisplayHeightDip;
+        double pageW = ActualWidth > 0 ? ActualWidth : (Width > 0 ? Width : PageInfo.DisplayWidthDip);
+        double pageH = ActualHeight > 0 ? ActualHeight : (Height > 0 ? Height : PageInfo.DisplayHeightDip);
         if (pageW <= 0 || pageH <= 0)
         {
             return Rect.Empty;
@@ -881,6 +1030,49 @@ public sealed partial class PdfPageCanvas : Grid
         double h = Math.Clamp(relH * pageH, 1, pageH - y);
 
         return new Rect(x, y, w, h);
+    }
+
+    /// <summary>
+    /// Checks whether this canvas is located vertically farther than 1.5 viewport heights away from the visible area.
+    /// </summary>
+    private bool IsFarFromViewport()
+    {
+        var scrollViewer = FindAncestor<ScrollViewer>(this);
+        if (scrollViewer is null || scrollViewer.ViewportHeight <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            var pageToSv = TransformToVisual(scrollViewer);
+            double pageW = ActualWidth > 0 ? ActualWidth : (Width > 0 ? Width : (PageInfo?.DisplayWidthDip ?? 0));
+            double pageH = ActualHeight > 0 ? ActualHeight : (Height > 0 ? Height : (PageInfo?.DisplayHeightDip ?? 0));
+            if (pageW <= 0 || pageH <= 0)
+            {
+                return false;
+            }
+
+            Rect pageInSv = pageToSv.TransformBounds(new Rect(0, 0, pageW, pageH));
+            double vpHeight = scrollViewer.ViewportHeight;
+            double threshold = 1.5 * vpHeight;
+
+            if (pageInSv.Y + pageInSv.Height < -threshold)
+            {
+                return true;
+            }
+
+            if (pageInSv.Y > vpHeight + threshold)
+            {
+                return true;
+            }
+
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static T? FindAncestor<T>(DependencyObject current) where T : DependencyObject

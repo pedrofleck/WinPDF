@@ -54,7 +54,7 @@ public sealed partial class ThumbnailsTabPage : Page
     private Storyboard? _storyboard;
     private bool _isUserScrollingSidebar;
     private bool _isPointerOverSidebar;
-    private bool _isFollowing;
+    private bool _isRenderingHooked;
     private bool _isStoryboardRunning;
     private double _targetThumbScrollY;
     private int _currentColCount = 2;
@@ -105,7 +105,7 @@ public sealed partial class ThumbnailsTabPage : Page
     {
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         UnsubscribeFromDocument();
-        StopContinuousFollower();
+        StopSmoothScrollLoop();
         _storyboard?.Stop();
         _isStoryboardRunning = false;
         _userScrollDebounceTimer.Stop();
@@ -277,7 +277,7 @@ public sealed partial class ThumbnailsTabPage : Page
 
         if (!allowAnimation)
         {
-            StopContinuousFollower();
+            StopSmoothScrollLoop();
             _storyboard?.Stop();
             _isStoryboardRunning = false;
             try
@@ -296,7 +296,7 @@ public sealed partial class ThumbnailsTabPage : Page
         if (!isCardVisible)
         {
             // Target is not visible: rapid animation with ExponentialEase!
-            StopContinuousFollower();
+            StopSmoothScrollLoop();
             AnimateWithExponentialEase(curY, targetScrollY);
         }
         else
@@ -304,7 +304,7 @@ public sealed partial class ThumbnailsTabPage : Page
             // Target is visible: use continuous smooth follower
             if (!_isStoryboardRunning)
             {
-                StartContinuousFollower();
+                StartSmoothScrollLoop();
             }
         }
     }
@@ -362,29 +362,29 @@ public sealed partial class ThumbnailsTabPage : Page
         }
     }
 
-    private void StartContinuousFollower()
+    private void StartSmoothScrollLoop()
     {
-        if (!_isFollowing)
+        if (!_isRenderingHooked)
         {
-            _isFollowing = true;
+            _isRenderingHooked = true;
             CompositionTarget.Rendering += OnCompositionTargetRendering;
         }
     }
 
-    private void StopContinuousFollower()
+    private void StopSmoothScrollLoop()
     {
-        if (_isFollowing)
+        if (_isRenderingHooked)
         {
-            _isFollowing = false;
+            _isRenderingHooked = false;
             CompositionTarget.Rendering -= OnCompositionTargetRendering;
         }
     }
 
     private void OnCompositionTargetRendering(object? sender, object e)
     {
-        if (ThumbnailsScrollViewer is null || _isStoryboardRunning)
+        if (ThumbnailsScrollViewer is null || _isStoryboardRunning || _isUserScrollingSidebar)
         {
-            StopContinuousFollower();
+            StopSmoothScrollLoop();
             return;
         }
 
@@ -398,7 +398,7 @@ public sealed partial class ThumbnailsTabPage : Page
                 ThumbnailsScrollViewer.ChangeView(null, _targetThumbScrollY, null, disableAnimation: true);
             }
             catch { }
-            StopContinuousFollower();
+            StopSmoothScrollLoop();
         }
         else
         {
@@ -409,7 +409,7 @@ public sealed partial class ThumbnailsTabPage : Page
             }
             catch
             {
-                StopContinuousFollower();
+                StopSmoothScrollLoop();
             }
         }
     }
@@ -429,14 +429,14 @@ public sealed partial class ThumbnailsTabPage : Page
         _isUserScrollingSidebar = true;
         _storyboard?.Stop();
         _isStoryboardRunning = false;
-        StopContinuousFollower();
+        StopSmoothScrollLoop();
         _userScrollDebounceTimer.Stop();
         _userScrollDebounceTimer.Start();
     }
 
     private void OnThumbnailsScrollViewerViewChanging(object? sender, ScrollViewerViewChangingEventArgs e)
     {
-        if (!_isFollowing && !_isStoryboardRunning && _isPointerOverSidebar)
+        if (!_isRenderingHooked && !_isStoryboardRunning && _isPointerOverSidebar)
         {
             _isUserScrollingSidebar = true;
             _userScrollDebounceTimer.Stop();

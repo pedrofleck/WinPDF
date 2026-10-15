@@ -248,6 +248,9 @@
                                 <ToggleMenuFlyoutItem.Icon>
                                     <FontIcon Glyph="&#xE708;" />
                                 </ToggleMenuFlyoutItem.Icon>
+                                <ToggleMenuFlyoutItem.KeyboardAccelerators>
+                                    <KeyboardAccelerator Key="I" Modifiers="Control" />
+                                </ToggleMenuFlyoutItem.KeyboardAccelerators>
                             </ToggleMenuFlyoutItem>
 
                             <MenuFlyoutSeparator />

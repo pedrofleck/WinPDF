@@ -100,8 +100,8 @@
                                     VerticalAlignment="Center">
                                     <!-- Página Esquerda (ou Única) -->
                                     <Border
-                                        Width="{x:Bind LeftPage.DisplayWidthDip, Mode=OneTime}"
-                                        Height="{x:Bind LeftPage.DisplayHeightDip, Mode=OneTime}"
+                                        Width="{x:Bind LeftPageWidth, Mode=OneTime}"
+                                        Height="{x:Bind LeftPageHeight, Mode=OneTime}"
                                         HorizontalAlignment="Center"
                                         VerticalAlignment="Center"
                                         Background="{ThemeResource LayerFillColorDefaultBrush}"
@@ -112,7 +112,10 @@
                                         <Border.Shadow>
                                             <ThemeShadow />
                                         </Border.Shadow>
-                                        <controls:PdfPageCanvas PageInfo="{x:Bind LeftPage, Mode=OneTime}" />
+                                        <controls:PdfPageCanvas
+                                            PageInfo="{x:Bind LeftPage, Mode=OneTime}"
+                                            IsNightMode="{x:Bind IsNightMode, Mode=OneTime}"
+                                            RotationAngle="{x:Bind Rotation, Mode=OneTime}" />
                                     </Border>
 
                                     <!-- Página Direita (quando Dupla) -->
@@ -130,7 +133,10 @@
                                         <Border.Shadow>
                                             <ThemeShadow />
                                         </Border.Shadow>
-                                        <controls:PdfPageCanvas PageInfo="{x:Bind RightPage, Mode=OneTime}" />
+                                        <controls:PdfPageCanvas
+                                            PageInfo="{x:Bind RightPage, Mode=OneTime}"
+                                            IsNightMode="{x:Bind IsNightMode, Mode=OneTime}"
+                                            RotationAngle="{x:Bind Rotation, Mode=OneTime}" />
                                     </Border>
                                 </StackPanel>
                             </DataTemplate>

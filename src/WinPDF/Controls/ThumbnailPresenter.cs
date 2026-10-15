@@ -6,13 +6,14 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
+using WinPDF.Models;
 using WinPDF.Services;
 using WinPDF.ViewModels;
 
 namespace WinPDF.Controls;
 
 /// <summary>
-/// Displays a rendered PDF thumbnail without Large Object Heap allocations.
+/// Displays a rendered PDF thumbnail with real aspect ratio and zero-LOH memory recycling.
 /// </summary>
 public sealed class ThumbnailPresenter : Grid
 {
@@ -34,6 +35,16 @@ public sealed class ThumbnailPresenter : Grid
             typeof(ThumbnailPresenter),
             new PropertyMetadata(null, OnItemPropertyChanged));
 
+    /// <summary>
+    /// Identifies the <see cref="PageInfo"/> dependency property.
+    /// </summary>
+    public static readonly DependencyProperty PageInfoProperty =
+        DependencyProperty.Register(
+            nameof(PageInfo),
+            typeof(PdfPageInfo),
+            typeof(ThumbnailPresenter),
+            new PropertyMetadata(null, OnPageInfoPropertyChanged));
+
     private readonly Image _image;
     private ThumbnailItemViewModel? _observedItem;
 
@@ -44,6 +55,15 @@ public sealed class ThumbnailPresenter : Grid
     {
         get => (ThumbnailItemViewModel?)GetValue(ItemProperty);
         set => SetValue(ItemProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets optional page metadata for real aspect ratio calculation.
+    /// </summary>
+    public PdfPageInfo? PageInfo
+    {
+        get => (PdfPageInfo?)GetValue(PageInfoProperty);
+        set => SetValue(PageInfoProperty, value);
     }
 
     /// <summary>
@@ -77,12 +97,15 @@ public sealed class ThumbnailPresenter : Grid
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         SubscribeToItem(Item);
+        UpdateDimensions();
         UpdateImage();
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         UnsubscribeFromItem();
+        _image.Source = null;
+        _image.Visibility = Visibility.Collapsed;
     }
 
     private static void OnItemPropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -90,6 +113,16 @@ public sealed class ThumbnailPresenter : Grid
         if (d is ThumbnailPresenter presenter)
         {
             presenter.SubscribeToItem(e.NewValue as ThumbnailItemViewModel);
+            presenter.UpdateDimensions();
+            presenter.UpdateImage();
+        }
+    }
+
+    private static void OnPageInfoPropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is ThumbnailPresenter presenter)
+        {
+            presenter.UpdateDimensions();
             presenter.UpdateImage();
         }
     }
@@ -116,6 +149,8 @@ public sealed class ThumbnailPresenter : Grid
         {
             _observedItem.PropertyChanged -= OnObservedItemPropertyChanged;
             _observedItem = null;
+            _image.Source = null;
+            _image.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -124,6 +159,43 @@ public sealed class ThumbnailPresenter : Grid
         if (e.PropertyName == nameof(ThumbnailItemViewModel.Image))
         {
             DispatcherQueue.TryEnqueue(UpdateImage);
+        }
+        else if (e.PropertyName is nameof(ThumbnailItemViewModel.WidthDip) or nameof(ThumbnailItemViewModel.HeightDip))
+        {
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                UpdateDimensions();
+                UpdateImage();
+            });
+        }
+    }
+
+    private void UpdateDimensions()
+    {
+        if (Item is not null)
+        {
+            Width = Item.WidthDip;
+            Height = Item.HeightDip;
+            _image.Width = Item.WidthDip;
+            _image.Height = Item.HeightDip;
+        }
+        else if (PageInfo is not null)
+        {
+            double w = PageInfo.DisplayWidthDip;
+            double h = PageInfo.DisplayHeightDip;
+            double aspect = (w > 0 && h > 0) ? (w / h) : 1.0;
+            if (aspect <= 1.0)
+            {
+                Height = 148.0;
+                Width = Math.Clamp(Math.Round(148.0 * aspect), 60.0, 112.0);
+            }
+            else
+            {
+                Width = 112.0;
+                Height = Math.Clamp(Math.Round(112.0 / aspect), 60.0, 148.0);
+            }
+            _image.Width = Width;
+            _image.Height = Height;
         }
     }
 

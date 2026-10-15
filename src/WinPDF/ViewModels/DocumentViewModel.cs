@@ -173,10 +173,22 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Gets or sets a value indicating whether night/dark reading mode is active (inverting page colors on GPU).
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsNightMode { get; set; }
+
+    /// <summary>
     /// Gets or sets the clockwise rotation angle in degrees (0, 90, 180, 270).
     /// </summary>
     [ObservableProperty]
     public partial int Rotation { get; set; }
+
+    partial void OnRotationChanged(int value)
+    {
+        UpdateDisplayedRows();
+        ModeChanged?.Invoke(this, EventArgs.Empty);
+    }
 
     /// <summary>
     /// Gets or sets a value indicating whether there are unsaved annotation changes.
@@ -414,6 +426,14 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Rotates the document view 90 degrees counter-clockwise.
+    /// </summary>
+    public void RotateCounterClockwise()
+    {
+        Rotation = (Rotation + 270) % 360;
+    }
+
+    /// <summary>
     /// Navigates to the specified zero-based page index.
     /// </summary>
     /// <param name="pageIndex">Target zero-based page index.</param>
@@ -472,14 +492,14 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
                 {
                     PdfPageInfo left = Pages[i];
                     PdfPageInfo? right = (i + 1 < Pages.Count) ? Pages[i + 1] : null;
-                    targetRows.Add(new PdfPageRow(left, right, IsPresentationMode));
+                    targetRows.Add(new PdfPageRow(left, right, IsPresentationMode, Rotation, IsNightMode));
                 }
             }
             else
             {
                 for (int i = 0; i < Pages.Count; i++)
                 {
-                    targetRows.Add(new PdfPageRow(Pages[i], null, IsPresentationMode));
+                    targetRows.Add(new PdfPageRow(Pages[i], null, IsPresentationMode, Rotation, IsNightMode));
                 }
             }
         }
@@ -491,11 +511,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
                 int leftIndex = cur;
                 PdfPageInfo left = Pages[leftIndex];
                 PdfPageInfo? right = (leftIndex + 1 < Pages.Count) ? Pages[leftIndex + 1] : null;
-                targetRows.Add(new PdfPageRow(left, right, IsPresentationMode));
+                targetRows.Add(new PdfPageRow(left, right, IsPresentationMode, Rotation, IsNightMode));
             }
             else
             {
-                targetRows.Add(new PdfPageRow(Pages[cur], null, IsPresentationMode));
+                targetRows.Add(new PdfPageRow(Pages[cur], null, IsPresentationMode, Rotation, IsNightMode));
             }
         }
 
@@ -506,7 +526,9 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             {
                 if (DisplayedRows[i].LeftPage.Index != targetRows[i].LeftPage.Index ||
                     DisplayedRows[i].RightPage?.Index != targetRows[i].RightPage?.Index ||
-                    DisplayedRows[i].IsPresentationMode != targetRows[i].IsPresentationMode)
+                    DisplayedRows[i].IsPresentationMode != targetRows[i].IsPresentationMode ||
+                    DisplayedRows[i].Rotation != targetRows[i].Rotation ||
+                    DisplayedRows[i].IsNightMode != targetRows[i].IsNightMode)
                 {
                     isIdentical = false;
                     break;
@@ -804,6 +826,9 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
         _tileCache.RemoveDocument(DocumentId);
         _ = _pdfService.CloseDocumentAsync(DocumentId);
+
+        System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(2, GCCollectionMode.Forced, blocking: false, compacting: true);
     }
 }
 

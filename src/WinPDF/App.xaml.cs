@@ -81,11 +81,20 @@ public partial class App : Application
         // Check command-line activation for file paths
         if (!string.IsNullOrWhiteSpace(args.Arguments))
         {
-            string rawArg = args.Arguments.Trim('\"', ' ');
-            if (System.IO.File.Exists(rawArg))
+            try
             {
-                ShellViewModel shellViewModel = _services.GetRequiredService<ShellViewModel>();
-                _ = shellViewModel.OpenFilePathAsync(rawArg);
+                string rawArg = args.Arguments.Trim('\"', ' ');
+                string fullPath = System.IO.Path.GetFullPath(rawArg);
+                if (System.IO.File.Exists(fullPath) &&
+                    string.Equals(System.IO.Path.GetExtension(fullPath), ".pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    ShellViewModel shellViewModel = _services.GetRequiredService<ShellViewModel>();
+                    _ = shellViewModel.OpenFilePathAsync(fullPath);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to parse launch arguments: {ex.Message}");
             }
         }
 

@@ -52,7 +52,11 @@ public sealed partial class MainWindow : Window
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
 
-        AppWindow.SetIcon("Assets/appicon.ico");
+        string iconPath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "Assets", "appicon.ico");
+        if (System.IO.File.Exists(iconPath))
+        {
+            try { AppWindow.SetIcon(iconPath); } catch { }
+        }
 
         if (AppWindowTitleBar.IsCustomizationSupported())
         {

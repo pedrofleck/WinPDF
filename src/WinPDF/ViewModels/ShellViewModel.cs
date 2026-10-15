@@ -84,23 +84,28 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty]
     public partial AppThemePreference CurrentTheme { get; set; } = AppThemePreference.System;
 
-    partial void OnCurrentThemeChanged(AppThemePreference value)
+    /// <summary>
+    /// Gets or sets a value indicating whether document night / inverted reading mode is active.
+    /// This is independent of the application UI shell theme configured in settings.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsNightMode { get; set; }
+
+    partial void OnIsNightModeChanged(bool value)
     {
-        OnPropertyChanged(nameof(IsNightMode));
+        if (CurrentDocument is not null && CurrentDocument.IsNightMode != value)
+        {
+            CurrentDocument.IsNightMode = value;
+        }
     }
 
     /// <summary>
-    /// Gets a value indicating whether dark night mode is currently active.
-    /// </summary>
-    public bool IsNightMode => CurrentTheme == AppThemePreference.Dark;
-
-    /// <summary>
-    /// Toggles between night / dark mode and light mode.
+    /// Toggles the document night reading mode.
     /// </summary>
     [RelayCommand]
     public void ToggleNightMode()
     {
-        CurrentTheme = (CurrentTheme == AppThemePreference.Dark) ? AppThemePreference.Light : AppThemePreference.Dark;
+        IsNightMode = !IsNightMode;
     }
 
     /// <summary>
@@ -108,6 +113,7 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     [ObservableProperty]
     public partial bool IsSettingsOpen { get; set; }
+
 
     /// <summary>
     /// Gets or sets a value indicating whether dual page mode is enabled.
@@ -234,6 +240,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
         if (newValue is not null)
         {
+            newValue.IsNightMode = IsNightMode;
             newValue.IsContinuous = (ViewMode == ViewMode.Continuous);
             newValue.IsDoublePage = IsDualPage;
             newValue.IsPresentationMode = IsPresentationMode;
@@ -562,6 +569,15 @@ public sealed partial class ShellViewModel : ObservableObject
     public void RotateClockwise()
     {
         CurrentDocument?.RotateClockwise();
+    }
+
+    /// <summary>
+    /// Rotates the active document 90 degrees counter-clockwise.
+    /// </summary>
+    [RelayCommand]
+    public void RotateCounterClockwise()
+    {
+        CurrentDocument?.RotateCounterClockwise();
     }
 
     /// <summary>

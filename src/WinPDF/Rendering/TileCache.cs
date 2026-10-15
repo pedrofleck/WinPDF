@@ -121,11 +121,11 @@ public abstract class TileCacheEntry
 /// </remarks>
 public sealed class TileCache : IDisposable
 {
-    /// <summary>Default total budget: 128 MB.</summary>
-    public const long DefaultMaxBytes = 128L * 1024 * 1024;
+    /// <summary>Default total budget: 32 MB.</summary>
+    public const long DefaultMaxBytes = 32L * 1024 * 1024;
 
-    /// <summary>Default budget reserved for the Level 0 pool: 64 MB.</summary>
-    public const long DefaultMaxBaseBytes = 64L * 1024 * 1024;
+    /// <summary>Default budget reserved for the Level 0 pool: 16 MB.</summary>
+    public const long DefaultMaxBaseBytes = 16L * 1024 * 1024;
 
     private readonly object _gate = new();
     private readonly Dictionary<TileKey, LinkedListNode<Item>> _map = new();
@@ -137,7 +137,7 @@ public sealed class TileCache : IDisposable
     private long _baseBytes;
     private bool _disposed;
 
-    /// <summary>Initializes a cache with the default 256 MB / 64 MB budgets.</summary>
+    /// <summary>Initializes a cache with the default 32 MB / 16 MB budgets.</summary>
     public TileCache()
         : this(DefaultMaxBytes, DefaultMaxBaseBytes)
     {
