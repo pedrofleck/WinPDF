@@ -19,7 +19,7 @@ namespace WinPDF.Rendering;
 internal sealed class PdfiumPageCache : IDisposable
 {
     /// <summary>Default number of page handles retained.</summary>
-    internal const int DefaultCapacity = 10;
+    internal const int DefaultCapacity = 8;
 
     private readonly Dictionary<(long DocumentId, int PageIndex), LinkedListNode<Entry>> _map;
     private readonly LinkedList<Entry> _lru = new();

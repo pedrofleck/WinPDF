@@ -7,6 +7,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Imaging;
 using WinPDF.Models;
+using WinPDF.Rendering;
 using WinPDF.Services;
 using WinPDF.ViewModels;
 
@@ -202,41 +203,51 @@ public sealed class ThumbnailPresenter : Grid
     private void UpdateImage()
     {
         var entry = Item?.Image;
-        if (entry is null)
+        if (entry is null || entry.IsDisposed || entry.ByteLength <= 0 || entry.Width <= 0 || entry.Height <= 0)
         {
             _image.Source = null;
             _image.Visibility = Visibility.Collapsed;
             return;
         }
 
-        PdfBitmapLease lease = entry.Bitmap;
-        if (lease.IsDisposed || lease.Width <= 0 || lease.Height <= 0)
-        {
-            _image.Source = null;
-            _image.Visibility = Visibility.Collapsed;
-            return;
-        }
-
-        _image.Source = CreateWriteableBitmap(lease);
+        _image.Source = CreateWriteableBitmap(entry);
         _image.Visibility = Visibility.Visible;
     }
 
-    private static unsafe WriteableBitmap? CreateWriteableBitmap(PdfBitmapLease lease)
+    private static unsafe WriteableBitmap? CreateWriteableBitmap(PdfBitmapEntry entry)
     {
         try
         {
-            WriteableBitmap bitmap = new(lease.Width, lease.Height);
+            WriteableBitmap bitmap = new(entry.Width, entry.Height);
             if (bitmap.PixelBuffer is IBufferByteAccess byteAccess)
             {
                 byte* dest = byteAccess.Buffer;
-                byte* src = (byte*)lease.Scan0;
-                long bytesToCopy = Math.Min(lease.SizeInBytes, (long)lease.Stride * lease.Height);
-                Buffer.MemoryCopy(src, dest, bytesToCopy, bytesToCopy);
+                if (entry.Pixels is { Length: > 0 })
+                {
+                    fixed (byte* src = entry.Pixels)
+                    {
+                        long bytesToCopy = Math.Min(entry.ByteLength, (long)entry.Stride * entry.Height);
+                        Buffer.MemoryCopy(src, dest, bytesToCopy, bytesToCopy);
+                    }
+                }
+                else if (entry.Bitmap is { IsDisposed: false } lease)
+                {
+                    byte* src = (byte*)lease.Scan0;
+                    long bytesToCopy = Math.Min(lease.SizeInBytes, (long)lease.Stride * lease.Height);
+                    Buffer.MemoryCopy(src, dest, bytesToCopy, bytesToCopy);
+                }
             }
             else
             {
                 using Stream stream = bitmap.PixelBuffer.AsStream();
-                stream.Write(lease.AsSpan());
+                if (entry.Pixels is { Length: > 0 })
+                {
+                    stream.Write(entry.Pixels, 0, entry.ByteLength);
+                }
+                else if (entry.Bitmap is { IsDisposed: false } lease)
+                {
+                    stream.Write(lease.AsSpan());
+                }
             }
 
             bitmap.Invalidate();

@@ -134,6 +134,7 @@
                                             <ThemeShadow />
                                         </Border.Shadow>
                                         <controls:PdfPageCanvas
+                                            Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasRightPage), Mode=OneTime}"
                                             PageInfo="{x:Bind RightPage, Mode=OneTime}"
                                             IsNightMode="{x:Bind IsNightMode, Mode=OneTime}"
                                             RotationAngle="{x:Bind Rotation, Mode=OneTime}" />

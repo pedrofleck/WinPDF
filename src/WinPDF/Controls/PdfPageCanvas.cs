@@ -1,9 +1,12 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Numerics;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Effects;
+using Microsoft.Graphics.Canvas.UI;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -18,7 +21,7 @@ using WinPDF.ViewModels;
 namespace WinPDF.Controls;
 
 /// <summary>
-/// Native Win2D canvas rendering a single PDF page with zero-LOH uploads, single viewport detail patch,
+/// Native Win2D canvas rendering a single PDF page with zero-LOH uploads, unified single-SwapChain architecture,
 /// fallback background blitting during zoom/scroll, and true 0.0% CPU/GPU consumption when stationary.
 /// </summary>
 public sealed partial class PdfPageCanvas : Grid
@@ -73,15 +76,13 @@ public sealed partial class PdfPageCanvas : Grid
             typeof(PdfPageCanvas),
             new PropertyMetadata(0, OnRotationAnglePropertyChanged));
 
-    private readonly CanvasControl _baseCanvas;
-    private readonly CanvasControl _detailCanvas;
-    private readonly TranslateTransform _detailTranslate;
+    private readonly CanvasControl _canvas;
     private readonly IPdfService _pdfService;
     private readonly TileCache _tileCache;
 
-    private CanvasBitmapEntry? _baseBitmapEntry;
+    private CanvasBitmap? _level0Bitmap;
     private CanvasBitmap? _detailBitmap;
-    private Rect _renderedPatchDip = Rect.Empty;
+    private Rect _detailRectDip = Rect.Empty;
     private double _renderedZoom = 1.0;
 
     private CancellationTokenSource? _baseCts;
@@ -90,7 +91,7 @@ public sealed partial class PdfPageCanvas : Grid
     private int _loadedPageIndex = -1;
     private volatile bool _isUnloaded;
     private bool _isResourcesCreated;
-    private bool _pendingRender;
+    private bool _needsLevel0Render;
 
     /// <summary>
     /// Gets or sets the metadata describing the page to render.
@@ -210,7 +211,7 @@ public sealed partial class PdfPageCanvas : Grid
     }
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="PdfPageCanvas"/> class.
+    /// Initializes a new instance of the <see cref="PdfPageCanvas"/> class with a single unified CanvasControl.
     /// </summary>
     public PdfPageCanvas()
     {
@@ -220,8 +221,7 @@ public sealed partial class PdfPageCanvas : Grid
         _pdfService = App.CurrentApp.Services.GetRequiredService<IPdfService>();
         _tileCache = App.CurrentApp.Services.GetRequiredService<TileCache>();
 
-        // PROIBIÇÃO ABSOLUTA: DpiScale do _baseCanvas fixo em 1.0f para sempre.
-        _baseCanvas = new CanvasControl
+        _canvas = new CanvasControl
         {
             UseSharedDevice = true,
             ClearColor = Windows.UI.Color.FromArgb(255, 255, 255, 255),
@@ -230,25 +230,10 @@ public sealed partial class PdfPageCanvas : Grid
             VerticalAlignment = VerticalAlignment.Stretch,
         };
 
-        _baseCanvas.CreateResources += OnCreateResources;
-        _baseCanvas.Draw += OnBaseCanvasDraw;
+        _canvas.CreateResources += OnCreateResources;
+        _canvas.Draw += OnCanvasDraw;
 
-        _detailTranslate = new TranslateTransform();
-        _detailCanvas = new CanvasControl
-        {
-            UseSharedDevice = true,
-            ClearColor = Windows.UI.Color.FromArgb(0, 0, 0, 0),
-            HorizontalAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Top,
-            Visibility = Visibility.Collapsed,
-            IsHitTestVisible = false,
-            RenderTransform = _detailTranslate,
-        };
-
-        _detailCanvas.Draw += OnDetailCanvasDraw;
-
-        Children.Add(_baseCanvas);
-        Children.Add(_detailCanvas);
+        Children.Add(_canvas);
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
@@ -257,6 +242,11 @@ public sealed partial class PdfPageCanvas : Grid
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         _isUnloaded = false;
+        if (PageInfo is null)
+        {
+            return;
+        }
+
         UpdateDimensions();
         SubscribeToActiveDocument();
         if (_observedDocument is not null)
@@ -353,11 +343,10 @@ public sealed partial class PdfPageCanvas : Grid
     {
         if (d is PdfPageCanvas canvas)
         {
-            canvas._baseCanvas.ClearColor = canvas.IsNightMode
+            canvas._canvas.ClearColor = canvas.IsNightMode
                 ? Windows.UI.Color.FromArgb(255, 18, 18, 18)
                 : Windows.UI.Color.FromArgb(255, 255, 255, 255);
-            canvas._baseCanvas.Invalidate();
-            canvas._detailCanvas.Invalidate();
+            canvas._canvas.Invalidate();
         }
     }
 
@@ -367,7 +356,7 @@ public sealed partial class PdfPageCanvas : Grid
         {
             canvas.ReleaseHighResPatch();
             canvas.UpdateDimensions();
-            canvas._baseCanvas.Invalidate();
+            canvas._canvas.Invalidate();
         }
     }
 
@@ -380,9 +369,12 @@ public sealed partial class PdfPageCanvas : Grid
             canvas.ReleaseBitmaps();
             canvas._loadedPageIndex = canvas.PageInfo?.Index ?? -1;
             canvas.UpdateDimensions();
-            canvas.TryLoadCachedBitmaps();
-            canvas._baseCanvas.Invalidate();
-            canvas.UpdateRender();
+            if (canvas.PageInfo is not null)
+            {
+                canvas.TryLoadCachedBitmaps();
+                canvas._canvas.Invalidate();
+                canvas.UpdateRender();
+            }
         }
     }
 
@@ -393,9 +385,12 @@ public sealed partial class PdfPageCanvas : Grid
             canvas.CancelInFlightRenders();
             canvas.ReleaseHighResPatch();
             canvas.ReleaseBitmaps();
-            canvas.TryLoadCachedBitmaps();
-            canvas._baseCanvas.Invalidate();
-            canvas.UpdateRender();
+            if (canvas.PageInfo is not null)
+            {
+                canvas.TryLoadCachedBitmaps();
+                canvas._canvas.Invalidate();
+                canvas.UpdateRender();
+            }
         }
     }
 
@@ -417,34 +412,41 @@ public sealed partial class PdfPageCanvas : Grid
 
             Width = effW;
             Height = effH;
-            _baseCanvas.Width = effW;
-            _baseCanvas.Height = effH;
+            _canvas.Width = effW;
+            _canvas.Height = effH;
+        }
+        else
+        {
+            Width = 0;
+            Height = 0;
+            _canvas.Width = 0;
+            _canvas.Height = 0;
         }
     }
 
-    private void OnCreateResources(CanvasControl sender, Microsoft.Graphics.Canvas.UI.CanvasCreateResourcesEventArgs args)
+    private void OnCreateResources(CanvasControl sender, CanvasCreateResourcesEventArgs args)
     {
         _isResourcesCreated = true;
-        if (args.Reason == Microsoft.Graphics.Canvas.UI.CanvasCreateResourcesReason.NewDevice)
+        if (args.Reason == CanvasCreateResourcesReason.NewDevice)
         {
             _tileCache.HandleDeviceLost();
-            _baseBitmapEntry?.Release();
-            _baseBitmapEntry = null;
+            _level0Bitmap?.Dispose();
+            _level0Bitmap = null;
             ReleaseHighResPatch();
         }
 
-        if (_baseBitmapEntry is null)
+        if (_level0Bitmap is null)
         {
             TryLoadCachedBitmaps();
         }
 
-        if (_baseBitmapEntry is not null)
+        if (_level0Bitmap is not null)
         {
-            _baseCanvas.Invalidate();
+            _canvas.Invalidate();
         }
-        else if (_pendingRender || PageInfo is not null)
+        else if (_needsLevel0Render || PageInfo is not null)
         {
-            _pendingRender = false;
+            _needsLevel0Render = false;
             UpdateRender();
         }
     }
@@ -472,19 +474,16 @@ public sealed partial class PdfPageCanvas : Grid
 
         if (_tileCache.TryGet(in baseKey, out TileCacheEntry? cached))
         {
-            if (cached is CanvasBitmapEntry canvasEntry)
+            if (cached is CanvasBitmapEntry { IsDisposed: false } canvasEntry)
             {
-                _baseBitmapEntry?.Release();
-                _baseBitmapEntry = canvasEntry;
+                _level0Bitmap = canvasEntry.Bitmap;
             }
-            else
-            {
-                cached?.Release();
-            }
+
+            cached?.Release();
         }
     }
 
-    private void OnBaseCanvasDraw(CanvasControl sender, CanvasDrawEventArgs args)
+    private void OnCanvasDraw(CanvasControl sender, CanvasDrawEventArgs args)
     {
         if (PageInfo is null)
         {
@@ -502,51 +501,58 @@ public sealed partial class PdfPageCanvas : Grid
         }
 
         var ds = args.DrawingSession;
-        bool swap = (RotationAngle % 180 != 0);
-        double effW = swap ? PageInfo.DisplayHeightDip : PageInfo.DisplayWidthDip;
-        double effH = swap ? PageInfo.DisplayWidthDip : PageInfo.DisplayHeightDip;
-        double origW = PageInfo.DisplayWidthDip;
-        double origH = PageInfo.DisplayHeightDip;
+        double w = sender.ActualWidth > 0 ? sender.ActualWidth : Width;
+        double h = sender.ActualHeight > 0 ? sender.ActualHeight : Height;
+        if (w <= 0 || h <= 0)
+        {
+            return;
+        }
 
-        Rect pageRect = new(0, 0, effW, effH);
+        Rect pageRect = new(0, 0, w, h);
 
         // 1. Folha base: branca no modo normal, OLED escuro #121212 no modo noturno
         ds.FillRectangle(pageRect, IsNightMode
             ? Windows.UI.Color.FromArgb(255, 18, 18, 18)
             : Windows.UI.Color.FromArgb(255, 255, 255, 255));
 
-        // 2. Bitmap base Nível 0 (Zq = 1.0f) com rotação centrada e InvertEffect no modo noturno
+        // 2. Rotação centrada via Matrix3x2
         var oldTransform = ds.Transform;
         try
         {
             if (RotationAngle != 0)
             {
                 float angleRad = (float)(RotationAngle * Math.PI / 180.0);
-                Vector2 center = new((float)effW / 2f, (float)effH / 2f);
+                Vector2 center = new((float)w / 2f, (float)h / 2f);
                 ds.Transform = Matrix3x2.CreateRotation(angleRad, center) * oldTransform;
             }
 
-            Rect drawRect = new((effW - origW) / 2.0, (effH - origH) / 2.0, origW, origH);
-
-            if (_baseBitmapEntry is { IsDisposed: false, Bitmap: { } baseBmp })
+            // 3. Desenhar Nível 0 base
+            if (_level0Bitmap is { } baseBmp)
             {
                 try
                 {
-                    if (IsNightMode)
-                    {
-                        using var invert = new InvertEffect { Source = baseBmp };
-                        ds.DrawImage(invert, drawRect, baseBmp.Bounds);
-                    }
-                    else
-                    {
-                        ds.DrawImage(baseBmp, drawRect);
-                    }
+                    bool swap = (RotationAngle % 180 != 0);
+                    double origW = swap ? h : w;
+                    double origH = swap ? w : h;
+                    Rect baseDest = new((w - origW) / 2.0, (h - origH) / 2.0, origW, origH);
+                    DrawBitmapWithNightMode(ds, baseBmp, baseDest, baseBmp.Bounds);
                 }
-                catch (ObjectDisposedException)
+                catch (Exception ex) when (ex is ObjectDisposedException or COMException)
                 {
-                    _baseBitmapEntry?.Release();
-                    _baseBitmapEntry = null;
-                    UpdateRender();
+                    _level0Bitmap = null;
+                }
+            }
+
+            // 4. Desenhar Patch de alta resolução sobre a região visível (apenas sem rotação do usuário)
+            if (RotationAngle == 0 && _detailBitmap is { } detailBmp && !_detailRectDip.IsEmpty && _detailRectDip.Width > 0 && _detailRectDip.Height > 0)
+            {
+                try
+                {
+                    DrawBitmapWithNightMode(ds, detailBmp, _detailRectDip, detailBmp.Bounds);
+                }
+                catch (Exception ex) when (ex is ObjectDisposedException or COMException)
+                {
+                    _detailBitmap = null;
                 }
             }
         }
@@ -556,33 +562,31 @@ public sealed partial class PdfPageCanvas : Grid
         }
     }
 
-    private void OnDetailCanvasDraw(CanvasControl sender, CanvasDrawEventArgs args)
+    private void DrawBitmapWithNightMode(
+        CanvasDrawingSession ds,
+        CanvasBitmap bitmap,
+        Rect destRect,
+        Rect srcRect)
     {
-        if (_detailBitmap is not null && !_renderedPatchDip.IsEmpty)
+        try
         {
-            try
+            if (IsNightMode)
             {
-                Rect destRect = new(0, 0, _renderedPatchDip.Width, _renderedPatchDip.Height);
-                if (IsNightMode)
-                {
-                    using var invert = new InvertEffect { Source = _detailBitmap };
-                    args.DrawingSession.DrawImage(invert, destRect, _detailBitmap.Bounds);
-                }
-                else
-                {
-                    args.DrawingSession.DrawImage(_detailBitmap, destRect);
-                }
+                using var invert = new InvertEffect { Source = bitmap };
+                ds.DrawImage(invert, destRect, srcRect);
             }
-            catch (ObjectDisposedException)
+            else
             {
-                _detailBitmap?.Dispose();
-                _detailBitmap = null;
+                ds.DrawImage(bitmap, destRect, srcRect);
             }
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or COMException)
+        {
         }
     }
 
     /// <summary>
-    /// Releases the high-resolution patch and collapses the detail canvas.
+    /// Releases the high-resolution patch.
     /// </summary>
     public void ReleaseHighResPatch()
     {
@@ -590,15 +594,15 @@ public sealed partial class PdfPageCanvas : Grid
         _detailCts?.Dispose();
         _detailCts = null;
 
-        if (_detailCanvas.Visibility != Visibility.Collapsed)
+        if (_detailBitmap is not null)
         {
-            _detailCanvas.Visibility = Visibility.Collapsed;
+            CanvasBitmap? old = _detailBitmap;
+            _detailBitmap = null;
+            _detailRectDip = Rect.Empty;
+            _renderedZoom = 1.0;
+            _canvas.Invalidate();
+            old?.Dispose();
         }
-
-        _detailBitmap?.Dispose();
-        _detailBitmap = null;
-        _renderedPatchDip = Rect.Empty;
-        _renderedZoom = 1.0;
     }
 
     /// <summary>
@@ -609,6 +613,7 @@ public sealed partial class PdfPageCanvas : Grid
 
     /// <summary>
     /// Updates the viewport and triggers detail rendering if zoomed and visible.
+    /// Level 0 bitmap is always retained while loaded.
     /// </summary>
     /// <param name="currentZoom">The current zoom factor.</param>
     public void UpdateViewport(double currentZoom)
@@ -620,47 +625,13 @@ public sealed partial class PdfPageCanvas : Grid
 
         ZoomFactor = currentZoom;
 
-        Rect visibleDip = GetVisibleRectInPageDips();
-
-        // Caso 1 — Página fora da tela (visibleDip.IsEmpty ou dimensão <= 0) OU sem zoom (currentZoom <= 1.05) OU com rotação:
-        if (currentZoom <= 1.05 || visibleDip.IsEmpty || visibleDip.Width <= 0 || visibleDip.Height <= 0 || RotationAngle != 0)
-        {
-            ReleaseHighResPatch();
-
-            // Se a página não intersetar o viewport e estiver a mais de 1.5 viewports de distância vertical, descarte também _baseBitmapEntry
-            if ((visibleDip.IsEmpty || visibleDip.Width <= 0 || visibleDip.Height <= 0) && IsFarFromViewport())
-            {
-                if (_baseBitmapEntry is not null)
-                {
-                    _baseBitmapEntry.Release();
-                    _baseBitmapEntry = null;
-                    _baseCanvas.Invalidate();
-                }
-                return;
-            }
-
-            // Se estiver próxima (< 1.5 viewports) mas ainda sem _baseBitmapEntry, recarregue sob demanda
-            if (_baseBitmapEntry is null)
-            {
-                TryLoadCachedBitmaps();
-                if (_baseBitmapEntry is null && !_isUnloaded)
-                {
-                    _baseCts?.Cancel();
-                    _baseCts?.Dispose();
-                    _baseCts = new CancellationTokenSource();
-                    _ = RenderBaseBitmapAsync(_baseCts.Token);
-                }
-            }
-            return;
-        }
-
-        // 1. Garantir que o bitmap base Nível 0 esteja carregado ou requisitado
-        if (_baseBitmapEntry is null)
+        // Garantir que o bitmap base Nível 0 esteja carregado ou requisitado
+        if (_level0Bitmap is null)
         {
             TryLoadCachedBitmaps();
         }
 
-        if (_baseBitmapEntry is null && !_isUnloaded)
+        if (_level0Bitmap is null && !_isUnloaded)
         {
             _baseCts?.Cancel();
             _baseCts?.Dispose();
@@ -668,18 +639,27 @@ public sealed partial class PdfPageCanvas : Grid
             _ = RenderBaseBitmapAsync(_baseCts.Token);
         }
 
+        Rect visibleDip = GetVisibleRectInPageDips();
+
+        // Caso 1 — Página fora da tela (visibleDip.IsEmpty ou dimensão <= 0) OU sem zoom (currentZoom <= 1.05) OU com rotação:
+        if (currentZoom <= 1.05 || visibleDip.IsEmpty || visibleDip.Width <= 0 || visibleDip.Height <= 0 || RotationAngle != 0)
+        {
+            ReleaseHighResPatch();
+            return;
+        }
+
         // Caso 2 — Página visível na tela (!visibleDip.IsEmpty) E com zoom (currentZoom > 1.05):
         bool sameZoom = Math.Abs(_renderedZoom - currentZoom) < 0.02;
         bool coversViewport = _detailBitmap is not null
-            && !_renderedPatchDip.IsEmpty
-            && _renderedPatchDip.X <= visibleDip.X + 0.5
-            && _renderedPatchDip.Y <= visibleDip.Y + 0.5
-            && (_renderedPatchDip.X + _renderedPatchDip.Width) >= (visibleDip.X + visibleDip.Width - 0.5)
-            && (_renderedPatchDip.Y + _renderedPatchDip.Height) >= (visibleDip.Y + visibleDip.Height - 0.5);
+            && !_detailRectDip.IsEmpty
+            && _detailRectDip.X <= visibleDip.X + 0.5
+            && _detailRectDip.Y <= visibleDip.Y + 0.5
+            && (_detailRectDip.X + _detailRectDip.Width) >= (visibleDip.X + visibleDip.Width - 0.5)
+            && (_detailRectDip.Y + _detailRectDip.Height) >= (visibleDip.Y + visibleDip.Height - 0.5);
 
         if (sameZoom && coversViewport)
         {
-            return; // Já está nítido na região visível atual!
+            return;
         }
 
         _ = RenderDetailPatchAsync(visibleDip, currentZoom);
@@ -694,19 +674,16 @@ public sealed partial class PdfPageCanvas : Grid
 
         if (!_isResourcesCreated)
         {
-            _pendingRender = true;
+            _needsLevel0Render = true;
             return;
         }
 
-        _pendingRender = false;
-
-        // 1. Garantir que o bitmap base Nível 0 esteja carregado ou requisitado
-        if (_baseBitmapEntry is null)
+        if (_level0Bitmap is null)
         {
             TryLoadCachedBitmaps();
         }
 
-        if (_baseBitmapEntry is null)
+        if (_level0Bitmap is null)
         {
             _baseCts?.Cancel();
             _baseCts?.Dispose();
@@ -743,101 +720,112 @@ public sealed partial class PdfPageCanvas : Grid
 
         if (_tileCache.TryGet(in baseKey, out TileCacheEntry? cached))
         {
-            if (cached is CanvasBitmapEntry canvasEntry)
+            if (cached is CanvasBitmapEntry { IsDisposed: false } canvasEntry)
             {
                 if (PageInfo?.Index == targetPageIndex && EffectiveDocumentId == targetDocId && !_isUnloaded)
                 {
-                    _baseBitmapEntry?.Release();
-                    _baseBitmapEntry = canvasEntry;
-                    _baseCanvas.Invalidate();
+                    _level0Bitmap = canvasEntry.Bitmap;
+                    _canvas.Invalidate();
 
                     if (EffectiveZoom > 1.05)
                     {
                         UpdateViewport(EffectiveZoom);
                     }
+
+                    cached?.Release();
                     return;
                 }
             }
+
             cached?.Release();
         }
 
         (int pixelWidth, int pixelHeight) = RenderGeometry.ComputeFullPagePixelSize(pageInfo, 1.0, rasterizationScale, 0);
 
+        PdfBitmapLease lease;
         try
         {
-            PdfBitmapLease lease = await _pdfService.RenderPageAsync(
+            lease = await _pdfService.RenderPageAsync(
                 targetDocId,
                 targetPageIndex,
                 pixelWidth,
                 pixelHeight,
                 highPriority: true,
                 ct).ConfigureAwait(false);
-
-            if (ct.IsCancellationRequested)
-            {
-                lease.Dispose();
-                return;
-            }
-
-            byte[] pixelData = lease.ToPixelArray();
-            int width = lease.Width;
-            int height = lease.Height;
-            lease.Dispose();
-
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                if (_isUnloaded || PageInfo?.Index != targetPageIndex || EffectiveDocumentId != targetDocId)
-                {
-                    return;
-                }
-
-                try
-                {
-                    CanvasDevice? device = CanvasDevice.GetSharedDevice();
-                    if (device is null)
-                    {
-                        return;
-                    }
-
-                    var bitmap = CanvasBitmap.CreateFromBytes(
-                        device,
-                        pixelData,
-                        width,
-                        height,
-                        DirectXPixelFormat.B8G8R8A8UIntNormalized);
-
-                    CanvasBitmapEntry entry = new(bitmap);
-                    _tileCache.Add(in baseKey, entry);
-
-                    if (!ct.IsCancellationRequested)
-                    {
-                        _baseBitmapEntry?.Release();
-                        _baseBitmapEntry = entry;
-                        _baseCanvas.Invalidate();
-
-                        if (EffectiveZoom > 1.05)
-                        {
-                            UpdateViewport(EffectiveZoom);
-                        }
-                    }
-                    else
-                    {
-                        entry.Release();
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"Base bitmap upload failed: {ex.Message}");
-                }
-            });
         }
         catch (OperationCanceledException)
         {
+            return;
         }
         catch (Exception ex)
         {
             Debug.WriteLine($"Base bitmap render failed: {ex.Message}");
+            return;
         }
+
+        if (ct.IsCancellationRequested || _isUnloaded)
+        {
+            lease.Dispose();
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            try
+            {
+                if (ct.IsCancellationRequested || _isUnloaded || !IsLoaded || PageInfo?.Index != targetPageIndex || EffectiveDocumentId != targetDocId)
+                {
+                    lease.Dispose();
+                    return;
+                }
+
+                if (_canvas.Device is null)
+                {
+                    _needsLevel0Render = true;
+                    lease.Dispose();
+                    return;
+                }
+
+                using (var entry = new PdfBitmapEntry(lease))
+                {
+                    lease.Dispose();
+
+                    var buffer = entry.Pixels.AsBuffer(0, entry.ByteLength);
+                    CanvasBitmap newBitmap;
+                    try
+                    {
+                        newBitmap = CanvasBitmap.CreateFromBytes(
+                            _canvas,
+                            buffer,
+                            entry.Width,
+                            entry.Height,
+                            DirectXPixelFormat.B8G8R8A8UIntNormalized);
+                    }
+                    catch (Exception ex) when (ex is ObjectDisposedException or COMException)
+                    {
+                        return;
+                    }
+
+                    CanvasBitmapEntry cacheEntry = new(newBitmap);
+                    _tileCache.Add(in baseKey, cacheEntry);
+
+                    CanvasBitmap? oldBitmap = _level0Bitmap;
+                    _level0Bitmap = newBitmap;
+                    _canvas.Invalidate();
+                    oldBitmap?.Dispose();
+
+                    if (EffectiveZoom > 1.05)
+                    {
+                        UpdateViewport(EffectiveZoom);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                lease.Dispose();
+                Debug.WriteLine($"Base bitmap upload failed: {ex.Message}");
+            }
+        });
     }
 
     private async Task RenderDetailPatchAsync(Rect visibleDip, double currentZoom)
@@ -858,7 +846,6 @@ public sealed partial class PdfPageCanvas : Grid
         double pageW = pageInfo.DisplayWidthDip;
         double pageH = pageInfo.DisplayHeightDip;
 
-        // Expande visibleDip com uma margem de pré-carregamento de 20% da largura/altura em cada direção
         double marginX = visibleDip.Width * 0.20;
         double marginY = visibleDip.Height * 0.20;
         double patchX = Math.Max(0, visibleDip.X - marginX);
@@ -870,7 +857,6 @@ public sealed partial class PdfPageCanvas : Grid
         double rasterScale = XamlRoot?.RasterizationScale ?? 1.0;
         double pixelScale = currentZoom * rasterScale;
 
-        // Limita o patch a no máximo 3840x2400 pixels físicos (~35 MB máx, ~10 MB típico)
         double maxScaleW = 3840.0 / Math.Max(1.0, patchDip.Width);
         double maxScaleH = 2400.0 / Math.Max(1.0, patchDip.Height);
         pixelScale = Math.Min(pixelScale, Math.Min(maxScaleW, maxScaleH));
@@ -913,54 +899,53 @@ public sealed partial class PdfPageCanvas : Grid
             return;
         }
 
-        byte[] pixelData = lease.ToPixelArray();
-        int leaseW = lease.Width;
-        int leaseH = lease.Height;
-        lease.Dispose();
-
         DispatcherQueue.TryEnqueue(() =>
         {
-            if (ct.IsCancellationRequested || _isUnloaded || PageInfo?.Index != targetPageIndex || EffectiveDocumentId != targetDocId)
-            {
-                return;
-            }
-
             try
             {
-                CanvasDevice? device = CanvasDevice.GetSharedDevice();
-                if (device is null)
+                if (ct.IsCancellationRequested || _isUnloaded || !IsLoaded || PageInfo?.Index != targetPageIndex || EffectiveDocumentId != targetDocId)
                 {
+                    lease.Dispose();
                     return;
                 }
 
-                var newBitmap = CanvasBitmap.CreateFromBytes(
-                    device,
-                    pixelData,
-                    leaseW,
-                    leaseH,
-                    DirectXPixelFormat.B8G8R8A8UIntNormalized);
-
-                _detailBitmap?.Dispose();
-                _detailBitmap = newBitmap;
-                _renderedPatchDip = patchDip;
-                _renderedZoom = currentZoom;
-
-                _detailTranslate.X = patchDip.X;
-                _detailTranslate.Y = patchDip.Y;
-                _detailCanvas.Width = patchDip.Width;
-                _detailCanvas.Height = patchDip.Height;
-
-                float targetDpiScale = (float)Math.Clamp(pixelScale / rasterScale, 1.0, 8.0);
-                if (Math.Abs(_detailCanvas.DpiScale - targetDpiScale) > 0.25f)
+                if (_canvas.Device is null)
                 {
-                    _detailCanvas.DpiScale = targetDpiScale;
+                    lease.Dispose();
+                    return;
                 }
 
-                _detailCanvas.Visibility = Visibility.Visible;
-                _detailCanvas.Invalidate();
+                using (var entry = new PdfBitmapEntry(lease))
+                {
+                    lease.Dispose();
+
+                    var buffer = entry.Pixels.AsBuffer(0, entry.ByteLength);
+                    CanvasBitmap newBitmap;
+                    try
+                    {
+                        newBitmap = CanvasBitmap.CreateFromBytes(
+                            _canvas,
+                            buffer,
+                            entry.Width,
+                            entry.Height,
+                            DirectXPixelFormat.B8G8R8A8UIntNormalized);
+                    }
+                    catch (Exception ex) when (ex is ObjectDisposedException or COMException)
+                    {
+                        return;
+                    }
+
+                    CanvasBitmap? oldDetail = _detailBitmap;
+                    _detailBitmap = newBitmap;
+                    _detailRectDip = patchDip;
+                    _renderedZoom = currentZoom;
+                    _canvas.Invalidate();
+                    oldDetail?.Dispose();
+                }
             }
             catch (Exception ex)
             {
+                lease.Dispose();
                 Debug.WriteLine($"Detail patch upload failed: {ex.Message}");
             }
         });
@@ -1018,7 +1003,6 @@ public sealed partial class PdfPageCanvas : Grid
 
         Rect visibleInSv = new(intX, intY, intR - intX, intB - intY);
 
-        // Converte da interseção na tela de volta para DIPs locais da página por proporção linear
         double relX = (visibleInSv.X - pageInSv.X) / pageInSv.Width;
         double relY = (visibleInSv.Y - pageInSv.Y) / pageInSv.Height;
         double relW = visibleInSv.Width / pageInSv.Width;
@@ -1030,49 +1014,6 @@ public sealed partial class PdfPageCanvas : Grid
         double h = Math.Clamp(relH * pageH, 1, pageH - y);
 
         return new Rect(x, y, w, h);
-    }
-
-    /// <summary>
-    /// Checks whether this canvas is located vertically farther than 1.5 viewport heights away from the visible area.
-    /// </summary>
-    private bool IsFarFromViewport()
-    {
-        var scrollViewer = FindAncestor<ScrollViewer>(this);
-        if (scrollViewer is null || scrollViewer.ViewportHeight <= 0)
-        {
-            return false;
-        }
-
-        try
-        {
-            var pageToSv = TransformToVisual(scrollViewer);
-            double pageW = ActualWidth > 0 ? ActualWidth : (Width > 0 ? Width : (PageInfo?.DisplayWidthDip ?? 0));
-            double pageH = ActualHeight > 0 ? ActualHeight : (Height > 0 ? Height : (PageInfo?.DisplayHeightDip ?? 0));
-            if (pageW <= 0 || pageH <= 0)
-            {
-                return false;
-            }
-
-            Rect pageInSv = pageToSv.TransformBounds(new Rect(0, 0, pageW, pageH));
-            double vpHeight = scrollViewer.ViewportHeight;
-            double threshold = 1.5 * vpHeight;
-
-            if (pageInSv.Y + pageInSv.Height < -threshold)
-            {
-                return true;
-            }
-
-            if (pageInSv.Y > vpHeight + threshold)
-            {
-                return true;
-            }
-
-            return false;
-        }
-        catch
-        {
-            return false;
-        }
     }
 
     private static T? FindAncestor<T>(DependencyObject current) where T : DependencyObject
@@ -1102,7 +1043,12 @@ public sealed partial class PdfPageCanvas : Grid
 
     private void ReleaseBitmaps()
     {
-        _baseBitmapEntry?.Release();
-        _baseBitmapEntry = null;
+        CanvasBitmap? b0 = _level0Bitmap;
+        _level0Bitmap = null;
+        b0?.Dispose();
+
+        CanvasBitmap? bd = _detailBitmap;
+        _detailBitmap = null;
+        bd?.Dispose();
     }
 }

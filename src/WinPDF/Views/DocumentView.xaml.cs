@@ -31,6 +31,8 @@ public sealed partial class DocumentView : Page
     private bool _isUpdatingSliderFromZoom;
     private bool _isPageBoxEditing;
     private bool _isFittedVertically;
+    private Size _lastHandledScrollViewerSize;
+    private bool _isApplyingFitZoom;
 
     /// <summary>Gets the localized page prefix text.</summary>
     public string PagePrefixText => ResourceStrings.Get(ResourceKeys.StatusBarPagePrefix);
@@ -270,6 +272,10 @@ public sealed partial class DocumentView : Page
     private void OnDocumentModeChanged(object? sender, EventArgs e)
     {
         DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            UpdateViewportPages(ViewModel.CurrentDocument?.ZoomFactor ?? ContinuousScrollViewer.ZoomFactor);
+        });
     }
 
     private void OnFitPageRequested()
@@ -295,6 +301,21 @@ public sealed partial class DocumentView : Page
             {
                 StatusBarPageBox.Text = _observedDocument.CurrentPageNumber.ToString();
             }
+
+            if (_observedDocument is { IsContinuous: false })
+            {
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                {
+                    UpdateViewportPages(ViewModel.CurrentDocument?.ZoomFactor ?? ContinuousScrollViewer.ZoomFactor);
+                });
+            }
+        }
+        else if (e.PropertyName is nameof(DocumentViewModel.IsContinuous) or nameof(DocumentViewModel.IsDoublePage))
+        {
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                UpdateViewportPages(ViewModel.CurrentDocument?.ZoomFactor ?? ContinuousScrollViewer.ZoomFactor);
+            });
         }
         else if (e.PropertyName == nameof(DocumentViewModel.ZoomFactor))
         {
@@ -349,6 +370,19 @@ public sealed partial class DocumentView : Page
 
     private void OnScrollViewerSizeChanged(object sender, SizeChangedEventArgs e)
     {
+        if (_isApplyingFitZoom)
+        {
+            return;
+        }
+
+        if (Math.Abs(e.NewSize.Width - _lastHandledScrollViewerSize.Width) < 1.0 &&
+            Math.Abs(e.NewSize.Height - _lastHandledScrollViewerSize.Height) < 1.0)
+        {
+            return;
+        }
+
+        _lastHandledScrollViewerSize = e.NewSize;
+
         if (ViewModel?.IsPresentationMode == true || (ViewModel?.CurrentDocument is { IsContinuous: false } && _isFittedVertically))
         {
             DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
@@ -558,45 +592,53 @@ public sealed partial class DocumentView : Page
     /// </summary>
     public void ExecuteFitVertical()
     {
-        if (ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
+        if (_isApplyingFitZoom || ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
         {
             return;
         }
 
-        int cur = Math.Clamp(doc.CurrentPageIndex, 0, doc.Pages.Count - 1);
-        var page = doc.Pages[cur];
-
-        bool isPres = ViewModel.IsPresentationMode;
-        double margin = isPres ? 0.0 : (!doc.IsContinuous ? 20.0 : 32.0);
-
-        double availW = Math.Max(100.0, ContinuousScrollViewer.ViewportWidth - margin);
-        double availH = Math.Max(100.0, ContinuousScrollViewer.ViewportHeight - margin);
-        double targetW = doc.IsDoublePage ? (page.DisplayWidthDip * 2.0 + 16.0) : page.DisplayWidthDip;
-        double targetH = page.DisplayHeightDip;
-        double targetZoom = Math.Clamp(Math.Min(availH / targetH, availW / targetW), DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
-
-        if (doc.IsContinuous)
+        _isApplyingFitZoom = true;
+        try
         {
-            double targetY = 24.0;
-            int step = doc.IsDoublePage ? 2 : 1;
-            int targetRow = cur / step;
-            for (int r = 0; r < targetRow && r * step < doc.Pages.Count; r++)
+            int cur = Math.Clamp(doc.CurrentPageIndex, 0, doc.Pages.Count - 1);
+            var page = doc.Pages[cur];
+
+            bool isPres = ViewModel.IsPresentationMode;
+            double margin = isPres ? 0.0 : (!doc.IsContinuous ? 20.0 : 32.0);
+
+            double availW = Math.Max(100.0, ContinuousScrollViewer.ViewportWidth - margin);
+            double availH = Math.Max(100.0, ContinuousScrollViewer.ViewportHeight - margin);
+            double targetW = doc.IsDoublePage ? (page.DisplayWidthDip * 2.0 + 16.0) : page.DisplayWidthDip;
+            double targetH = page.DisplayHeightDip;
+            double targetZoom = Math.Clamp(Math.Min(availH / targetH, availW / targetW), DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
+
+            if (doc.IsContinuous)
             {
-                targetY += doc.Pages[r * step].DisplayHeightDip + 16.0;
+                double targetY = 24.0;
+                int step = doc.IsDoublePage ? 2 : 1;
+                int targetRow = cur / step;
+                for (int r = 0; r < targetRow && r * step < doc.Pages.Count; r++)
+                {
+                    targetY += doc.Pages[r * step].DisplayHeightDip + 16.0;
+                }
+
+                double vOffset = Math.Max(0, (targetY * targetZoom) - Math.Max(0, (ContinuousScrollViewer.ViewportHeight - (targetH * targetZoom)) / 2.0));
+                double hOffset = Math.Max(0, ((targetW * targetZoom) - ContinuousScrollViewer.ViewportWidth) / 2.0);
+                ContinuousScrollViewer.ChangeView(hOffset, vOffset, (float)targetZoom, disableAnimation: true);
+            }
+            else
+            {
+                ContinuousScrollViewer.ChangeView(0, 0, (float)targetZoom, disableAnimation: true);
             }
 
-            double vOffset = Math.Max(0, (targetY * targetZoom) - Math.Max(0, (ContinuousScrollViewer.ViewportHeight - (targetH * targetZoom)) / 2.0));
-            double hOffset = Math.Max(0, ((targetW * targetZoom) - ContinuousScrollViewer.ViewportWidth) / 2.0);
-            ContinuousScrollViewer.ChangeView(hOffset, vOffset, (float)targetZoom, disableAnimation: true);
+            _isFittedVertically = true;
+            doc.ZoomFactor = targetZoom;
+            UpdateViewportPages(targetZoom);
         }
-        else
+        finally
         {
-            ContinuousScrollViewer.ChangeView(0, 0, (float)targetZoom, disableAnimation: true);
+            _isApplyingFitZoom = false;
         }
-
-        _isFittedVertically = true;
-        doc.ZoomFactor = targetZoom;
-        UpdateViewportPages(targetZoom);
     }
 
     /// <summary>

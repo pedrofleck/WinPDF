@@ -127,6 +127,12 @@ public sealed class TileCache : IDisposable
     /// <summary>Default budget reserved for the Level 0 pool: 16 MB.</summary>
     public const long DefaultMaxBaseBytes = 16L * 1024 * 1024;
 
+    /// <summary>Maximum number of thumbnail entries retained in cache.</summary>
+    public const int MaxThumbnailEntries = 16;
+
+    /// <summary>Maximum number of Level 0 entries retained in cache.</summary>
+    public const int MaxLevel0Entries = 4;
+
     private readonly object _gate = new();
     private readonly Dictionary<TileKey, LinkedListNode<Item>> _map = new();
     private readonly LinkedList<Item> _mainLru = new();
@@ -361,18 +367,24 @@ public sealed class TileCache : IDisposable
     // Caller holds _gate. Evicts tiles first, Level 0 bitmaps only as a last resort.
     private void EnforceBudgets(ref List<TileCacheEntry>? evicted)
     {
-        while (_baseBytes > _maxBaseBytes && _baseLru.Last is { } baseTail)
+        while ((_baseBytes > _maxBaseBytes || _baseLru.Count > MaxLevel0Entries) && _baseLru.Last is { } baseTail)
         {
             _map.Remove(baseTail.Value.Key);
             RemoveNode(baseTail, isBase: true, ref evicted);
         }
 
+        while ((_mainBytes + _baseBytes > _maxBytes || _mainLru.Count > MaxThumbnailEntries) && _mainLru.Last is { } mainTail)
+        {
+            _map.Remove(mainTail.Value.Key);
+            RemoveNode(mainTail, isBase: false, ref evicted);
+        }
+
         while (_mainBytes + _baseBytes > _maxBytes)
         {
-            if (_mainLru.Last is { } mainTail)
+            if (_mainLru.Last is { } fallbackTail)
             {
-                _map.Remove(mainTail.Value.Key);
-                RemoveNode(mainTail, isBase: false, ref evicted);
+                _map.Remove(fallbackTail.Value.Key);
+                RemoveNode(fallbackTail, isBase: false, ref evicted);
             }
             else if (_baseLru.Last is { } baseLast)
             {
@@ -397,6 +409,10 @@ public sealed class TileCache : IDisposable
         foreach (TileCacheEntry entry in evicted)
         {
             entry.Release();
+            if (entry is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
         }
     }
 
