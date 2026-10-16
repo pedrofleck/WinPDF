@@ -22,7 +22,7 @@
                 HorizontalAlignment="Center"
                 FontSize="28"
                 Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                Glyph="&#xE8F2;" />
+                Glyph="&#xE90A;" />
             <TextBlock
                 x:Uid="AnnotationsEmptyText"
                 HorizontalAlignment="Center"
@@ -50,7 +50,7 @@
                             <FontIcon
                                 FontSize="14"
                                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                Glyph="&#xE8F2;" />
+                                Glyph="&#xE90A;" />
                             <TextBlock
                                 VerticalAlignment="Center"
                                 Style="{StaticResource BodyTextBlockStyle}"

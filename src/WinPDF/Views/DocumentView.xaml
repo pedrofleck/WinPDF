@@ -388,7 +388,6 @@
                             ToolTipService.ToolTip="{x:Bind PropertiesToolTipText, Mode=OneTime}">
                             <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                 <FontIcon Glyph="&#xE946;" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                <FontIcon Glyph="&#xE74E;" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <TextBlock
                                     Text="{x:Bind ViewModel.CurrentDocument.FormattedFileSize, Mode=OneWay}"
                                     FontSize="12"
@@ -436,7 +435,7 @@
                             Background="Transparent"
                             BorderThickness="0"
                             ToolTipService.ToolTip="{x:Bind ContinuousToolTipText, Mode=OneTime}">
-                            <FontIcon Glyph="&#xE8EA;" FontSize="13" />
+                            <FontIcon Glyph="&#xEC8F;" FontSize="13" />
                         </ToggleButton>
 
                         <!-- 4. Separador | -->
@@ -454,7 +453,7 @@
                             CornerRadius="4"
                             Click="OnFitPageClick"
                             ToolTipService.ToolTip="{x:Bind FitVerticalToolTipText, Mode=OneTime}">
-                            <FontIcon Glyph="&#xE9A6;" FontSize="13" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xF616;" FontSize="13" />
                         </Button>
 
                         <!-- Botão Fit Horizontal (Ajustar à Largura) -->
@@ -468,7 +467,7 @@
                             CornerRadius="4"
                             Click="OnFitWidthClick"
                             ToolTipService.ToolTip="{x:Bind FitHorizontalToolTipText, Mode=OneTime}">
-                            <FontIcon Glyph="&#xE8A0;" FontSize="13" />
+                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xF617;" FontSize="13" />
                         </Button>
 
                         <!-- Caixa Seletora de Zoom (100% ▾) -->

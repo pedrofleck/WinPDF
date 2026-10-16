@@ -18,7 +18,7 @@
             Margin="4,4,4,6"
             Command="{x:Bind ViewModel.ToggleBookmarkCurrentPageCommand}">
             <StackPanel Orientation="Horizontal" Spacing="8">
-                <FontIcon FontSize="14" Glyph="&#xE8A4;" />
+                <FontIcon FontSize="14" Glyph="&#xE728;" />
                 <TextBlock
                     x:Uid="BookmarkCurrentPageButton"
                     Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.CurrentDocument.IsCurrentPageBookmarked), Mode=OneWay}" />
@@ -40,7 +40,7 @@
                 HorizontalAlignment="Center"
                 FontSize="28"
                 Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                Glyph="&#xE8A4;" />
+                Glyph="&#xE728;" />
             <TextBlock
                 x:Uid="BookmarksEmptyText"
                 HorizontalAlignment="Center"
@@ -72,7 +72,7 @@
                             <FontIcon
                                 FontSize="14"
                                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                Glyph="&#xE8A4;" />
+                                Glyph="&#xE728;" />
                             <TextBlock
                                 VerticalAlignment="Center"
                                 Style="{StaticResource BodyTextBlockStyle}"

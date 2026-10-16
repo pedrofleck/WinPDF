@@ -497,7 +497,7 @@
                                     <Grid Width="40" Height="36" Background="Transparent">
                                         <FontIcon
                                             FontSize="20"
-                                            Glyph="&#xE8F2;"
+                                            Glyph="&#xE90A;"
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Center" />
                                         <Rectangle
@@ -527,7 +527,7 @@
                                     <Grid Width="40" Height="36" Background="Transparent">
                                         <FontIcon
                                             FontSize="20"
-                                            Glyph="&#xE8A4;"
+                                            Glyph="&#xE728;"
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Center" />
                                         <Rectangle
