@@ -33,6 +33,8 @@ public sealed partial class DocumentView : Page
     private bool _isFittedVertically;
     private Size _lastHandledScrollViewerSize;
     private bool _isApplyingFitZoom;
+    private UIElement? _hookedScrollTemplateRoot;
+    private PointerEventHandler? _wheelHandler;
 
     /// <summary>Gets the localized page prefix text.</summary>
     public string PagePrefixText => ResourceStrings.Get(ResourceKeys.StatusBarPagePrefix);
@@ -93,7 +95,13 @@ public sealed partial class DocumentView : Page
         ViewModel = App.CurrentApp.Services.GetRequiredService<ShellViewModel>();
         InitializeComponent();
 
-        ContinuousScrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(OnScrollViewerPointerWheelChanged), true);
+        _wheelHandler = new PointerEventHandler(OnScrollViewerPointerWheelChanged);
+        ScrollViewerContentRoot.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
+        ContinuousPagesRepeater.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
+        PrevPageZone.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
+        NextPageZone.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
+        ExitPresentationTopZone.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
+        ContinuousScrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         ContinuousScrollViewer.SizeChanged += OnScrollViewerSizeChanged;
 
         _presentationHideTimer.Tick += OnPresentationHideTimerTick;
@@ -126,12 +134,35 @@ public sealed partial class DocumentView : Page
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        EnsureScrollViewerWheelHook();
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         SubscribeToDocument(ViewModel.CurrentDocument);
 
         if (ViewModel.CurrentDocument is not null)
         {
             UpdateViewportPages(ViewModel.CurrentDocument.ZoomFactor);
+        }
+    }
+
+    private void EnsureScrollViewerWheelHook()
+    {
+        if (_wheelHandler is null)
+        {
+            return;
+        }
+
+        ContinuousScrollViewer.ApplyTemplate();
+        if (VisualTreeHelper.GetChildrenCount(ContinuousScrollViewer) > 0 &&
+            VisualTreeHelper.GetChild(ContinuousScrollViewer, 0) is UIElement templateRoot &&
+            !ReferenceEquals(_hookedScrollTemplateRoot, templateRoot))
+        {
+            if (_hookedScrollTemplateRoot is not null)
+            {
+                _hookedScrollTemplateRoot.RemoveHandler(UIElement.PointerWheelChangedEvent, _wheelHandler);
+            }
+
+            _hookedScrollTemplateRoot = templateRoot;
+            _hookedScrollTemplateRoot.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         }
     }
 
@@ -416,6 +447,7 @@ public sealed partial class DocumentView : Page
 
     private void OnScrollViewerSizeChanged(object sender, SizeChangedEventArgs e)
     {
+        EnsureScrollViewerWheelHook();
         if (e.NewSize.Width <= 0 || e.NewSize.Height <= 0)
         {
             return;
@@ -869,21 +901,39 @@ public sealed partial class DocumentView : Page
         }
     }
 
+    private static bool IsKeyDown(Windows.System.VirtualKey key)
+    {
+        var state = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(key);
+        return (state & Windows.UI.Core.CoreVirtualKeyStates.Down) == Windows.UI.Core.CoreVirtualKeyStates.Down;
+    }
+
     private void OnScrollViewerPointerWheelChanged(object sender, PointerRoutedEventArgs e)
     {
-        if (ViewModel.CurrentDocument is not { } doc)
+        if (e.Handled || ViewModel.CurrentDocument is not { } doc)
         {
             return;
         }
 
         var props = e.GetCurrentPoint(ContinuousScrollViewer).Properties;
-        bool isCtrlPressed = (e.KeyModifiers & Windows.System.VirtualKeyModifiers.Control) != 0;
+        bool isCtrlPressed = (e.KeyModifiers & Windows.System.VirtualKeyModifiers.Control) != 0
+            || IsKeyDown(Windows.System.VirtualKey.Control)
+            || IsKeyDown(Windows.System.VirtualKey.LeftControl)
+            || IsKeyDown(Windows.System.VirtualKey.RightControl);
 
-        var shiftState = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift);
-        bool isShiftDown = (shiftState & Windows.UI.Core.CoreVirtualKeyStates.Down) == Windows.UI.Core.CoreVirtualKeyStates.Down;
+        bool isShiftDown = IsKeyDown(Windows.System.VirtualKey.Shift)
+            || IsKeyDown(Windows.System.VirtualKey.LeftShift)
+            || IsKeyDown(Windows.System.VirtualKey.RightShift);
         bool isShiftPressed = (e.KeyModifiers & Windows.System.VirtualKeyModifiers.Shift) != 0
             || isShiftDown
             || props.IsHorizontalMouseWheel;
+
+        if (!isShiftPressed || isCtrlPressed)
+        {
+            if (ContinuousScrollViewer.VerticalScrollMode != ScrollMode.Enabled)
+            {
+                ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Enabled;
+            }
+        }
 
         if (isCtrlPressed)
         {
@@ -893,11 +943,17 @@ public sealed partial class DocumentView : Page
 
         if (isShiftPressed)
         {
+            e.Handled = true;
             int delta = props.MouseWheelDelta;
             if (delta != 0)
             {
-                e.Handled = true;
                 _isFittedVertically = false;
+                double lockedVerticalOffset = ContinuousScrollViewer.VerticalOffset;
+
+                if (ContinuousScrollViewer.VerticalScrollMode != ScrollMode.Disabled)
+                {
+                    ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Disabled;
+                }
 
                 if (ContinuousScrollViewer.ScrollableWidth > 1.0)
                 {
@@ -907,7 +963,7 @@ public sealed partial class DocumentView : Page
                         0,
                         ContinuousScrollViewer.ScrollableWidth);
 
-                    ContinuousScrollViewer.ChangeView(newOffset, null, null, disableAnimation: true);
+                    ContinuousScrollViewer.ChangeView(newOffset, lockedVerticalOffset, null, disableAnimation: true);
                 }
                 else if (!doc.IsContinuous)
                 {
@@ -920,6 +976,18 @@ public sealed partial class DocumentView : Page
                         doc.NextPage();
                     }
                 }
+                else
+                {
+                    ContinuousScrollViewer.ChangeView(null, lockedVerticalOffset, null, disableAnimation: true);
+                }
+
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                {
+                    if (ContinuousScrollViewer.VerticalScrollMode != ScrollMode.Enabled)
+                    {
+                        ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Enabled;
+                    }
+                });
             }
             return;
         }
