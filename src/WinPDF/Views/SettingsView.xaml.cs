@@ -11,7 +11,7 @@ namespace WinPDF.Views;
 /// </summary>
 public sealed partial class SettingsView : Page
 {
-    private const double ResponsiveBreakpoint = 900.0;
+    private const double ResponsiveBreakpoint = 860.0;
 
     /// <summary>
     /// Gets the settings view model.
@@ -49,17 +49,17 @@ public sealed partial class SettingsView : Page
 
         if (width >= ResponsiveBreakpoint)
         {
-            CardsColumn.MaxWidth = 760;
-            SpacerColumn.Width = new GridLength(1, GridUnitType.Star);
+            CardsColumn.MaxWidth = double.PositiveInfinity;
+            SpacerColumn.Width = new GridLength(48);
             SpacerColumn.MinWidth = 48;
-            AboutColumn.Width = GridLength.Auto;
+            AboutColumn.Width = new GridLength(300);
 
-            Grid.SetRow(AboutPanel, 0);
+            Grid.SetRow(AboutPanel, 1);
             Grid.SetColumn(AboutPanel, 2);
             AboutPanel.HorizontalAlignment = HorizontalAlignment.Right;
             AboutPanel.Margin = new Thickness(0);
-            AboutPanel.Width = 280;
-            AboutPanel.MaxWidth = 280;
+            AboutPanel.Width = 300;
+            AboutPanel.MaxWidth = 300;
         }
         else
         {
@@ -68,12 +68,12 @@ public sealed partial class SettingsView : Page
             SpacerColumn.MinWidth = 0;
             AboutColumn.Width = new GridLength(0);
 
-            Grid.SetRow(AboutPanel, 1);
+            Grid.SetRow(AboutPanel, 2);
             Grid.SetColumn(AboutPanel, 0);
-            AboutPanel.HorizontalAlignment = HorizontalAlignment.Left;
-            AboutPanel.Margin = new Thickness(0, 32, 0, 0);
+            AboutPanel.HorizontalAlignment = HorizontalAlignment.Stretch;
+            AboutPanel.Margin = new Thickness(0, 36, 0, 0);
             AboutPanel.Width = double.NaN;
-            AboutPanel.MaxWidth = 760;
+            AboutPanel.MaxWidth = double.PositiveInfinity;
         }
     }
 

@@ -390,15 +390,19 @@ public sealed partial class MainWindow : Window
 
     private void UpdateMainContainerStyle()
     {
-        if (ViewModel.HasDocument)
+        if (ViewModel.HasDocument && !ViewModel.IsSettingsOpen)
         {
             MainContentContainer.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["LayerFillColorDefaultBrush"];
             MainContentContainer.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
+            MainContentContainer.BorderThickness = ViewModel.IsSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0);
+            MainContentContainer.CornerRadius = ViewModel.IsSidebarOpen ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
         }
         else
         {
             MainContentContainer.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
             MainContentContainer.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+            MainContentContainer.BorderThickness = new Thickness(0);
+            MainContentContainer.CornerRadius = new CornerRadius(0);
         }
     }
 
@@ -515,6 +519,7 @@ public sealed partial class MainWindow : Window
         else if (e.PropertyName == nameof(ShellViewModel.IsSettingsOpen))
         {
             UpdateSidebarLayout();
+            UpdateMainContainerStyle();
             if (ViewModel.IsSettingsOpen)
             {
                 MainContentFrame.Navigate(typeof(SettingsView), ViewModel, new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromRight });

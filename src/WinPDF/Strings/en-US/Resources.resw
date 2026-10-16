@@ -117,6 +117,7 @@
 
   <!-- ===================== Settings Page & Dialog ===================== -->
   <data name="SettingsDialog_Title" xml:space="preserve"><value>Settings</value></data>
+  <data name="Settings_Page_Title.Text" xml:space="preserve"><value>Settings</value></data>
   <data name="Settings_Theme_Header.Text" xml:space="preserve"><value>App theme</value></data>
   <data name="Settings_Theme_System.Content" xml:space="preserve"><value>Use system setting</value></data>
   <data name="Settings_Theme_Light.Content" xml:space="preserve"><value>Light</value></data>

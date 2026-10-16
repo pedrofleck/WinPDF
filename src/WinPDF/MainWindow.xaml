@@ -169,11 +169,21 @@
                     </AnimatedIcon>
                 </Button>
 
-                <TextBlock
-                    x:Uid="SettingsTitleText"
+                <StackPanel
                     VerticalAlignment="Center"
-                    FontWeight="SemiBold"
-                    Style="{StaticResource CaptionTextBlockStyle}" />
+                    Orientation="Horizontal"
+                    Spacing="6">
+                    <Image
+                        Width="16"
+                        Height="16"
+                        VerticalAlignment="Center"
+                        Source="ms-appx:///Assets/appicon.png" />
+                    <TextBlock
+                        x:Uid="AppTitleBarText"
+                        VerticalAlignment="Center"
+                        FontWeight="SemiBold"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+                </StackPanel>
             </StackPanel>
 
             <!-- Centro: Área de Arraste da Janela + Nome do Documento -->
@@ -609,10 +619,10 @@
             <!-- Container Arredondado Principal -->
             <Border
                 x:Name="MainContentContainer"
-                Background="{x:Bind converters:UiHelpers.MainContainerBackground(ViewModel.HasDocument), Mode=OneWay}"
-                BorderBrush="{x:Bind converters:UiHelpers.MainContainerBorderBrush(ViewModel.HasDocument), Mode=OneWay}"
-                BorderThickness="{x:Bind converters:UiHelpers.MainContainerBorderThickness(ViewModel.HasDocument, ViewModel.IsSidebarOpen), Mode=OneWay}"
-                CornerRadius="{x:Bind converters:UiHelpers.MainContainerCornerRadius(ViewModel.HasDocument, ViewModel.IsSidebarOpen), Mode=OneWay}">
+                Background="{x:Bind converters:UiHelpers.MainContainerBackground(ViewModel.HasDocument, ViewModel.IsSettingsOpen), Mode=OneWay}"
+                BorderBrush="{x:Bind converters:UiHelpers.MainContainerBorderBrush(ViewModel.HasDocument, ViewModel.IsSettingsOpen), Mode=OneWay}"
+                BorderThickness="{x:Bind converters:UiHelpers.MainContainerBorderThickness(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}"
+                CornerRadius="{x:Bind converters:UiHelpers.MainContainerCornerRadius(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}">
 
                 <!-- Frame de Conteúdo Principal (DocumentView vs. SettingsView) -->
                 <Frame

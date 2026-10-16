@@ -6,38 +6,42 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:vm="using:WinPDF.ViewModels"
-    Background="{ThemeResource LayerFillColorDefaultBrush}"
+    Background="Transparent"
     mc:Ignorable="d">
 
     <ScrollViewer HorizontalAlignment="Stretch" HorizontalScrollBarVisibility="Disabled">
         <Grid
             x:Name="SettingsRootGrid"
-            Margin="36,24,36,36"
+            Margin="48,24,48,48"
             HorizontalAlignment="Stretch">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition x:Name="CardsColumn" Width="*" MaxWidth="760" />
-                <ColumnDefinition x:Name="SpacerColumn" Width="*" MinWidth="48" />
-                <ColumnDefinition x:Name="AboutColumn" Width="Auto" />
+                <ColumnDefinition x:Name="CardsColumn" Width="*" />
+                <ColumnDefinition x:Name="SpacerColumn" Width="48" />
+                <ColumnDefinition x:Name="AboutColumn" Width="300" />
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- Coluna 0 (Width="*", MaxWidth="760"): Cartões de Configuração -->
-            <StackPanel
-                x:Name="CardsPanel"
+            <!-- Título Principal "Configurações" Grande no Topo -->
+            <TextBlock
                 Grid.Row="0"
                 Grid.Column="0"
-                MaxWidth="760"
+                Grid.ColumnSpan="3"
+                x:Uid="Settings_Page_Title"
+                FontSize="28"
+                FontWeight="SemiBold"
+                Margin="0,0,0,24" />
+
+            <!-- Coluna 0: Cartões de Configuração (Larga, proporcional) -->
+            <StackPanel
+                x:Name="CardsPanel"
+                Grid.Row="1"
+                Grid.Column="0"
                 HorizontalAlignment="Stretch"
                 Spacing="24">
-
-                <!-- Cabeçalho Principal das Configurações -->
-                <TextBlock
-                    x:Uid="SettingsDialog_Title"
-                    FontWeight="SemiBold"
-                    Style="{StaticResource TitleTextBlockStyle}" />
 
                 <!-- ========================================================= -->
                 <!-- Seção 1: APARÊNCIA                                        -->
@@ -216,9 +220,9 @@
             <!-- ========================================================= -->
             <StackPanel
                 x:Name="AboutPanel"
-                Grid.Row="0"
+                Grid.Row="1"
                 Grid.Column="2"
-                Width="280"
+                Width="300"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Top"
                 Spacing="16">
