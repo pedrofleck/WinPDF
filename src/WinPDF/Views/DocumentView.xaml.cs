@@ -1064,3 +1064,42 @@ public sealed partial class DocumentView : Page
         }
     }
 }
+    private void ReturnFocusToViewer()
+    {
+        ContinuousScrollViewer.Focus(FocusState.Programmatic);
+    }
+
+    private void OnStatusBarZoomSliderValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        if (_isUpdatingSliderFromZoom || ViewModel.CurrentDocument is null)
+        {
+            return;
+        }
+
+        _isFittedVertically = false;
+        double newFactor = Math.Clamp(e.NewValue / 100.0, 0.25, 5.0);
+        if (Math.Abs(ViewModel.CurrentDocument.ZoomFactor - newFactor) > 0.01)
+        {
+            ApplyZoomAroundCenter((float)newFactor);
+        }
+    }
+
+    private void UpdateZoomSlider(double zoomFactor)
+    {
+        if (StatusBarZoomSlider is null)
+        {
+            return;
+        }
+
+        _isUpdatingSliderFromZoom = true;
+        try
+        {
+            double percentage = Math.Clamp(zoomFactor * 100.0, StatusBarZoomSlider.Minimum, StatusBarZoomSlider.Maximum);
+            StatusBarZoomSlider.Value = percentage;
+        }
+        finally
+        {
+            _isUpdatingSliderFromZoom = false;
+        }
+    }
+}
