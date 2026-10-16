@@ -114,7 +114,7 @@
   <!-- ===================== Settings Dialog ===================== -->
   <data name="SettingsDialog_Title" xml:space="preserve"><value>Configurações</value></data>
   <data name="Settings_Theme_Header.Text" xml:space="preserve"><value>Tema do aplicativo</value></data>
-  <data name="Settings_Theme_System.Content" xml:space="preserve"><value>Seguir o sistema (Padrão)</value></data>
+  <data name="Settings_Theme_System.Content" xml:space="preserve"><value>Seguir o sistema</value></data>
   <data name="Settings_Theme_Light.Content" xml:space="preserve"><value>Claro</value></data>
   <data name="Settings_Theme_Dark.Content" xml:space="preserve"><value>Escuro</value></data>
   <data name="Settings_Theme_Description.Text" xml:space="preserve"><value>Selecionar o tema do aplicativo a ser exibido</value></data>

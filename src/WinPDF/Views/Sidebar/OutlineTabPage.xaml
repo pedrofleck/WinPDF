@@ -41,7 +41,11 @@
             Visibility="{x:Bind converters:UiHelpers.HasItems(ViewModel.CurrentDocument.Outline.Count), Mode=OneWay}">
             <TreeView.ItemTemplate>
                 <DataTemplate x:DataType="vm:OutlineItemViewModel">
-                    <Grid ColumnDefinitions="*,Auto">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
                         <TextBlock
                             Grid.Column="0"
                             Text="{x:Bind Title}"

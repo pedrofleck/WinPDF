@@ -11,6 +11,7 @@
     xmlns:models="using:WinPDF.Models"
     xmlns:views="using:WinPDF.Views"
     xmlns:vm="using:WinPDF.ViewModels"
+    xmlns:animatedvisuals="using:Microsoft.UI.Xaml.Controls.AnimatedVisuals"
     mc:Ignorable="d">
 
     <Window.SystemBackdrop>
@@ -62,7 +63,18 @@
                         CornerRadius="4"
                         Style="{StaticResource SubtleButtonStyle}"
                         Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
-                        <FontIcon FontSize="16" Glyph="&#xE700;" />
+                        <AnimatedIcon
+                            x:Name="SidebarToggleAnimatedIcon"
+                            Width="16"
+                            Height="16"
+                            AnimatedIcon.State="Normal">
+                            <AnimatedIcon.Source>
+                                <animatedvisuals:AnimatedGlobalNavigationButtonVisualSource />
+                            </AnimatedIcon.Source>
+                            <AnimatedIcon.FallbackIconSource>
+                                <FontIconSource FontSize="16" Glyph="&#xE700;" />
+                            </AnimatedIcon.FallbackIconSource>
+                        </AnimatedIcon>
                     </Button>
 
                     <StackPanel
@@ -111,7 +123,18 @@
                         CornerRadius="4"
                         IsEnabled="{x:Bind ViewModel.HasDocument, Mode=OneWay}"
                         Style="{StaticResource SubtleButtonStyle}">
-                        <FontIcon FontSize="16" Glyph="&#xE721;" />
+                        <AnimatedIcon
+                            x:Name="SearchAnimatedIcon"
+                            Width="16"
+                            Height="16"
+                            AnimatedIcon.State="Normal">
+                            <AnimatedIcon.Source>
+                                <animatedvisuals:AnimatedFindVisualSource />
+                            </AnimatedIcon.Source>
+                            <AnimatedIcon.FallbackIconSource>
+                                <FontIconSource FontSize="16" Glyph="&#xE721;" />
+                            </AnimatedIcon.FallbackIconSource>
+                        </AnimatedIcon>
                     </Button>
                 </StackPanel>
             </StackPanel>
@@ -132,7 +155,18 @@
                     Command="{x:Bind ViewModel.CloseSettingsCommand}"
                     CornerRadius="4"
                     Style="{StaticResource SubtleButtonStyle}">
-                    <FontIcon FontSize="16" Glyph="&#xE72B;" />
+                    <AnimatedIcon
+                        x:Name="SettingsBackAnimatedIcon"
+                        Width="16"
+                        Height="16"
+                        AnimatedIcon.State="Normal">
+                        <AnimatedIcon.Source>
+                            <animatedvisuals:AnimatedBackVisualSource />
+                        </AnimatedIcon.Source>
+                        <AnimatedIcon.FallbackIconSource>
+                            <FontIconSource FontSize="16" Glyph="&#xE72B;" />
+                        </AnimatedIcon.FallbackIconSource>
+                    </AnimatedIcon>
                 </Button>
 
                 <TextBlock
@@ -197,7 +231,39 @@
                     Padding="0"
                     CornerRadius="4"
                     Style="{StaticResource SubtleButtonStyle}">
-                    <FontIcon FontSize="16" Glyph="&#xE712;" />
+                    <StackPanel
+                        Orientation="Horizontal"
+                        Spacing="2.5"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center">
+                        <Ellipse
+                            x:Name="EllipsisDot1"
+                            Width="3.5"
+                            Height="3.5"
+                            Fill="{ThemeResource TextFillColorPrimaryBrush}">
+                            <Ellipse.RenderTransform>
+                                <TranslateTransform x:Name="EllipsisDot1Transform" />
+                            </Ellipse.RenderTransform>
+                        </Ellipse>
+                        <Ellipse
+                            x:Name="EllipsisDot2"
+                            Width="3.5"
+                            Height="3.5"
+                            Fill="{ThemeResource TextFillColorPrimaryBrush}">
+                            <Ellipse.RenderTransform>
+                                <TranslateTransform x:Name="EllipsisDot2Transform" />
+                            </Ellipse.RenderTransform>
+                        </Ellipse>
+                        <Ellipse
+                            x:Name="EllipsisDot3"
+                            Width="3.5"
+                            Height="3.5"
+                            Fill="{ThemeResource TextFillColorPrimaryBrush}">
+                            <Ellipse.RenderTransform>
+                                <TranslateTransform x:Name="EllipsisDot3Transform" />
+                            </Ellipse.RenderTransform>
+                        </Ellipse>
+                    </StackPanel>
                     <Button.Flyout>
                         <MenuFlyout Placement="BottomEdgeAlignedRight">
                             <MenuFlyoutItem x:Uid="Menu_SaveAs" Command="{x:Bind ViewModel.SaveAsCommand}">
@@ -283,7 +349,18 @@
                     Command="{x:Bind ViewModel.OpenSettingsCommand}"
                     CornerRadius="4"
                     Style="{StaticResource SubtleButtonStyle}">
-                    <FontIcon FontSize="16" Glyph="&#xE713;" />
+                    <AnimatedIcon
+                        x:Name="SettingsAnimatedIcon"
+                        Width="16"
+                        Height="16"
+                        AnimatedIcon.State="Normal">
+                        <AnimatedIcon.Source>
+                            <animatedvisuals:AnimatedSettingsVisualSource />
+                        </AnimatedIcon.Source>
+                        <AnimatedIcon.FallbackIconSource>
+                            <FontIconSource FontSize="16" Glyph="&#xE713;" />
+                        </AnimatedIcon.FallbackIconSource>
+                    </AnimatedIcon>
                 </Button>
                 </StackPanel>
 

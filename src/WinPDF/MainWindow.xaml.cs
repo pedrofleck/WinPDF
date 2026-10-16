@@ -5,6 +5,8 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Graphics;
@@ -33,7 +35,7 @@ public sealed partial class MainWindow : Window
     private bool _wasSidebarClosedByNarrowWindow;
     private bool _isInternalSidebarToggle;
     private int _previousSidebarIndex = -1;
-    private RectInt32[]? _lastPassthroughRects;
+
 
     [LibraryImport("user32.dll", EntryPoint = "SendMessageW", SetLastError = true)]
     private static partial IntPtr SendMessage(IntPtr hWnd, uint Msg, UIntPtr wParam, IntPtr lParam);
@@ -55,9 +57,9 @@ public sealed partial class MainWindow : Window
 
         ViewModel = App.CurrentApp.Services.GetRequiredService<ShellViewModel>();
 
-        // Custom TitleBar integration with Mica
+        // Custom TitleBar integration with Mica: only center drag region moves the window
         ExtendsContentIntoTitleBar = true;
-        SetTitleBar(AppTitleBar);
+        SetTitleBar(TitleBarDragRegion);
 
         string iconPath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "Assets", "appicon.ico");
         if (System.IO.File.Exists(iconPath))
@@ -108,9 +110,7 @@ public sealed partial class MainWindow : Window
         // Window size and layout events
         SizeChanged += OnMainWindowSizeChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
-        AppTitleBar.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
-        SettingsBackBtn.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
-        ExitFullScreenBtn.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
+        RegisterTitleBarAnimatedIconPointerHandlers();
 
         MainSplitView.OpenPaneLength = _savedSidebarWidth;
         MainSplitView.PaneOpening += (_, _) =>
@@ -248,6 +248,122 @@ public sealed partial class MainWindow : Window
         _wasSidebarClosedByNarrowWindow = false;
     }
 
+    private void RegisterTitleBarAnimatedIconPointerHandlers()
+    {
+        HookAnimatedIconButton(SidebarToggleButton, SidebarToggleAnimatedIcon);
+        HookAnimatedIconButton(SearchBtn, SearchAnimatedIcon);
+        HookAnimatedIconButton(SettingsBackBtn, SettingsBackAnimatedIcon);
+        HookAnimatedIconButton(SettingsBtn, SettingsAnimatedIcon);
+        HookDocumentMenuButton();
+    }
+
+    private static void HookAnimatedIconButton(Button button, AnimatedIcon icon)
+    {
+        AnimatedIcon.SetState(icon, "Normal");
+
+        button.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler((_, _) =>
+        {
+            AnimatedIcon.SetState(icon, "PointerOver");
+        }), true);
+
+        button.AddHandler(UIElement.PointerExitedEvent, new PointerEventHandler((_, _) =>
+        {
+            AnimatedIcon.SetState(icon, "Normal");
+        }), true);
+
+        button.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) =>
+        {
+            AnimatedIcon.SetState(icon, "Pressed");
+        }), true);
+
+        button.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((sender, e) =>
+        {
+            if (sender is FrameworkElement fe && fe.ActualWidth > 0 && fe.ActualHeight > 0)
+            {
+                var pos = e.GetCurrentPoint(fe).Position;
+                if (pos.X >= 0 && pos.Y >= 0 && pos.X <= fe.ActualWidth && pos.Y <= fe.ActualHeight)
+                {
+                    AnimatedIcon.SetState(icon, "PointerOver");
+                    return;
+                }
+            }
+
+            AnimatedIcon.SetState(icon, "Normal");
+        }), true);
+
+        button.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler((_, _) =>
+        {
+            AnimatedIcon.SetState(icon, "Normal");
+        }), true);
+
+        button.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler((_, _) =>
+        {
+            AnimatedIcon.SetState(icon, "Normal");
+        }), true);
+    }
+
+    private Storyboard? _ellipsisWaveStoryboard;
+
+    private void HookDocumentMenuButton()
+    {
+        DocumentMenuBtn.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) =>
+        {
+            PlayEllipsisWaveAnimation();
+        }), true);
+    }
+
+    private void PlayEllipsisWaveAnimation()
+    {
+        _ellipsisWaveStoryboard?.Stop();
+        var sb = new Storyboard();
+
+        TranslateTransform[] dots = [EllipsisDot1Transform, EllipsisDot2Transform, EllipsisDot3Transform];
+        for (int i = 0; i < dots.Length; i++)
+        {
+            var keyFrames = new DoubleAnimationUsingKeyFrames
+            {
+                BeginTime = TimeSpan.FromMilliseconds(i * 45)
+            };
+            keyFrames.KeyFrames.Add(new EasingDoubleKeyFrame
+            {
+                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(0)),
+                Value = 0.0
+            });
+            keyFrames.KeyFrames.Add(new EasingDoubleKeyFrame
+            {
+                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(105)),
+                Value = -3.0,
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            });
+            keyFrames.KeyFrames.Add(new EasingDoubleKeyFrame
+            {
+                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(225)),
+                Value = 0.0,
+                EasingFunction = new BounceEase { Bounces = 1, Bounciness = 3, EasingMode = EasingMode.EaseOut }
+            });
+
+            Storyboard.SetTarget(keyFrames, dots[i]);
+            Storyboard.SetTargetProperty(keyFrames, "Y");
+            sb.Children.Add(keyFrames);
+        }
+
+        _ellipsisWaveStoryboard = sb;
+        sb.Begin();
+    }
+
+    private static void AddDoubleAnimation(Storyboard sb, DependencyObject target, string property, double toValue, double durationMs)
+    {
+        var anim = new DoubleAnimation
+        {
+            To = toValue,
+            Duration = new Duration(TimeSpan.FromMilliseconds(durationMs)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(anim, target);
+        Storyboard.SetTargetProperty(anim, property);
+        sb.Children.Add(anim);
+    }
+
     private void OnSidebarSplitterDragDelta(object sender, DragDeltaEventArgs e)
     {
         double currentWidth = MainSplitView.OpenPaneLength > 0 ? MainSplitView.OpenPaneLength : _savedSidebarWidth;
@@ -287,9 +403,6 @@ public sealed partial class MainWindow : Window
     }
 
     private double _lastRightInsetDip = -1;
-    private FrameworkElement[]? _documentInteractiveElements;
-    private FrameworkElement[]? _settingsInteractiveElements;
-    private readonly List<RectInt32> _reusablePassthroughRects = new(8);
 
     private void UpdateTitleBarInsets()
     {
@@ -328,72 +441,19 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private static bool AreRectsEqualList(RectInt32[] a, List<RectInt32> b)
-    {
-        if (a.Length != b.Count)
-        {
-            return false;
-        }
 
-        for (int i = 0; i < a.Length; i++)
-        {
-            if (a[i].X != b[i].X || a[i].Y != b[i].Y || a[i].Width != b[i].Width || a[i].Height != b[i].Height)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
 
     private void UpdateTitleBarNonClientRegions()
     {
-        if (!AppWindowTitleBar.IsCustomizationSupported() || Content?.XamlRoot is null)
+        if (!AppWindowTitleBar.IsCustomizationSupported())
         {
             return;
         }
 
-        double scale = Content.XamlRoot.RasterizationScale;
-        _reusablePassthroughRects.Clear();
-
-        FrameworkElement[] interactiveElements = ViewModel.IsSettingsOpen
-            ? (_settingsInteractiveElements ??= [SettingsBackBtn, ExitFullScreenBtn])
-            : (_documentInteractiveElements ??=
-            [
-                SidebarToggleButton,
-                OpenFileBtn,
-                SearchBtn,
-                AnnotationToolsToggleBtn,
-                DocumentMenuBtn,
-                SettingsBtn,
-                ExitFullScreenBtn
-            ]);
-
-        foreach (var element in interactiveElements)
-        {
-            if (element.IsLoaded && element.Visibility == Visibility.Visible && element.ActualWidth > 0 && element.ActualHeight > 0)
-            {
-                var transform = element.TransformToVisual(null);
-                var bounds = transform.TransformBounds(new Windows.Foundation.Rect(0, 0, element.ActualWidth, element.ActualHeight));
-                _reusablePassthroughRects.Add(new RectInt32(
-                    (int)Math.Round(bounds.X * scale),
-                    (int)Math.Round(bounds.Y * scale),
-                    (int)Math.Round(bounds.Width * scale),
-                    (int)Math.Round(bounds.Height * scale)));
-            }
-        }
-
-        if (_lastPassthroughRects is not null && AreRectsEqualList(_lastPassthroughRects, _reusablePassthroughRects))
-        {
-            return;
-        }
-
-        var newRects = _reusablePassthroughRects.ToArray();
         try
         {
             var nonClientInput = InputNonClientPointerSource.GetForWindowId(AppWindow.Id);
-            nonClientInput.SetRegionRects(NonClientRegionKind.Passthrough, newRects);
-            _lastPassthroughRects = newRects;
+            nonClientInput.ClearRegionRects(NonClientRegionKind.Passthrough);
         }
         catch
         {
