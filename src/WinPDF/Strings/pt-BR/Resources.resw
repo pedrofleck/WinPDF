@@ -200,4 +200,6 @@
   <data name="StatusBar_SlideshowToolTip" xml:space="preserve"><value>Apresentação de slides (F5)</value></data>
   <data name="StatusBar_FullScreenToolTip" xml:space="preserve"><value>Tela cheia (F11)</value></data>
   <data name="Presentation_ExitButton" xml:space="preserve"><value>Sair da apresentação (Esc)</value></data>
+  <data name="FullScreenInfoBar.Title" xml:space="preserve"><value>Tela cheia</value></data>
+  <data name="FullScreenInfoBar.Message" xml:space="preserve"><value>Pressione Esc para sair da tela cheia</value></data>
 </root>

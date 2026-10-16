@@ -196,30 +196,20 @@
                     </Border>
                 </Grid>
 
-                <!-- Aviso Inicial de Modo Apresentação (Desaparece após 3s) -->
-                <Border
-                    x:Name="ExitPresentationOverlay"
+                <!-- Aviso de Tela Cheia / Apresentação (Padrão WinUI Gallery) -->
+                <InfoBar
+                    x:Name="FullScreenInfoBar"
+                    x:Uid="FullScreenInfoBar"
+                    IsOpen="False"
+                    IsIconVisible="False"
+                    IsClosable="True"
+                    Title="Full screen"
+                    Message="Press Esc to exit full screen"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Top"
                     Margin="0,24,0,0"
-                    CornerRadius="8"
-                    Background="#D0181818"
-                    BorderBrush="#40FFFFFF"
-                    BorderThickness="1"
-                    IsHitTestVisible="False"
-                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsPresentationMode), Mode=OneWay}">
-                    <Border.OpacityTransition>
-                        <ScalarTransition Duration="0:0:0.4" />
-                    </Border.OpacityTransition>
-                    <StackPanel Orientation="Horizontal" Spacing="8" Padding="14,8" VerticalAlignment="Center">
-                        <FontIcon Glyph="&#xE711;" FontSize="13" Foreground="White" />
-                        <TextBlock
-                            Text="{x:Bind ExitPresentationText, Mode=OneTime}"
-                            FontSize="12"
-                            Foreground="White"
-                            VerticalAlignment="Center" />
-                    </StackPanel>
-                </Border>
+                    Canvas.ZIndex="100"
+                    CloseButtonClick="OnFullScreenInfoBarCloseButtonClick" />
 
                 <!-- Zona Superior Clicável de 80 DIPs para Sair da Apresentação com Botão Sutil ao Hover -->
                 <Grid

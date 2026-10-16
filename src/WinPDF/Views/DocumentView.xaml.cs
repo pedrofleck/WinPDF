@@ -215,20 +215,22 @@ public sealed partial class DocumentView : Page
                 ScrollToPage(ViewModel.CurrentDocument.CurrentPageIndex);
             }
         }
-        else if (e.PropertyName == nameof(ShellViewModel.IsPresentationMode))
+        else if (e.PropertyName == nameof(ShellViewModel.IsPresentationMode) || e.PropertyName == nameof(ShellViewModel.IsFullScreen))
         {
-            if (ViewModel.IsPresentationMode)
+            if (ViewModel.IsPresentationMode || ViewModel.IsFullScreen)
             {
-                ExitPresentationOverlay.Opacity = 1.0;
-                ExitPresentationOverlay.Visibility = Visibility.Visible;
+                FullScreenInfoBar.IsOpen = true;
                 _presentationHideTimer.Stop();
                 _presentationHideTimer.Start();
-                DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
+                if (ViewModel.IsPresentationMode)
+                {
+                    DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
+                }
             }
             else
             {
                 _presentationHideTimer.Stop();
-                ExitPresentationOverlay.Visibility = Visibility.Collapsed;
+                FullScreenInfoBar.IsOpen = false;
             }
         }
     }
@@ -846,7 +848,13 @@ public sealed partial class DocumentView : Page
     private void OnPresentationHideTimerTick(object? sender, object e)
     {
         _presentationHideTimer.Stop();
-        ExitPresentationOverlay.Opacity = 0.0;
+        FullScreenInfoBar.IsOpen = false;
+    }
+
+    private void OnFullScreenInfoBarCloseButtonClick(InfoBar sender, object args)
+    {
+        _presentationHideTimer.Stop();
+        FullScreenInfoBar.IsOpen = false;
     }
 
     private void OnEscapeAcceleratorInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
@@ -855,6 +863,11 @@ public sealed partial class DocumentView : Page
         {
             args.Handled = true;
             ViewModel.ExitPresentationCommand.Execute(null);
+        }
+        else if (ViewModel.IsFullScreen)
+        {
+            args.Handled = true;
+            ViewModel.ToggleFullScreenCommand.Execute(null);
         }
     }
 
@@ -1025,45 +1038,6 @@ public sealed partial class DocumentView : Page
         StatusBarPageBox.SelectAll();
     }
 
-    private void ReturnFocusToViewer()
-    {
-        ContinuousScrollViewer.Focus(FocusState.Programmatic);
-    }
-
-    private void OnStatusBarZoomSliderValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
-    {
-        if (_isUpdatingSliderFromZoom || ViewModel.CurrentDocument is null)
-        {
-            return;
-        }
-
-        _isFittedVertically = false;
-        double newFactor = Math.Clamp(e.NewValue / 100.0, 0.25, 5.0);
-        if (Math.Abs(ViewModel.CurrentDocument.ZoomFactor - newFactor) > 0.01)
-        {
-            ApplyZoomAroundCenter((float)newFactor);
-        }
-    }
-
-    private void UpdateZoomSlider(double zoomFactor)
-    {
-        if (StatusBarZoomSlider is null)
-        {
-            return;
-        }
-
-        _isUpdatingSliderFromZoom = true;
-        try
-        {
-            double percentage = Math.Clamp(zoomFactor * 100.0, StatusBarZoomSlider.Minimum, StatusBarZoomSlider.Maximum);
-            StatusBarZoomSlider.Value = percentage;
-        }
-        finally
-        {
-            _isUpdatingSliderFromZoom = false;
-        }
-    }
-}
     private void ReturnFocusToViewer()
     {
         ContinuousScrollViewer.Focus(FocusState.Programmatic);
