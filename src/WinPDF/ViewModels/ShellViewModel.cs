@@ -149,9 +149,16 @@ public sealed partial class ShellViewModel : ObservableObject
     public partial DocumentViewModel? CurrentDocument { get; set; }
 
     /// <summary>
-    /// Gets a value indicating whether a document is currently loaded.
+    /// Gets or sets a value indicating whether an initial document is opening from launch arguments.
     /// </summary>
-    public bool HasDocument => CurrentDocument is not null;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDocument))]
+    public partial bool IsInitialDocumentOpening { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether a document is currently loaded or opening.
+    /// </summary>
+    public bool HasDocument => CurrentDocument is not null || IsInitialDocumentOpening;
 
     /// <summary>
     /// Gets or sets the window title string.
@@ -373,6 +380,20 @@ public sealed partial class ShellViewModel : ObservableObject
             string content = ResourceStrings.Format(ResourceKeys.DialogOpenErrorContent, System.IO.Path.GetFileName(filePath), ex.Message);
             string close = ResourceStrings.Get(ResourceKeys.DialogClose);
             await _dialogService.ShowMessageAsync(title, content, close, cancellationToken);
+        }
+        finally
+        {
+            if (IsInitialDocumentOpening)
+            {
+                if (_windowContext.DispatcherQueue?.HasThreadAccess == true)
+                {
+                    IsInitialDocumentOpening = false;
+                }
+                else
+                {
+                    _windowContext.DispatcherQueue?.TryEnqueue(() => IsInitialDocumentOpening = false);
+                }
+            }
         }
     }
 

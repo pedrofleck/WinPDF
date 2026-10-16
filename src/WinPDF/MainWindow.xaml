@@ -334,63 +334,168 @@
                             Background="Transparent"
                             IsNavigationStackEnabled="False" />
 
-                        <!-- Rodapé com SelectorBar Nativo sem Bordas (Ícones Maiores de 20px) -->
+                        <!-- Rodapé com Botões de Abas da Barra Lateral (Ícones de 20px com Alvo Touch Amplo) -->
                         <Border
                             Grid.Row="1"
-                            Padding="4,6,4,6"
+                            Padding="0,4,0,4"
                             Background="Transparent"
                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                             BorderThickness="0,1,0,0">
-                            <SelectorBar
-                                x:Name="SidebarFooterSelectorBar"
+                            <StackPanel
+                                x:Name="SidebarFooterButtonsPanel"
+                                Orientation="Horizontal"
                                 HorizontalAlignment="Center"
-                                SelectionChanged="OnSidebarFooterSelectionChanged">
-                                <SelectorBarItem
-                                    x:Name="ThumbnailsSelectorItem"
+                                Spacing="2">
+                                <!-- Aba 1: Miniaturas das Páginas -->
+                                <Button
+                                    x:Name="ThumbnailsTabBtn"
                                     x:Uid="Sidebar_Thumbnails"
-                                    Margin="2,0"
-                                    Padding="6,6">
-                                    <SelectorBarItem.Icon>
-                                        <FontIcon FontSize="20" Glyph="&#xF0E2;" />
-                                    </SelectorBarItem.Icon>
-                                </SelectorBarItem>
-                                <SelectorBarItem
-                                    x:Name="OutlineSelectorItem"
+                                    Width="40"
+                                    Height="36"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Click="OnSidebarTabButtonClick"
+                                    Tag="Thumbnails">
+                                    <Grid Width="40" Height="36" Background="Transparent">
+                                        <FontIcon
+                                            FontSize="20"
+                                            Glyph="&#xF0E2;"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center" />
+                                        <Rectangle
+                                            Width="18"
+                                            Height="3"
+                                            RadiusX="1.5"
+                                            RadiusY="1.5"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Bottom"
+                                            Margin="0,0,0,2"
+                                            Fill="{ThemeResource AccentFillColorDefaultBrush}"
+                                            Visibility="{x:Bind converters:UiHelpers.ThumbnailsVisibility(ViewModel.SidebarTab), Mode=OneWay}" />
+                                    </Grid>
+                                </Button>
+
+                                <!-- Aba 2: Sumário / Índice -->
+                                <Button
+                                    x:Name="OutlineTabBtn"
                                     x:Uid="Sidebar_Outline"
-                                    Margin="2,0"
-                                    Padding="6,6">
-                                    <SelectorBarItem.Icon>
-                                        <FontIcon FontSize="20" Glyph="&#xE8FD;" />
-                                    </SelectorBarItem.Icon>
-                                </SelectorBarItem>
-                                <SelectorBarItem
-                                    x:Name="AnnotationsSelectorItem"
+                                    Width="40"
+                                    Height="36"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Click="OnSidebarTabButtonClick"
+                                    Tag="Outline">
+                                    <Grid Width="40" Height="36" Background="Transparent">
+                                        <FontIcon
+                                            FontSize="20"
+                                            Glyph="&#xE8FD;"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center" />
+                                        <Rectangle
+                                            Width="18"
+                                            Height="3"
+                                            RadiusX="1.5"
+                                            RadiusY="1.5"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Bottom"
+                                            Margin="0,0,0,2"
+                                            Fill="{ThemeResource AccentFillColorDefaultBrush}"
+                                            Visibility="{x:Bind converters:UiHelpers.OutlineVisibility(ViewModel.SidebarTab), Mode=OneWay}" />
+                                    </Grid>
+                                </Button>
+
+                                <!-- Aba 3: Anotações -->
+                                <Button
+                                    x:Name="AnnotationsTabBtn"
                                     x:Uid="Sidebar_Annotations"
-                                    Margin="2,0"
-                                    Padding="6,6">
-                                    <SelectorBarItem.Icon>
-                                        <FontIcon FontSize="20" Glyph="&#xE8F2;" />
-                                    </SelectorBarItem.Icon>
-                                </SelectorBarItem>
-                                <SelectorBarItem
-                                    x:Name="BookmarksSelectorItem"
+                                    Width="40"
+                                    Height="36"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Click="OnSidebarTabButtonClick"
+                                    Tag="Annotations">
+                                    <Grid Width="40" Height="36" Background="Transparent">
+                                        <FontIcon
+                                            FontSize="20"
+                                            Glyph="&#xE8F2;"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center" />
+                                        <Rectangle
+                                            Width="18"
+                                            Height="3"
+                                            RadiusX="1.5"
+                                            RadiusY="1.5"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Bottom"
+                                            Margin="0,0,0,2"
+                                            Fill="{ThemeResource AccentFillColorDefaultBrush}"
+                                            Visibility="{x:Bind converters:UiHelpers.AnnotationsVisibility(ViewModel.SidebarTab), Mode=OneWay}" />
+                                    </Grid>
+                                </Button>
+
+                                <!-- Aba 4: Marcadores -->
+                                <Button
+                                    x:Name="BookmarksTabBtn"
                                     x:Uid="Sidebar_Bookmarks"
-                                    Margin="2,0"
-                                    Padding="6,6">
-                                    <SelectorBarItem.Icon>
-                                        <FontIcon FontSize="20" Glyph="&#xE8A4;" />
-                                    </SelectorBarItem.Icon>
-                                </SelectorBarItem>
-                                <SelectorBarItem
-                                    x:Name="AttachmentsSelectorItem"
+                                    Width="40"
+                                    Height="36"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Click="OnSidebarTabButtonClick"
+                                    Tag="Bookmarks">
+                                    <Grid Width="40" Height="36" Background="Transparent">
+                                        <FontIcon
+                                            FontSize="20"
+                                            Glyph="&#xE8A4;"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center" />
+                                        <Rectangle
+                                            Width="18"
+                                            Height="3"
+                                            RadiusX="1.5"
+                                            RadiusY="1.5"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Bottom"
+                                            Margin="0,0,0,2"
+                                            Fill="{ThemeResource AccentFillColorDefaultBrush}"
+                                            Visibility="{x:Bind converters:UiHelpers.BookmarksVisibility(ViewModel.SidebarTab), Mode=OneWay}" />
+                                    </Grid>
+                                </Button>
+
+                                <!-- Aba 5: Anexos -->
+                                <Button
+                                    x:Name="AttachmentsTabBtn"
                                     x:Uid="Sidebar_Attachments"
-                                    Margin="2,0"
-                                    Padding="6,6">
-                                    <SelectorBarItem.Icon>
-                                        <FontIcon FontSize="20" Glyph="&#xE723;" />
-                                    </SelectorBarItem.Icon>
-                                </SelectorBarItem>
-                            </SelectorBar>
+                                    Width="40"
+                                    Height="36"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Click="OnSidebarTabButtonClick"
+                                    Tag="Attachments">
+                                    <Grid Width="40" Height="36" Background="Transparent">
+                                        <FontIcon
+                                            FontSize="20"
+                                            Glyph="&#xE723;"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center" />
+                                        <Rectangle
+                                            Width="18"
+                                            Height="3"
+                                            RadiusX="1.5"
+                                            RadiusY="1.5"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Bottom"
+                                            Margin="0,0,0,2"
+                                            Fill="{ThemeResource AccentFillColorDefaultBrush}"
+                                            Visibility="{x:Bind converters:UiHelpers.AttachmentsVisibility(ViewModel.SidebarTab), Mode=OneWay}" />
+                                    </Grid>
+                                </Button>
+                            </StackPanel>
                         </Border>
                     </Grid>
 

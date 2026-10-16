@@ -24,7 +24,7 @@ namespace WinPDF;
 public sealed partial class MainWindow : Window
 {
     private const double CompactBreakpoint = 768.0;
-    private const double MinSidebarWidth = 180.0;
+    private const double MinSidebarWidth = 220.0;
     private const double MaxSidebarWidth = 480.0;
     private const double DefaultSidebarWidth = 260.0;
 
@@ -127,6 +127,8 @@ public sealed partial class MainWindow : Window
             MainContentContainer.BorderThickness = ViewModel.HasDocument ? new Thickness(0, 1, 0, 0) : new Thickness(0);
         };
 
+        SelectSidebarTab(ViewModel.SidebarTab);
+
         AppWindow.Changed += OnAppWindowChanged;
 
         if (Content is FrameworkElement root)
@@ -142,7 +144,7 @@ public sealed partial class MainWindow : Window
 
                 // Initial frame navigation
                 MainContentFrame.Navigate(typeof(DocumentView), ViewModel);
-                UpdateSidebarFooterSelectorBarSelection();
+                SelectSidebarTab(ViewModel.SidebarTab);
 
                 if (root.XamlRoot is not null)
                 {
@@ -443,6 +445,7 @@ public sealed partial class MainWindow : Window
         {
             UpdateSidebarLayout();
             UpdateMainContainerStyle();
+            SelectSidebarTab(ViewModel.SidebarTab);
             DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsAnnotationToolbarOpen))
@@ -472,7 +475,7 @@ public sealed partial class MainWindow : Window
         }
         else if (e.PropertyName == nameof(ShellViewModel.SidebarTab))
         {
-            UpdateSidebarFooterSelectorBarSelection();
+            SelectSidebarTab(ViewModel.SidebarTab);
         }
     }
 
@@ -574,32 +577,26 @@ public sealed partial class MainWindow : Window
         titleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
     }
 
-    private void OnSidebarFooterSelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
+    private void OnSidebarTabButtonClick(object sender, RoutedEventArgs e)
     {
-        if (sender.SelectedItem is null)
+        if (sender is FrameworkElement { Tag: string tag } &&
+            Enum.TryParse<SidebarTab>(tag, out var tab))
         {
-            return;
+            SelectSidebarTab(tab);
         }
+    }
 
-        int currentSelectedIndex = sender.Items.IndexOf(sender.SelectedItem);
-        Type pageType = sender.SelectedItem switch
+    private void SelectSidebarTab(SidebarTab targetTab)
+    {
+        int targetIndex = (int)targetTab;
+        Type pageType = targetTab switch
         {
-            var item when item == ThumbnailsSelectorItem => typeof(ThumbnailsTabPage),
-            var item when item == OutlineSelectorItem => typeof(OutlineTabPage),
-            var item when item == AnnotationsSelectorItem => typeof(AnnotationsTabPage),
-            var item when item == BookmarksSelectorItem => typeof(BookmarksTabPage),
-            var item when item == AttachmentsSelectorItem => typeof(AttachmentsTabPage),
+            SidebarTab.Thumbnails => typeof(ThumbnailsTabPage),
+            SidebarTab.Outline => typeof(OutlineTabPage),
+            SidebarTab.Annotations => typeof(AnnotationsTabPage),
+            SidebarTab.Bookmarks => typeof(BookmarksTabPage),
+            SidebarTab.Attachments => typeof(AttachmentsTabPage),
             _ => typeof(ThumbnailsTabPage)
-        };
-
-        SidebarTab targetTab = sender.SelectedItem switch
-        {
-            var item when item == ThumbnailsSelectorItem => SidebarTab.Thumbnails,
-            var item when item == OutlineSelectorItem => SidebarTab.Outline,
-            var item when item == AnnotationsSelectorItem => SidebarTab.Annotations,
-            var item when item == BookmarksSelectorItem => SidebarTab.Bookmarks,
-            var item when item == AttachmentsSelectorItem => SidebarTab.Attachments,
-            _ => SidebarTab.Thumbnails
         };
 
         if (ViewModel.SidebarTab != targetTab)
@@ -611,38 +608,15 @@ public sealed partial class MainWindow : Window
         {
             SidebarContentFrame.Navigate(pageType, ViewModel);
         }
-        else if (currentSelectedIndex != _previousSidebarIndex)
+        else if (targetIndex != _previousSidebarIndex)
         {
-            var effect = currentSelectedIndex - _previousSidebarIndex > 0
+            var effect = targetIndex - _previousSidebarIndex > 0
                 ? SlideNavigationTransitionEffect.FromRight
                 : SlideNavigationTransitionEffect.FromLeft;
             SidebarContentFrame.Navigate(pageType, ViewModel, new SlideNavigationTransitionInfo { Effect = effect });
         }
 
-        _previousSidebarIndex = currentSelectedIndex;
-    }
-
-    private void UpdateSidebarFooterSelectorBarSelection()
-    {
-        if (SidebarFooterSelectorBar is null)
-        {
-            return;
-        }
-
-        SelectorBarItem targetItem = ViewModel.SidebarTab switch
-        {
-            SidebarTab.Thumbnails => ThumbnailsSelectorItem,
-            SidebarTab.Outline => OutlineSelectorItem,
-            SidebarTab.Annotations => AnnotationsSelectorItem,
-            SidebarTab.Bookmarks => BookmarksSelectorItem,
-            SidebarTab.Attachments => AttachmentsSelectorItem,
-            _ => ThumbnailsSelectorItem
-        };
-
-        if (SidebarFooterSelectorBar.SelectedItem != targetItem)
-        {
-            SidebarFooterSelectorBar.SelectedItem = targetItem;
-        }
+        _previousSidebarIndex = targetIndex;
     }
 
     private void OnPrintClick(object sender, RoutedEventArgs e)

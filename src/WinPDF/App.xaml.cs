@@ -141,14 +141,9 @@ public partial class App : Application
             return;
         }
 
-        _mainWindow = new MainWindow();
-
-        // Initialize window context for pickers and dialogs
-        IWindowContext windowContext = _services.GetRequiredService<IWindowContext>();
-        windowContext.Initialize(_mainWindow);
+        string[] cmdArgs = Environment.GetCommandLineArgs();
 
         // Check for automated diagnostic test mode
-        string[] cmdArgs = Environment.GetCommandLineArgs();
         bool isAutoTest = false;
         string? autoTestPdf = null;
         for (int i = 1; i < cmdArgs.Length; i++)
@@ -164,14 +159,8 @@ public partial class App : Application
             }
         }
 
-        if (isAutoTest)
-        {
-            _mainWindow.Activate();
-            WinPDF.Services.Diagnostics.AutoTestRunner.Run(_mainWindow, autoTestPdf);
-            return;
-        }
-
-        // Check command-line activation for file paths
+        // Check command-line activation for file paths before creating main window
+        string? startupPdf = null;
         if (!string.IsNullOrWhiteSpace(args.Arguments))
         {
             try
@@ -181,8 +170,7 @@ public partial class App : Application
                 if (System.IO.File.Exists(fullPath) &&
                     string.Equals(System.IO.Path.GetExtension(fullPath), ".pdf", StringComparison.OrdinalIgnoreCase))
                 {
-                    ShellViewModel shellViewModel = _services.GetRequiredService<ShellViewModel>();
-                    _ = shellViewModel.OpenFilePathAsync(fullPath);
+                    startupPdf = fullPath;
                 }
             }
             catch (Exception ex)
@@ -198,13 +186,32 @@ public partial class App : Application
                 if (!candidate.StartsWith('-') && System.IO.File.Exists(candidate) &&
                     string.Equals(System.IO.Path.GetExtension(candidate), ".pdf", StringComparison.OrdinalIgnoreCase))
                 {
-                    ShellViewModel shellViewModel = _services.GetRequiredService<ShellViewModel>();
-                    _ = shellViewModel.OpenFilePathAsync(System.IO.Path.GetFullPath(candidate));
+                    startupPdf = System.IO.Path.GetFullPath(candidate);
                 }
             }
             catch
             {
             }
+        }
+
+        ShellViewModel shellViewModel = _services.GetRequiredService<ShellViewModel>();
+        if (startupPdf is not null)
+        {
+            shellViewModel.IsInitialDocumentOpening = true;
+            _ = shellViewModel.OpenFilePathAsync(startupPdf);
+        }
+
+        _mainWindow = new MainWindow();
+
+        // Initialize window context for pickers and dialogs
+        IWindowContext windowContext = _services.GetRequiredService<IWindowContext>();
+        windowContext.Initialize(_mainWindow);
+
+        if (isAutoTest)
+        {
+            _mainWindow.Activate();
+            WinPDF.Services.Diagnostics.AutoTestRunner.Run(_mainWindow, autoTestPdf);
+            return;
         }
 
         _mainWindow.Activate();
