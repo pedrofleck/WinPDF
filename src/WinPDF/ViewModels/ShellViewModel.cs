@@ -145,6 +145,7 @@ public sealed partial class ShellViewModel : ObservableObject
     /// Gets or sets the active PDF document, or <c>null</c> if no document is currently open.
     /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasDocument))]
     public partial DocumentViewModel? CurrentDocument { get; set; }
 
     /// <summary>

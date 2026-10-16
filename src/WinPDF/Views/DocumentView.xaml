@@ -9,7 +9,7 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:models="using:WinPDF.Models"
     xmlns:vm="using:WinPDF.ViewModels"
-    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+    Background="Transparent"
     mc:Ignorable="d">
 
     <Page.KeyboardAccelerators>
@@ -18,7 +18,7 @@
     </Page.KeyboardAccelerators>
 
     <Grid
-        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+        Background="Transparent"
         AllowDrop="True"
         DragOver="OnDocumentDragOver"
         Drop="OnDocumentDrop"

@@ -115,7 +115,7 @@ public sealed partial class MainWindow : Window
         MainSplitView.OpenPaneLength = _savedSidebarWidth;
         MainSplitView.PaneOpening += (_, _) =>
         {
-            if (!ViewModel.IsSettingsOpen)
+            if (ViewModel.HasDocument && !ViewModel.IsSettingsOpen)
             {
                 MainContentContainer.CornerRadius = new CornerRadius(8, 0, 0, 0);
                 MainContentContainer.BorderThickness = new Thickness(1, 1, 0, 0);
@@ -124,7 +124,7 @@ public sealed partial class MainWindow : Window
         MainSplitView.PaneClosing += (_, _) =>
         {
             MainContentContainer.CornerRadius = new CornerRadius(0);
-            MainContentContainer.BorderThickness = new Thickness(0, 1, 0, 0);
+            MainContentContainer.BorderThickness = ViewModel.HasDocument ? new Thickness(0, 1, 0, 0) : new Thickness(0);
         };
 
         AppWindow.Changed += OnAppWindowChanged;
@@ -138,6 +138,7 @@ public sealed partial class MainWindow : Window
                 UpdateTitleBarInsets();
                 UpdateTitleBarNonClientRegions();
                 UpdateSidebarLayout();
+                UpdateMainContainerStyle();
 
                 // Initial frame navigation
                 MainContentFrame.Navigate(typeof(DocumentView), ViewModel);
@@ -255,17 +256,31 @@ public sealed partial class MainWindow : Window
 
     private void UpdateSidebarLayout()
     {
-        if (ViewModel.IsSettingsOpen)
+        if (!ViewModel.HasDocument || ViewModel.IsSettingsOpen)
         {
             MainSplitView.IsPaneOpen = false;
             MainContentContainer.CornerRadius = new CornerRadius(0);
-            MainContentContainer.BorderThickness = new Thickness(0, 1, 0, 0);
+            MainContentContainer.BorderThickness = !ViewModel.HasDocument ? new Thickness(0) : new Thickness(0, 1, 0, 0);
         }
         else
         {
             MainSplitView.IsPaneOpen = ViewModel.IsSidebarOpen;
             MainContentContainer.CornerRadius = ViewModel.IsSidebarOpen ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
             MainContentContainer.BorderThickness = ViewModel.IsSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0);
+        }
+    }
+
+    private void UpdateMainContainerStyle()
+    {
+        if (ViewModel.HasDocument)
+        {
+            MainContentContainer.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["LayerFillColorDefaultBrush"];
+            MainContentContainer.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
+        }
+        else
+        {
+            MainContentContainer.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+            MainContentContainer.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
         }
     }
 
@@ -423,6 +438,12 @@ public sealed partial class MainWindow : Window
             }
 
             UpdateSidebarLayout();
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.HasDocument))
+        {
+            UpdateSidebarLayout();
+            UpdateMainContainerStyle();
+            DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsAnnotationToolbarOpen))
         {

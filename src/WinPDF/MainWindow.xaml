@@ -50,7 +50,7 @@
                 Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.IsSettingsOpen), Mode=OneWay}">
 
                 <!-- Grupo 1: Toggle da Barra Lateral e Logo/Nome do App -->
-                <StackPanel Orientation="Horizontal">
+                <StackPanel Orientation="Horizontal" Spacing="10">
                     <Button
                         x:Name="SidebarToggleButton"
                         x:Uid="SidebarToggle"
@@ -60,12 +60,12 @@
                         Click="OnSidebarToggleClick"
                         Command="{x:Bind ViewModel.ToggleSidebarCommand}"
                         CornerRadius="4"
-                        Style="{StaticResource SubtleButtonStyle}">
+                        Style="{StaticResource SubtleButtonStyle}"
+                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
                         <FontIcon FontSize="16" Glyph="&#xE700;" />
                     </Button>
 
                     <StackPanel
-                        Margin="14,0,0,0"
                         VerticalAlignment="Center"
                         Orientation="Horizontal"
                         Spacing="6">
@@ -312,7 +312,7 @@
             x:Name="MainSplitView"
             Grid.Row="1"
             DisplayMode="Inline"
-            IsPaneOpen="{x:Bind ViewModel.IsSidebarOpen, Mode=OneWay}"
+            IsPaneOpen="{x:Bind converters:UiHelpers.IsSidebarOpenWithDoc(ViewModel.HasDocument, ViewModel.IsSidebarOpen), Mode=OneWay}"
             OpenPaneLength="260"
             PaneBackground="Transparent"
             PanePlacement="Left">
@@ -427,10 +427,10 @@
             <!-- Container Arredondado Principal -->
             <Border
                 x:Name="MainContentContainer"
-                Background="{ThemeResource LayerFillColorDefaultBrush}"
-                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                BorderThickness="{x:Bind converters:UiHelpers.MainContainerBorderThickness(ViewModel.IsSidebarOpen), Mode=OneWay}"
-                CornerRadius="{x:Bind converters:UiHelpers.MainContainerCornerRadius(ViewModel.IsSidebarOpen), Mode=OneWay}">
+                Background="{x:Bind converters:UiHelpers.MainContainerBackground(ViewModel.HasDocument), Mode=OneWay}"
+                BorderBrush="{x:Bind converters:UiHelpers.MainContainerBorderBrush(ViewModel.HasDocument), Mode=OneWay}"
+                BorderThickness="{x:Bind converters:UiHelpers.MainContainerBorderThickness(ViewModel.HasDocument, ViewModel.IsSidebarOpen), Mode=OneWay}"
+                CornerRadius="{x:Bind converters:UiHelpers.MainContainerCornerRadius(ViewModel.HasDocument, ViewModel.IsSidebarOpen), Mode=OneWay}">
 
                 <!-- Frame de Conteúdo Principal (DocumentView vs. SettingsView) -->
                 <Frame
