@@ -79,6 +79,10 @@ foreach ($s in $sizes) {
     $bmp.Dispose()
 }
 
+# Salva tambem versao PNG para a UI do WinUI 3 (TitleBar, etc.)
+$pngPath = Join-Path $assetsDir "appicon.png"
+[System.IO.File]::WriteAllBytes($pngPath, $pngList[-1])
+
 # Monta o arquivo .ico
 $fileStream = [System.IO.File]::Create($icoPath)
 $writer = New-Object System.IO.BinaryWriter $fileStream

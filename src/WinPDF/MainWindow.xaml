@@ -69,10 +69,11 @@
                         VerticalAlignment="Center"
                         Orientation="Horizontal"
                         Spacing="6">
-                        <FontIcon
-                            FontSize="16"
-                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                            Glyph="&#xE8A5;" />
+                        <Image
+                            Width="16"
+                            Height="16"
+                            VerticalAlignment="Center"
+                            Source="ms-appx:///Assets/appicon.png" />
                         <TextBlock
                             x:Uid="AppTitleBarText"
                             VerticalAlignment="Center"

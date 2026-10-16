@@ -184,7 +184,8 @@ public readonly record struct PdfRenderRequest(
     /// <param name="pageIndex">Zero-based page index.</param>
     /// <param name="widthPx">Thumbnail width in pixels.</param>
     /// <param name="heightPx">Thumbnail height in pixels.</param>
+    /// <param name="userRotationDegrees">User rotation in degrees applied on top of the page's intrinsic <c>/Rotate</c>.</param>
     /// <returns>The render request.</returns>
-    public static PdfRenderRequest ForThumbnail(long documentId, int pageIndex, int widthPx, int heightPx)
-        => new(documentId, pageIndex, widthPx, heightPx, widthPx, heightPx, 0, 0, 0, PdfRenderFlags.Annotations);
+    public static PdfRenderRequest ForThumbnail(long documentId, int pageIndex, int widthPx, int heightPx, int userRotationDegrees = 0)
+        => new(documentId, pageIndex, widthPx, heightPx, widthPx, heightPx, 0, 0, userRotationDegrees, PdfRenderFlags.Annotations);
 }

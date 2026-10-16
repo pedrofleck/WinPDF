@@ -21,11 +21,14 @@ using WinPDF.ViewModels;
 namespace WinPDF.Controls;
 
 /// <summary>
-/// Native Win2D canvas rendering a single PDF page with Viewbox-insulated base canvas, single viewport detail patch,
+/// Native Win2D canvas rendering a single PDF page with Viewbox-insulated base canvas, high-DPI viewport detail patch,
 /// zero-LOH uploads, fallback background blitting during zoom/scroll, and true 0.0% CPU/GPU consumption when stationary.
 /// </summary>
 public sealed partial class PdfPageCanvas : Grid
 {
+    private const double DetailZoomThreshold = 1.01;
+    private const double MaxDetailPatchDimensionPx = 4096.0;
+
     /// <summary>
     /// Identifies the <see cref="PageInfo"/> dependency property.
     /// </summary>
@@ -87,6 +90,7 @@ public sealed partial class PdfPageCanvas : Grid
     private CanvasBitmap? _detailBitmap;
     private Rect _detailRectDip = Rect.Empty;
     private double _renderedZoom = 1.0;
+    private double _renderedPixelScale = 1.0;
 
     private CancellationTokenSource? _baseCts;
     private CancellationTokenSource? _detailCts;
@@ -180,12 +184,18 @@ public sealed partial class PdfPageCanvas : Grid
     }
 
     /// <summary>
-    /// Gets the effective zoom factor, looking at explicit ZoomFactor, active document ZoomFactor, or parent ScrollViewer.
+    /// Gets the effective zoom factor, looking at parent ScrollViewer, explicit ZoomFactor, or active document ZoomFactor.
     /// </summary>
     private double EffectiveZoom
     {
         get
         {
+            var scrollViewer = FindAncestor<ScrollViewer>(this);
+            if (scrollViewer is not null && scrollViewer.ZoomFactor > 0.05 && Math.Abs(scrollViewer.ZoomFactor - 1.0) > 0.001)
+            {
+                return scrollViewer.ZoomFactor;
+            }
+
             if (ZoomFactor > 0.05 && Math.Abs(ZoomFactor - 1.0) > 0.001)
             {
                 return ZoomFactor;
@@ -196,7 +206,6 @@ public sealed partial class PdfPageCanvas : Grid
                 return _observedDocument.ZoomFactor;
             }
 
-            var scrollViewer = FindAncestor<ScrollViewer>(this);
             if (scrollViewer is not null && scrollViewer.ZoomFactor > 0.05)
             {
                 return scrollViewer.ZoomFactor;
@@ -224,7 +233,7 @@ public sealed partial class PdfPageCanvas : Grid
         _pdfService = App.CurrentApp.Services.GetRequiredService<IPdfService>();
         _tileCache = App.CurrentApp.Services.GetRequiredService<TileCache>();
 
-        // PROIBIÇÃO ABSOLUTA: DpiScale do _baseCanvas fixo em 1.0f para sempre.
+        // Level 0 base canvas keeps DpiScale fixed at 1.0f forever to bound full-page VRAM.
         _baseCanvas = new CanvasControl
         {
             UseSharedDevice = true,
@@ -251,6 +260,9 @@ public sealed partial class PdfPageCanvas : Grid
             UseSharedDevice = true,
             ClearColor = Windows.UI.Color.FromArgb(0, 0, 0, 0),
             DpiScale = 1.0f,
+            Width = 1.0,
+            Height = 1.0,
+            Opacity = 0.0,
             HorizontalAlignment = HorizontalAlignment.Left,
             VerticalAlignment = VerticalAlignment.Top,
             Visibility = Visibility.Collapsed,
@@ -258,6 +270,8 @@ public sealed partial class PdfPageCanvas : Grid
             RenderTransform = _detailTranslate,
         };
 
+        _detailCanvas.CreateResources += OnDetailCreateResources;
+        _detailCanvas.SizeChanged += OnDetailCanvasSizeChanged;
         _detailCanvas.Draw += OnDetailCanvasDraw;
 
         Children.Add(_baseViewbox);
@@ -309,9 +323,10 @@ public sealed partial class PdfPageCanvas : Grid
         CanvasLoaded?.Invoke(this);
 
         var sv = FindAncestor<ScrollViewer>(this);
-        if (sv is not null && sv.ZoomFactor > 1.05)
+        double activeZoom = sv is not null && sv.ZoomFactor > 0.05 ? sv.ZoomFactor : EffectiveZoom;
+        if (activeZoom > DetailZoomThreshold)
         {
-            UpdateViewport(sv.ZoomFactor);
+            UpdateViewport(activeZoom);
         }
     }
 
@@ -401,6 +416,10 @@ public sealed partial class PdfPageCanvas : Grid
             canvas.ReleaseHighResPatch();
             canvas.UpdateDimensions();
             canvas._baseCanvas.Invalidate();
+            if (canvas.EffectiveZoom > DetailZoomThreshold)
+            {
+                canvas.UpdateViewport(canvas.EffectiveZoom);
+            }
         }
     }
 
@@ -440,9 +459,9 @@ public sealed partial class PdfPageCanvas : Grid
 
     private static void OnZoomFactorPropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        if (d is PdfPageCanvas canvas)
+        if (d is PdfPageCanvas canvas && e.NewValue is double newZoom && newZoom > 0.05)
         {
-            canvas.UpdateViewport(canvas.EffectiveZoom);
+            canvas.UpdateViewport(newZoom);
         }
     }
 
@@ -490,6 +509,22 @@ public sealed partial class PdfPageCanvas : Grid
         {
             _needsLevel0Render = false;
             UpdateRender();
+        }
+    }
+
+    private void OnDetailCreateResources(CanvasControl sender, CanvasCreateResourcesEventArgs args)
+    {
+        if (_detailBitmap is not null && _detailCanvas.Visibility == Visibility.Visible)
+        {
+            _detailCanvas.Invalidate();
+        }
+    }
+
+    private void OnDetailCanvasSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_detailBitmap is not null && _detailCanvas.Visibility == Visibility.Visible && e.NewSize.Width > 0 && e.NewSize.Height > 0)
+        {
+            _detailCanvas.Invalidate();
         }
     }
 
@@ -552,12 +587,12 @@ public sealed partial class PdfPageCanvas : Grid
 
         Rect pageRect = new(0, 0, w, h);
 
-        // 1. Folha base: branca no modo normal, OLED escuro #121212 no modo noturno
+        // 1. Base page background: white in normal mode, dark #121212 in night mode.
         ds.FillRectangle(pageRect, IsNightMode
             ? Windows.UI.Color.FromArgb(255, 18, 18, 18)
             : Windows.UI.Color.FromArgb(255, 255, 255, 255));
 
-        // 2. Rotação centrada via Matrix3x2
+        // 2. Centered rotation via Matrix3x2.
         var oldTransform = ds.Transform;
         try
         {
@@ -568,7 +603,7 @@ public sealed partial class PdfPageCanvas : Grid
                 ds.Transform = Matrix3x2.CreateRotation(angleRad, center) * oldTransform;
             }
 
-            // 3. Desenhar Nível 0 base
+            // 3. Draw Level 0 base bitmap.
             if (_level0Bitmap is { } baseBmp)
             {
                 try
@@ -599,8 +634,8 @@ public sealed partial class PdfPageCanvas : Grid
         }
 
         var ds = args.DrawingSession;
-        double w = sender.Width > 0 ? sender.Width : sender.ActualWidth;
-        double h = sender.Height > 0 ? sender.Height : sender.ActualHeight;
+        double w = sender.ActualWidth > 0 ? sender.ActualWidth : sender.Width;
+        double h = sender.ActualHeight > 0 ? sender.ActualHeight : sender.Height;
         if (w <= 0 || h <= 0)
         {
             return;
@@ -628,7 +663,7 @@ public sealed partial class PdfPageCanvas : Grid
             if (IsNightMode)
             {
                 using var invert = new InvertEffect { Source = bitmap };
-                ds.DrawImage(invert, destRect, srcRect);
+                ds.DrawImage(invert, destRect, invert.GetBounds(ds));
             }
             else
             {
@@ -641,7 +676,7 @@ public sealed partial class PdfPageCanvas : Grid
     }
 
     /// <summary>
-    /// Releases the high-resolution patch.
+    /// Releases the high-resolution patch and resets the detail canvas surface to minimum footprint.
     /// </summary>
     public void ReleaseHighResPatch()
     {
@@ -649,13 +684,22 @@ public sealed partial class PdfPageCanvas : Grid
         _detailCts?.Dispose();
         _detailCts = null;
 
-        if (_detailBitmap is not null)
+        if (_detailBitmap is not null || _detailCanvas.Visibility == Visibility.Visible)
         {
             CanvasBitmap? old = _detailBitmap;
             _detailBitmap = null;
             _detailRectDip = Rect.Empty;
             _renderedZoom = 1.0;
+            _renderedPixelScale = 1.0;
+            _detailCanvas.Opacity = 0.0;
             _detailCanvas.Visibility = Visibility.Collapsed;
+            _detailCanvas.Width = 1.0;
+            _detailCanvas.Height = 1.0;
+            if (Math.Abs(_detailCanvas.DpiScale - 1.0f) > 0.001f)
+            {
+                _detailCanvas.DpiScale = 1.0f;
+            }
+
             old?.Dispose();
         }
     }
@@ -678,15 +722,18 @@ public sealed partial class PdfPageCanvas : Grid
             return;
         }
 
-        ZoomFactor = currentZoom;
+        if (Math.Abs(ZoomFactor - currentZoom) > 0.0005)
+        {
+            SetValue(ZoomFactorProperty, currentZoom);
+        }
 
-        // Garantir que o bitmap base Nível 0 esteja carregado ou requisitado
+        // Ensure Level 0 base bitmap is loaded or requested.
         if (_level0Bitmap is null)
         {
             TryLoadCachedBitmaps();
         }
 
-        if (_level0Bitmap is null && !_isUnloaded)
+        if (_level0Bitmap is null && !_isUnloaded && _isResourcesCreated)
         {
             _baseCts?.Cancel();
             _baseCts?.Dispose();
@@ -694,30 +741,68 @@ public sealed partial class PdfPageCanvas : Grid
             _ = RenderBaseBitmapAsync(_baseCts.Token);
         }
 
-        Rect visibleDip = GetVisibleRectInPageDips();
+        Rect visibleDip = GetVisibleRectInPageDips(currentZoom);
 
-        // Caso 1 — Página fora da tela (visibleDip.IsEmpty ou dimensão <= 0) OU sem zoom (currentZoom <= 1.05) OU com rotação:
-        if (currentZoom <= 1.05 || visibleDip.IsEmpty || visibleDip.Width <= 0 || visibleDip.Height <= 0 || RotationAngle != 0)
+        // Case 1 — Page off-screen or unzoomed: release high-res patch immediately.
+        if (currentZoom <= DetailZoomThreshold || visibleDip.IsEmpty || visibleDip.Width <= 0 || visibleDip.Height <= 0)
         {
             ReleaseHighResPatch();
             return;
         }
 
-        // Caso 2 — Página visível na tela (!visibleDip.IsEmpty) E com zoom (currentZoom > 1.05):
+        bool swap = (RotationAngle % 180 != 0);
+        double pageW = Math.Max(1.0, swap ? PageInfo.DisplayHeightDip : PageInfo.DisplayWidthDip);
+        double pageH = Math.Max(1.0, swap ? PageInfo.DisplayWidthDip : PageInfo.DisplayHeightDip);
+        double rasterScale = XamlRoot?.RasterizationScale ?? 1.0;
+
+        (Rect candidatePatchDip, double targetPixelScale) = ComputePatchAndPixelScale(visibleDip, pageW, pageH, currentZoom, rasterScale);
+
+        // Case 2 — Page visible on screen and zoomed: check if current high-res patch already covers viewport at target resolution.
         bool sameZoom = Math.Abs(_renderedZoom - currentZoom) < 0.02;
+        bool sameScale = Math.Abs(_renderedPixelScale - targetPixelScale) < 0.02;
         bool coversViewport = _detailBitmap is not null
             && !_detailRectDip.IsEmpty
+            && _detailCanvas.Visibility == Visibility.Visible
             && _detailRectDip.X <= visibleDip.X + 0.5
             && _detailRectDip.Y <= visibleDip.Y + 0.5
             && (_detailRectDip.X + _detailRectDip.Width) >= (visibleDip.X + visibleDip.Width - 0.5)
             && (_detailRectDip.Y + _detailRectDip.Height) >= (visibleDip.Y + visibleDip.Height - 0.5);
 
-        if (sameZoom && coversViewport)
+        if (sameZoom && sameScale && coversViewport)
         {
             return;
         }
 
-        _ = RenderDetailPatchAsync(visibleDip, currentZoom);
+        _ = RenderDetailPatchAsync(candidatePatchDip, targetPixelScale, currentZoom, rasterScale);
+    }
+
+    private static (Rect PatchDip, double PixelScale) ComputePatchAndPixelScale(
+        Rect visibleDip,
+        double pageW,
+        double pageH,
+        double currentZoom,
+        double rasterScale)
+    {
+        double desiredPixelScale = Math.Max(1.0, currentZoom * rasterScale);
+
+        // Bound the patch in DIPs so that the 20% prefetch margin does not force pixelScale below native resolution on 4K displays.
+        double maxAllowedPatchW = Math.Max(visibleDip.Width, MaxDetailPatchDimensionPx / desiredPixelScale);
+        double maxAllowedPatchH = Math.Max(visibleDip.Height, MaxDetailPatchDimensionPx / desiredPixelScale);
+
+        double marginX = Math.Min(visibleDip.Width * 0.20, Math.Max(0.0, (maxAllowedPatchW - visibleDip.Width) / 2.0));
+        double marginY = Math.Min(visibleDip.Height * 0.20, Math.Max(0.0, (maxAllowedPatchH - visibleDip.Height) / 2.0));
+
+        double patchX = Math.Max(0, visibleDip.X - marginX);
+        double patchY = Math.Max(0, visibleDip.Y - marginY);
+        double patchR = Math.Min(pageW, visibleDip.X + visibleDip.Width + marginX);
+        double patchB = Math.Min(pageH, visibleDip.Y + visibleDip.Height + marginY);
+        Rect patchDip = new(patchX, patchY, Math.Max(1.0, patchR - patchX), Math.Max(1.0, patchB - patchY));
+
+        double maxScaleW = MaxDetailPatchDimensionPx / Math.Max(1.0, patchDip.Width);
+        double maxScaleH = MaxDetailPatchDimensionPx / Math.Max(1.0, patchDip.Height);
+        double pixelScale = Math.Min(desiredPixelScale, Math.Min(maxScaleW, maxScaleH));
+
+        return (patchDip, pixelScale);
     }
 
     private void UpdateRender()
@@ -782,7 +867,7 @@ public sealed partial class PdfPageCanvas : Grid
                     _level0Bitmap = canvasEntry.Bitmap;
                     _baseCanvas.Invalidate();
 
-                    if (EffectiveZoom > 1.05)
+                    if (EffectiveZoom > DetailZoomThreshold)
                     {
                         UpdateViewport(EffectiveZoom);
                     }
@@ -846,6 +931,7 @@ public sealed partial class PdfPageCanvas : Grid
                     lease.Dispose();
 
                     var buffer = entry.Pixels.AsBuffer(0, entry.ByteLength);
+                    float baseDpi = _baseCanvas.Dpi > 0 ? _baseCanvas.Dpi : (float)(96.0 * rasterizationScale);
                     CanvasBitmap newBitmap;
                     try
                     {
@@ -854,7 +940,8 @@ public sealed partial class PdfPageCanvas : Grid
                             buffer,
                             entry.Width,
                             entry.Height,
-                            DirectXPixelFormat.B8G8R8A8UIntNormalized);
+                            DirectXPixelFormat.B8G8R8A8UIntNormalized,
+                            baseDpi);
                     }
                     catch (Exception ex) when (ex is ObjectDisposedException or COMException)
                     {
@@ -869,7 +956,7 @@ public sealed partial class PdfPageCanvas : Grid
                     _baseCanvas.Invalidate();
                     oldBitmap?.Dispose();
 
-                    if (EffectiveZoom > 1.05)
+                    if (EffectiveZoom > DetailZoomThreshold)
                     {
                         UpdateViewport(EffectiveZoom);
                     }
@@ -883,7 +970,7 @@ public sealed partial class PdfPageCanvas : Grid
         });
     }
 
-    private async Task RenderDetailPatchAsync(Rect visibleDip, double currentZoom)
+    private async Task RenderDetailPatchAsync(Rect patchDip, double pixelScale, double currentZoom, double rasterScale)
     {
         if (PageInfo is not { } pageInfo || EffectiveDocumentId <= 0 || _isUnloaded)
         {
@@ -897,24 +984,11 @@ public sealed partial class PdfPageCanvas : Grid
 
         int targetPageIndex = pageInfo.Index;
         long targetDocId = EffectiveDocumentId;
+        int targetRotation = RotationAngle;
 
-        double pageW = pageInfo.DisplayWidthDip;
-        double pageH = pageInfo.DisplayHeightDip;
-
-        double marginX = visibleDip.Width * 0.20;
-        double marginY = visibleDip.Height * 0.20;
-        double patchX = Math.Max(0, visibleDip.X - marginX);
-        double patchY = Math.Max(0, visibleDip.Y - marginY);
-        double patchR = Math.Min(pageW, visibleDip.X + visibleDip.Width + marginX);
-        double patchB = Math.Min(pageH, visibleDip.Y + visibleDip.Height + marginY);
-        Rect patchDip = new(patchX, patchY, patchR - patchX, patchB - patchY);
-
-        double rasterScale = XamlRoot?.RasterizationScale ?? 1.0;
-        double pixelScale = currentZoom * rasterScale;
-
-        double maxScaleW = 3840.0 / Math.Max(1.0, patchDip.Width);
-        double maxScaleH = 2400.0 / Math.Max(1.0, patchDip.Height);
-        pixelScale = Math.Min(pixelScale, Math.Min(maxScaleW, maxScaleH));
+        bool swap = (targetRotation % 180 != 0);
+        double pageW = Math.Max(1.0, swap ? pageInfo.DisplayHeightDip : pageInfo.DisplayWidthDip);
+        double pageH = Math.Max(1.0, swap ? pageInfo.DisplayWidthDip : pageInfo.DisplayHeightDip);
 
         int fullW = Math.Max(1, (int)Math.Round(pageW * pixelScale));
         int fullH = Math.Max(1, (int)Math.Round(pageH * pixelScale));
@@ -923,19 +997,32 @@ public sealed partial class PdfPageCanvas : Grid
         int regW = Math.Clamp((int)Math.Ceiling(patchDip.Width * pixelScale), 1, fullW - regX);
         int regH = Math.Clamp((int)Math.Ceiling(patchDip.Height * pixelScale), 1, fullH - regY);
 
+        double actualScaleX = fullW / pageW;
+        double actualScaleY = fullH / pageH;
+        Rect exactPatchDip = new(
+            regX / actualScaleX,
+            regY / actualScaleY,
+            regW / actualScaleX,
+            regH / actualScaleY);
+
         PdfBitmapLease lease;
         try
         {
-            lease = await _pdfService.RenderRegionAsync(
+            PdfRenderRequest request = new(
                 targetDocId,
                 targetPageIndex,
-                startXPx: regX,
-                startYPx: regY,
-                widthPx: regW,
-                heightPx: regH,
-                totalWidthPx: fullW,
-                totalHeightPx: fullH,
-                highPriority: true,
+                regW,
+                regH,
+                fullW,
+                fullH,
+                -regX,
+                -regY,
+                targetRotation,
+                PdfRenderFlags.Annotations);
+
+            lease = await _pdfService.RenderAsync(
+                request,
+                PdfJobPriority.Visible,
                 ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -958,17 +1045,30 @@ public sealed partial class PdfPageCanvas : Grid
         {
             try
             {
-                if (ct.IsCancellationRequested || _isUnloaded || !IsLoaded || PageInfo?.Index != targetPageIndex || EffectiveDocumentId != targetDocId)
+                if (ct.IsCancellationRequested || _isUnloaded || !IsLoaded ||
+                    PageInfo?.Index != targetPageIndex || EffectiveDocumentId != targetDocId || RotationAngle != targetRotation)
                 {
                     lease.Dispose();
                     return;
                 }
 
-                if (_detailCanvas.Device is null)
+                ICanvasResourceCreator? resourceCreator = _detailCanvas.Device ?? _baseCanvas.Device;
+                if (resourceCreator is null)
                 {
-                    lease.Dispose();
-                    return;
+                    try
+                    {
+                        resourceCreator = CanvasDevice.GetSharedDevice();
+                    }
+                    catch
+                    {
+                        lease.Dispose();
+                        return;
+                    }
                 }
+
+                double activeRasterScale = XamlRoot?.RasterizationScale ?? rasterScale;
+                float targetDpiScale = (float)Math.Max(1.0, pixelScale / Math.Max(0.1, activeRasterScale));
+                float targetDpi = (float)(96.0 * activeRasterScale * targetDpiScale);
 
                 using (var entry = new PdfBitmapEntry(lease))
                 {
@@ -979,11 +1079,12 @@ public sealed partial class PdfPageCanvas : Grid
                     try
                     {
                         newBitmap = CanvasBitmap.CreateFromBytes(
-                            _detailCanvas,
+                            resourceCreator,
                             buffer,
                             entry.Width,
                             entry.Height,
-                            DirectXPixelFormat.B8G8R8A8UIntNormalized);
+                            DirectXPixelFormat.B8G8R8A8UIntNormalized,
+                            targetDpi);
                     }
                     catch (Exception ex) when (ex is ObjectDisposedException or COMException)
                     {
@@ -992,14 +1093,21 @@ public sealed partial class PdfPageCanvas : Grid
 
                     CanvasBitmap? oldDetail = _detailBitmap;
                     _detailBitmap = newBitmap;
-                    _detailRectDip = patchDip;
+                    _detailRectDip = exactPatchDip;
                     _renderedZoom = currentZoom;
+                    _renderedPixelScale = pixelScale;
 
-                    _detailTranslate.X = patchDip.X;
-                    _detailTranslate.Y = patchDip.Y;
-                    _detailCanvas.Width = Math.Max(1.0, patchDip.Width);
-                    _detailCanvas.Height = Math.Max(1.0, patchDip.Height);
+                    _detailTranslate.X = exactPatchDip.X;
+                    _detailTranslate.Y = exactPatchDip.Y;
+                    _detailCanvas.Width = Math.Max(1.0, exactPatchDip.Width);
+                    _detailCanvas.Height = Math.Max(1.0, exactPatchDip.Height);
 
+                    if (Math.Abs(_detailCanvas.DpiScale - targetDpiScale) > 0.001f)
+                    {
+                        _detailCanvas.DpiScale = targetDpiScale;
+                    }
+
+                    _detailCanvas.Opacity = 1.0;
                     _detailCanvas.Visibility = Visibility.Visible;
                     _detailCanvas.Invalidate();
                     oldDetail?.Dispose();
@@ -1017,15 +1125,27 @@ public sealed partial class PdfPageCanvas : Grid
     /// Computes the visible portion of this page in local page DIPs (0..DisplayWidthDip, 0..DisplayHeightDip).
     /// Returns Rect.Empty if the page does not intersect the current ScrollViewer viewport.
     /// </summary>
-    public Rect GetVisibleRectInPageDips()
+    public Rect GetVisibleRectInPageDips() => GetVisibleRectInPageDips(EffectiveZoom);
+
+    /// <summary>
+    /// Computes the visible portion of this page in local page DIPs for the specified target zoom factor.
+    /// Returns Rect.Empty if the page does not intersect the current ScrollViewer viewport.
+    /// </summary>
+    /// <param name="targetZoom">The target zoom factor.</param>
+    /// <returns>The visible rectangle in page DIPs, or <see cref="Rect.Empty"/> if off-screen.</returns>
+    public Rect GetVisibleRectInPageDips(double targetZoom)
     {
         if (PageInfo is null || !IsLoaded)
         {
             return Rect.Empty;
         }
 
-        double pageW = ActualWidth > 0 ? ActualWidth : (Width > 0 ? Width : PageInfo.DisplayWidthDip);
-        double pageH = ActualHeight > 0 ? ActualHeight : (Height > 0 ? Height : PageInfo.DisplayHeightDip);
+        bool swap = (RotationAngle % 180 != 0);
+        double defaultW = swap ? PageInfo.DisplayHeightDip : PageInfo.DisplayWidthDip;
+        double defaultH = swap ? PageInfo.DisplayWidthDip : PageInfo.DisplayHeightDip;
+
+        double pageW = ActualWidth > 0 ? ActualWidth : (Width > 0 ? Width : defaultW);
+        double pageH = ActualHeight > 0 ? ActualHeight : (Height > 0 ? Height : defaultH);
         if (pageW <= 0 || pageH <= 0)
         {
             return Rect.Empty;
@@ -1053,10 +1173,30 @@ public sealed partial class PdfPageCanvas : Grid
             return Rect.Empty;
         }
 
-        double intX = Math.Max(0, pageInSv.X);
-        double intY = Math.Max(0, pageInSv.Y);
-        double intR = Math.Min(scrollViewer.ViewportWidth, pageInSv.X + pageInSv.Width);
-        double intB = Math.Min(scrollViewer.ViewportHeight, pageInSv.Y + pageInSv.Height);
+        double vw = scrollViewer.ViewportWidth;
+        double vh = scrollViewer.ViewportHeight;
+        double viewportLeft = 0.0;
+        double viewportTop = 0.0;
+        double viewportRight = vw;
+        double viewportBottom = vh;
+
+        // If ChangeView was just invoked to zoom in, the visual transform may still reflect the previous zoom factor.
+        double actualTransformZoom = pageInSv.Width / pageW;
+        if (targetZoom > DetailZoomThreshold && actualTransformZoom > 0.05 && Math.Abs(actualTransformZoom - targetZoom) > 0.05 && targetZoom > actualTransformZoom)
+        {
+            double scaleRatio = actualTransformZoom / targetZoom;
+            double effVw = vw * scaleRatio;
+            double effVh = vh * scaleRatio;
+            viewportLeft = (vw - effVw) / 2.0;
+            viewportTop = (vh - effVh) / 2.0;
+            viewportRight = viewportLeft + effVw;
+            viewportBottom = viewportTop + effVh;
+        }
+
+        double intX = Math.Max(viewportLeft, pageInSv.X);
+        double intY = Math.Max(viewportTop, pageInSv.Y);
+        double intR = Math.Min(viewportRight, pageInSv.X + pageInSv.Width);
+        double intB = Math.Min(viewportBottom, pageInSv.Y + pageInSv.Height);
 
         if (intR <= intX + 1.0 || intB <= intY + 1.0)
         {

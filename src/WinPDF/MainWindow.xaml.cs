@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
@@ -34,6 +35,12 @@ public sealed partial class MainWindow : Window
     private int _previousSidebarIndex = -1;
     private RectInt32[]? _lastPassthroughRects;
 
+    [LibraryImport("user32.dll", EntryPoint = "SendMessageW", SetLastError = true)]
+    private static partial IntPtr SendMessage(IntPtr hWnd, uint Msg, UIntPtr wParam, IntPtr lParam);
+
+    [LibraryImport("user32.dll", EntryPoint = "LoadImageW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    private static partial IntPtr LoadImage(IntPtr hInst, string name, uint type, int cx, int cy, uint fuLoad);
+
     /// <summary>
     /// Gets the shell view model orchestrating window state, documents, and navigation.
     /// </summary>
@@ -56,6 +63,30 @@ public sealed partial class MainWindow : Window
         if (System.IO.File.Exists(iconPath))
         {
             try { AppWindow.SetIcon(iconPath); } catch { }
+
+            try
+            {
+                IntPtr hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                if (hwnd != IntPtr.Zero)
+                {
+                    const uint IMAGE_ICON = 1;
+                    const uint LR_LOADFROMFILE = 0x00000010;
+                    const uint WM_SETICON = 0x0080;
+
+                    IntPtr hSmall = LoadImage(IntPtr.Zero, iconPath, IMAGE_ICON, 16, 16, LR_LOADFROMFILE);
+                    if (hSmall != IntPtr.Zero)
+                    {
+                        _ = SendMessage(hwnd, WM_SETICON, UIntPtr.Zero, hSmall);
+                    }
+
+                    IntPtr hBig = LoadImage(IntPtr.Zero, iconPath, IMAGE_ICON, 32, 32, LR_LOADFROMFILE);
+                    if (hBig != IntPtr.Zero)
+                    {
+                        _ = SendMessage(hwnd, WM_SETICON, new UIntPtr(1), hBig);
+                    }
+                }
+            }
+            catch { }
         }
 
         if (AppWindowTitleBar.IsCustomizationSupported())

@@ -8,7 +8,7 @@
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <RootNamespace>WinPDF</RootNamespace>
     <AssemblyName>WinPDF</AssemblyName>
-    <Version>0.2.1-alpha.2</Version>
+    <Version>0.2.2-alpha.2</Version>
     <Product>WinPDF</Product>
     <AssemblyTitle>WinPDF</AssemblyTitle>
     <Description>Lightweight Fluent 2 PDF Reader</Description>
@@ -46,6 +46,7 @@
 
   <ItemGroup>
     <Manifest Include="$(ApplicationManifest)" />
+    <Content Include="Assets\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <!-- Versions are defined centrally in Directory.Packages.props. -->

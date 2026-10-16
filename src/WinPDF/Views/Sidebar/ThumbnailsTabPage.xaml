@@ -15,7 +15,7 @@
         <ScrollViewer
             x:Name="ThumbnailsScrollViewer"
             MinWidth="120"
-            Padding="12,8,12,8"
+            Padding="16,8,16,8"
             HorizontalScrollBarVisibility="Disabled"
             VerticalScrollBarVisibility="Auto"
             SizeChanged="OnThumbnailsScrollViewerSizeChanged"
@@ -32,8 +32,8 @@
                     <controls:SafeUniformGridLayout
                         x:Name="ThumbnailsLayout"
                         MinItemWidth="50"
-                        MinItemHeight="60"
-                        MinRowSpacing="8"
+                        MinItemHeight="40"
+                        MinRowSpacing="4"
                         MinColumnSpacing="10"
                         ItemsStretch="Fill"
                         MaximumRowsOrColumns="2" />
@@ -44,7 +44,7 @@
                             DataContext="{x:Bind}"
                             Spacing="4"
                             HorizontalAlignment="Center"
-                            VerticalAlignment="Top"
+                            VerticalAlignment="Center"
                             Tapped="OnThumbnailTapped"
                             Background="Transparent"
                             IsHitTestVisible="True">
@@ -58,19 +58,19 @@
                                 BorderThickness="{x:Bind converters:UiHelpers.ThumbnailBorderThickness(IsCurrentPage), Mode=OneWay}"
                                 CornerRadius="4"
                                 IsHitTestVisible="True">
-                                <Grid HorizontalAlignment="Center" VerticalAlignment="Center" Background="Transparent">
+                                <Grid HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent">
                                     <FontIcon
                                         HorizontalAlignment="Center"
                                         VerticalAlignment="Center"
                                         FontSize="28"
                                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                         Glyph="&#xE8A5;" />
-                                    <controls:ThumbnailPresenter Item="{x:Bind}" />
+                                    <controls:ThumbnailPresenter Item="{x:Bind Mode=OneWay}" />
                                 </Grid>
                             </Border>
                             <TextBlock
                                 HorizontalAlignment="Center"
-                                Text="{x:Bind DisplayNumber}"
+                                Text="{x:Bind DisplayNumber, Mode=OneWay}"
                                 Style="{StaticResource CaptionTextBlockStyle}"
                                 FontWeight="{x:Bind converters:UiHelpers.ThumbnailFontWeight(IsCurrentPage), Mode=OneWay}"
                                 Foreground="{x:Bind converters:UiHelpers.ThumbnailNumberForeground(IsCurrentPage), Mode=OneWay}" />

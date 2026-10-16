@@ -15,6 +15,8 @@ namespace WinPDF.Views.Sidebar;
 /// </summary>
 public sealed partial class ThumbnailsTabPage : Page
 {
+    private const double TwoColumnThresholdDip = 300.0;
+
     /// <summary>
     /// Identifies the <see cref="CurrentAnimatedScrollY"/> dependency property used for storyboard vertical offset animations.
     /// </summary>
@@ -57,8 +59,10 @@ public sealed partial class ThumbnailsTabPage : Page
     private bool _isRenderingHooked;
     private bool _isStoryboardRunning;
     private double _targetThumbScrollY;
-    private int _currentColCount = 2;
     private double _currentRowHeight = 182.0;
+    private double _lastHandledWidth;
+    private long _lastSizedDocumentId = -1;
+    private int _lastSizedRotation = -1;
 
     /// <summary>
     /// Gets the shell view model.
@@ -93,11 +97,8 @@ public sealed partial class ThumbnailsTabPage : Page
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         SubscribeToDocument(ViewModel.CurrentDocument);
 
-        if (ThumbnailsScrollViewer.ActualWidth > 0)
-        {
-            UpdateThumbnailSizes(ThumbnailsScrollViewer.ActualWidth);
-        }
-
+        double width = ThumbnailsScrollViewer.ActualWidth > 0 ? ThumbnailsScrollViewer.ActualWidth : 260.0;
+        UpdateThumbnailSizes(width, force: true);
         UpdateTargetScrollPosition(allowAnimation: false);
     }
 
@@ -116,12 +117,18 @@ public sealed partial class ThumbnailsTabPage : Page
         if (e.PropertyName == nameof(ShellViewModel.CurrentDocument))
         {
             SubscribeToDocument(ViewModel.CurrentDocument);
-            if (ThumbnailsScrollViewer.ActualWidth > 0)
-            {
-                UpdateThumbnailSizes(ThumbnailsScrollViewer.ActualWidth);
-            }
-
+            double width = ThumbnailsScrollViewer.ActualWidth > 0 ? ThumbnailsScrollViewer.ActualWidth : 260.0;
+            UpdateThumbnailSizes(width, force: true);
             UpdateTargetScrollPosition(allowAnimation: false);
+        }
+        else if (e.PropertyName is nameof(ShellViewModel.IsSidebarOpen) or nameof(ShellViewModel.SidebarTab))
+        {
+            if (ViewModel.IsSidebarOpen && ViewModel.SidebarTab == Models.SidebarTab.Thumbnails)
+            {
+                double width = ThumbnailsScrollViewer.ActualWidth > 0 ? ThumbnailsScrollViewer.ActualWidth : 260.0;
+                UpdateThumbnailSizes(width, force: true);
+                UpdateTargetScrollPosition(allowAnimation: false);
+            }
         }
     }
 
@@ -157,7 +164,13 @@ public sealed partial class ThumbnailsTabPage : Page
             return;
         }
 
-        if (e.PropertyName is nameof(DocumentViewModel.FractionalPageIndex) or nameof(DocumentViewModel.CurrentPageIndex))
+        if (e.PropertyName == nameof(DocumentViewModel.Rotation))
+        {
+            double width = ThumbnailsScrollViewer.ActualWidth > 0 ? ThumbnailsScrollViewer.ActualWidth : 260.0;
+            UpdateThumbnailSizes(width, force: true);
+            UpdateTargetScrollPosition(allowAnimation: false);
+        }
+        else if (e.PropertyName is nameof(DocumentViewModel.FractionalPageIndex) or nameof(DocumentViewModel.CurrentPageIndex))
         {
             // Scrolling the document resets any user scroll lock on sidebar and snaps into synchronization.
             _isUserScrollingSidebar = false;
@@ -166,13 +179,11 @@ public sealed partial class ThumbnailsTabPage : Page
         }
     }
 
-    private double _lastHandledWidth;
-
     private void OnThumbnailsScrollViewerSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        if (Math.Abs(e.NewSize.Width - e.PreviousSize.Width) > 1.0 && e.NewSize.Width > 50.0)
+        if (e.NewSize.Width > 50.0)
         {
-            UpdateThumbnailSizes(e.NewSize.Width);
+            UpdateThumbnailSizes(e.NewSize.Width, force: false);
             DispatcherQueue.TryEnqueue(() =>
             {
                 UpdateTargetScrollPosition(allowAnimation: false);
@@ -180,74 +191,57 @@ public sealed partial class ThumbnailsTabPage : Page
         }
     }
 
-    private void UpdateThumbnailSizes(double scrollViewerWidth)
+    private void UpdateThumbnailSizes(double scrollViewerWidth, bool force = false)
     {
         if (ViewModel.CurrentDocument is not { } doc || scrollViewerWidth <= 0 || ThumbnailsLayout is null)
         {
             return;
         }
 
-        if (Math.Abs(_lastHandledWidth - scrollViewerWidth) < 2.0)
-        {
-            return;
-        }
+    bool sameDocAndRot = (_lastSizedDocumentId == doc.DocumentId) && (_lastSizedRotation == doc.Rotation);
+    if (!force && sameDocAndRot && Math.Abs(_lastHandledWidth - scrollViewerWidth) < 0.5)
+    {
+        return;
+    }
 
-        _lastHandledWidth = scrollViewerWidth;
+    _lastHandledWidth = scrollViewerWidth;
+    _lastSizedDocumentId = doc.DocumentId;
+    _lastSizedRotation = doc.Rotation;
 
-        // Total padding: 12 DIPs on each side = 24 DIPs, plus space for scrollbar ~8 DIPs = 32 DIPs
-        double availableW = Math.Max(80.0, scrollViewerWidth - 32.0);
+    double horizontalPadding = ThumbnailsScrollViewer.Padding.Left + ThumbnailsScrollViewer.Padding.Right;
+    double availableW = Math.Max(80.0, scrollViewerWidth - horizontalPadding - 14.0);
 
-        // Threshold: 2 columns if sidebar width >= 270 DIPs; otherwise 1 large centered column.
-        int numCols = scrollViewerWidth >= 270.0 ? 2 : 1;
+    int numCols = scrollViewerWidth >= TwoColumnThresholdDip ? 2 : 1;
 
-        if (ThumbnailsLayout.MaximumRowsOrColumns != numCols)
-        {
-            ThumbnailsLayout.MaximumRowsOrColumns = numCols;
-        }
+    if (ThumbnailsLayout.MaximumRowsOrColumns != numCols)
+    {
+        ThumbnailsLayout.MaximumRowsOrColumns = numCols;
+    }
 
-        ThumbnailsLayout.ItemsStretch = UniformGridLayoutItemsStretch.Fill;
-        // Keep MinItemWidth safe at 50 and MinItemHeight at 60 to prevent divide-by-zero crashes
-        ThumbnailsLayout.MinItemWidth = 50.0;
-        ThumbnailsLayout.MinItemHeight = 60.0;
+    double colSpacing = ThumbnailsLayout.MinColumnSpacing;
+    double colWidth = (numCols == 1)
+        ? availableW
+        : Math.Floor((availableW - colSpacing) / 2.0);
 
-        double colWidth = (numCols == 1)
-            ? availableW
-            : Math.Floor((availableW - 14.0) / 2.0);
+    double maxCardW = (numCols == 1)
+        ? Math.Clamp(colWidth - 12.0, 48.0, 190.0)
+        : Math.Clamp(colWidth - 8.0, 44.0, 180.0);  
 
-        // Add generous horizontal padding to make thumbnails slightly smaller and breathe nicely
-        double maxCardW = (numCols == 1)
-            ? Math.Clamp(colWidth - 36.0, 50.0, 150.0)
-            : Math.Max(50.0, colWidth - 18.0);
+        // Allow portrait pages (like A4 1:1.414 or taller) to maintain their full aspect ratio without clipping.
+        double maxCardH = Math.Round(maxCardW * 1.48);
 
-        _currentColCount = numCols;
         double maxCalculatedH = 0.0;
 
         for (int i = 0; i < doc.Thumbnails.Count; i++)
         {
             var thumb = doc.Thumbnails[i];
-            double aspect = 0.707;
+            double aspect = 1.0 / Math.Sqrt(2.0);
             if (i < doc.Pages.Count)
             {
-                var p = doc.Pages[i];
-                if (p.WidthPt > 0 && p.HeightPt > 0)
-                {
-                    aspect = p.WidthPt / p.HeightPt;
-                }
+                aspect = DocumentViewModel.GetPageDisplayAspectRatio(doc.Pages[i], doc.Rotation);
             }
 
-            double w = maxCardW;
-            double h = Math.Round(w / aspect);
-
-            if (h > 300.0)
-            {
-                h = 300.0;
-                w = Math.Clamp(Math.Round(h * aspect), 50.0, maxCardW);
-            }
-            else if (h < 50.0)
-            {
-                h = 50.0;
-                w = Math.Clamp(Math.Round(h * aspect), 50.0, maxCardW);
-            }
+            (double w, double h) = DocumentViewModel.ComputeThumbnailBox(aspect, maxCardW, maxCardH);
 
             thumb.WidthDip = w;
             thumb.HeightDip = h;
@@ -258,7 +252,8 @@ public sealed partial class ThumbnailsTabPage : Page
             }
         }
 
-        _currentRowHeight = (maxCalculatedH > 40.0 ? maxCalculatedH : 140.0) + 30.0; // card + spacing(4) + text(18) + rowSpacing(8)
+        _currentRowHeight = (maxCalculatedH > 32.0 ? maxCalculatedH : 140.0) + 26.0 + ThumbnailsLayout.MinRowSpacing;
+        ThumbnailsLayout.UpdateRowMetrics(doc.Thumbnails);
     }
 
     private void UpdateTargetScrollPosition(bool allowAnimation = false)
@@ -273,11 +268,14 @@ public sealed partial class ThumbnailsTabPage : Page
             return;
         }
 
-        int cols = Math.Max(1, _currentColCount);
-        double rowHeight = _currentRowHeight > 50.0 ? _currentRowHeight : 180.0;
+        ThumbnailsLayout.GetRowVerticalBounds(
+            doc.FractionalPageIndex,
+            _currentRowHeight,
+            out double rowCenterY,
+            out double rowTop,
+            out double rowHeight);
 
-        double rowIndex = doc.FractionalPageIndex / cols;
-        double targetCenterY = 8.0 + (rowIndex * rowHeight) + (rowHeight / 2.0);
+        double targetCenterY = 8.0 + rowCenterY;
         double targetScrollY = Math.Clamp(targetCenterY - (ThumbnailsScrollViewer.ViewportHeight / 2.0), 0, Math.Max(0, ThumbnailsScrollViewer.ScrollableHeight));
 
         _targetThumbScrollY = targetScrollY;
@@ -299,7 +297,7 @@ public sealed partial class ThumbnailsTabPage : Page
         }
 
         // Check if the target page is currently visible in the sidebar viewport:
-        double cardTop = 8.0 + (rowIndex * rowHeight);
+        double cardTop = 8.0 + rowTop;
         double cardBottom = cardTop + rowHeight;
         bool isCardVisible = (cardBottom >= curY && cardTop <= curY + viewportH);
 

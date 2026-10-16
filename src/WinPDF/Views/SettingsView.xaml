@@ -229,10 +229,11 @@
                     Style="{StaticResource SubtitleTextBlockStyle}" />
 
                 <StackPanel Orientation="Horizontal" Spacing="16">
-                    <FontIcon
-                        FontSize="36"
-                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                        Glyph="&#xE8A5;" />
+                    <Image
+                        Width="36"
+                        Height="36"
+                        VerticalAlignment="Center"
+                        Source="ms-appx:///Assets/appicon.png" />
                     <StackPanel VerticalAlignment="Center" Spacing="2">
                         <TextBlock
                             x:Uid="Settings_About_AppHeader"

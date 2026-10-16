@@ -1,85 +1,281 @@
-using System;
-using System.Diagnostics;
+using System.Collections.Specialized;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Windows.Foundation;
+using WinPDF.ViewModels;
 
 namespace WinPDF.Controls;
 
 /// <summary>
-/// Hardened UniformGridLayout that prevents native integer divide-by-zero crashes (microsoft-ui-xaml #10539)
-/// by ensuring that available sizes passed to the native layout engine are always strictly greater than
-/// the minimum item size plus spacing.
+/// Virtualizing multi-column grid layout for PDF thumbnails that preserves each row's true aspect-ratio height
+/// while avoiding native <see cref="UniformGridLayout"/> fixed-row-height clipping and divide-by-zero crashes (microsoft-ui-xaml #10539).
 /// </summary>
-public sealed class SafeUniformGridLayout : UniformGridLayout
+public sealed class SafeUniformGridLayout : VirtualizingLayout
 {
+    private const double CaptionAndPaddingHeight = 26.0;
+    private const double RealizationBufferDip = 240.0;
+
+    private readonly record struct RealizedItem(int Index, int Row, int Column);
+
+    private readonly List<double> _rowTops = new();
+    private readonly List<double> _rowHeights = new();
+    private readonly List<RealizedItem> _realizedItems = new();
+    private double _lastCellWidth = 100.0;
+
+    /// <summary>
+    /// Gets or sets the minimum item width in DIPs.
+    /// </summary>
+    public double MinItemWidth { get; set; } = 50.0;
+
+    /// <summary>
+    /// Gets or sets the minimum item height floor in DIPs.
+    /// </summary>
+    public double MinItemHeight { get; set; } = 40.0;
+
+    /// <summary>
+    /// Gets or sets the vertical spacing between rows in DIPs.
+    /// </summary>
+    public double MinRowSpacing { get; set; } = 8.0;
+
+    /// <summary>
+    /// Gets or sets the horizontal spacing between columns in DIPs.
+    /// </summary>
+    public double MinColumnSpacing { get; set; } = 10.0;
+
+    /// <summary>
+    /// Gets or sets the item stretch mode.
+    /// </summary>
+    public UniformGridLayoutItemsStretch ItemsStretch { get; set; } = UniformGridLayoutItemsStretch.Fill;
+
+    /// <summary>
+    /// Gets or sets the maximum number of columns per row.
+    /// </summary>
+    public int MaximumRowsOrColumns { get; set; } = 2;
+
+    /// <summary>
+    /// Pre-computes row vertical positions from the current thumbnail view models and invalidates layout measurement.
+    /// </summary>
+    /// <param name="items">The collection of thumbnail items.</param>
+    public void UpdateRowMetrics(IReadOnlyList<ThumbnailItemViewModel>? items)
+    {
+        _rowTops.Clear();
+        _rowHeights.Clear();
+
+        if (items is { Count: > 0 })
+        {
+            int cols = Math.Max(1, MaximumRowsOrColumns);
+            double rowSpacing = Math.Max(0.0, MinRowSpacing);
+            int rowCount = (items.Count + cols - 1) / cols;
+            double currentY = 0.0;
+
+            for (int r = 0; r < rowCount; r++)
+            {
+                int firstIdx = r * cols;
+                int lastIdx = Math.Min(items.Count - 1, firstIdx + cols - 1);
+                double rowH = Math.Max(36.0, MinItemHeight);
+
+                for (int i = firstIdx; i <= lastIdx; i++)
+                {
+                    double h = items[i].HeightDip;
+                    if (h > 0)
+                    {
+                        rowH = Math.Max(rowH, Math.Ceiling(h + CaptionAndPaddingHeight));
+                    }
+                }
+
+                _rowTops.Add(currentY);
+                _rowHeights.Add(rowH);
+                currentY += rowH + (r < rowCount - 1 ? rowSpacing : 0.0);
+            }
+        }
+
+        InvalidateMeasure();
+    }
+
+    /// <summary>
+    /// Invalidates the layout measure pass when thumbnail card dimensions or column counts change.
+    /// </summary>
+    public void InvalidateLayout() => InvalidateMeasure();
+
+    /// <summary>
+    /// Computes the vertical bounds (<c>rowTop</c>, <c>rowHeight</c>, and <c>centerY</c>) for a fractional item index.
+    /// </summary>
+    /// <param name="fractionalItemIndex">Fractional zero-based page index.</param>
+    /// <param name="fallbackRowHeight">Fallback row height if layout has not yet measured.</param>
+    /// <param name="centerY">Computed vertical center coordinate in repeater space.</param>
+    /// <param name="rowTop">Computed top coordinate of the target row.</param>
+    /// <param name="rowHeight">Computed height of the target row.</param>
+    public void GetRowVerticalBounds(
+        double fractionalItemIndex,
+        double fallbackRowHeight,
+        out double centerY,
+        out double rowTop,
+        out double rowHeight)
+    {
+        int cols = Math.Max(1, MaximumRowsOrColumns);
+        double fracRow = Math.Max(0.0, fractionalItemIndex / cols);
+        int rowIdx = (int)Math.Floor(fracRow);
+        double rowFraction = fracRow - rowIdx;
+
+        if (_rowTops.Count > 0 && _rowHeights.Count == _rowTops.Count)
+        {
+            int clampedRow = Math.Clamp(rowIdx, 0, _rowTops.Count - 1);
+            rowTop = _rowTops[clampedRow];
+            rowHeight = _rowHeights[clampedRow];
+            centerY = rowTop + (rowHeight * (0.5 + (rowFraction * 0.5)));
+            return;
+        }
+
+        rowHeight = fallbackRowHeight > 40.0 ? fallbackRowHeight : 180.0;
+        rowTop = rowIdx * (rowHeight + MinRowSpacing);
+        centerY = (fracRow * (rowHeight + MinRowSpacing)) + (rowHeight / 2.0);
+    }
+
+    /// <inheritdoc/>
+    protected override void OnItemsChangedCore(VirtualizingLayoutContext context, object source, NotifyCollectionChangedEventArgs args)
+    {
+        base.OnItemsChangedCore(context, source, args);
+        _rowTops.Clear();
+        _rowHeights.Clear();
+        InvalidateMeasure();
+    }
+
     /// <inheritdoc/>
     protected override Size MeasureOverride(VirtualizingLayoutContext context, Size availableSize)
     {
-        if (context is null || availableSize.Width <= 0 || availableSize.Height <= 0)
+        _rowTops.Clear();
+        _rowHeights.Clear();
+        _realizedItems.Clear();
+
+        if (context is null || availableSize.Width <= 0 || double.IsNaN(availableSize.Width))
         {
             return new Size(0, 0);
         }
 
-        // UniformGridLayout has a known bug in WinUI 3 (microsoft/microsoft-ui-xaml issue #10539):
-        // itemsPerLine is calculated via integer division:
-        //   itemsPerLine = (availableMinor + spacing) / itemSizeWithSpacing;
-        //   fullLinesCount = itemsCount / itemsPerLine; // DIVIDE BY ZERO (0x80020012) if itemsPerLine == 0!
-        // To guarantee itemsPerLine is ALWAYS >= 1, the available size along the line axis MUST be at least
-        // (MinItemWidth + MinColumnSpacing + 1.0) for horizontal orientation, or (MinItemHeight + MinRowSpacing + 1.0)
-        // for vertical orientation.
-        double minWidth = Math.Max(50.0, MinItemWidth + MinColumnSpacing + 1.0);
-        double minHeight = Math.Max(50.0, MinItemHeight + MinRowSpacing + 1.0);
-
-        double w = double.IsNaN(availableSize.Width) || double.IsInfinity(availableSize.Width)
-            ? availableSize.Width
-            : Math.Max(availableSize.Width, minWidth);
-
-        double h = double.IsNaN(availableSize.Height) || double.IsInfinity(availableSize.Height)
-            ? availableSize.Height
-            : Math.Max(availableSize.Height, minHeight);
-
-        Size safeSize = new(w, h);
-
-        try
+        int itemCount = context.ItemCount;
+        if (itemCount <= 0)
         {
-            return base.MeasureOverride(context, safeSize);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[SafeUniformGridLayout] MeasureOverride safely suppressed native exception: {ex.Message}");
             return new Size(0, 0);
         }
+
+        double availW = double.IsInfinity(availableSize.Width) ? 240.0 : availableSize.Width;
+        int cols = Math.Max(1, MaximumRowsOrColumns);
+        double colSpacing = cols > 1 ? Math.Max(0.0, MinColumnSpacing) : 0.0;
+        double rowSpacing = Math.Max(0.0, MinRowSpacing);
+
+        double cellW = Math.Max(32.0, (availW - (colSpacing * (cols - 1))) / cols);
+        _lastCellWidth = cellW;
+
+        Rect realizationRect = context.RealizationRect;
+        double realizeTop = -RealizationBufferDip;
+        double realizeBottom = 1200.0 + RealizationBufferDip;
+
+        if (!realizationRect.IsEmpty && double.IsFinite(realizationRect.Y) && double.IsFinite(realizationRect.Height) && realizationRect.Height > 0)
+        {
+            realizeTop = realizationRect.Y - RealizationBufferDip;
+            realizeBottom = realizationRect.Y + realizationRect.Height + RealizationBufferDip;
+        }
+
+        int rowCount = (itemCount + cols - 1) / cols;
+        double currentY = 0.0;
+
+        for (int r = 0; r < rowCount; r++)
+        {
+            int firstIdx = r * cols;
+            int lastIdx = Math.Min(itemCount - 1, firstIdx + cols - 1);
+
+            double estimatedRowH = Math.Max(36.0, MinItemHeight);
+            for (int i = firstIdx; i <= lastIdx; i++)
+            {
+                try
+                {
+                    if (context.GetItemAt(i) is ThumbnailItemViewModel vm && vm.HeightDip > 0)
+                    {
+                        estimatedRowH = Math.Max(estimatedRowH, Math.Ceiling(vm.HeightDip + CaptionAndPaddingHeight));
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            bool shouldRealize = (currentY + estimatedRowH >= realizeTop) && (currentY <= realizeBottom);
+            double actualRowH = estimatedRowH;
+
+            if (shouldRealize)
+            {
+                for (int i = firstIdx; i <= lastIdx; i++)
+                {
+                    try
+                    {
+                        UIElement element = context.GetOrCreateElementAt(i);
+                        element.Measure(new Size(cellW, double.PositiveInfinity));
+                        if (double.IsFinite(element.DesiredSize.Height) && element.DesiredSize.Height > 0)
+                        {
+                            actualRowH = Math.Max(actualRowH, Math.Ceiling(element.DesiredSize.Height));
+                        }
+
+                        _realizedItems.Add(new RealizedItem(i, r, i - firstIdx));
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            _rowTops.Add(currentY);
+            _rowHeights.Add(actualRowH);
+
+            currentY += actualRowH;
+            if (r < rowCount - 1)
+            {
+                currentY += rowSpacing;
+            }
+        }
+
+        return new Size(availW, Math.Max(0.0, currentY));
     }
 
     /// <inheritdoc/>
     protected override Size ArrangeOverride(VirtualizingLayoutContext context, Size finalSize)
     {
-        if (context is null || finalSize.Width <= 0 || finalSize.Height <= 0)
+        if (context is null || finalSize.Width <= 0 || double.IsNaN(finalSize.Width))
         {
             return new Size(0, 0);
         }
 
-        double minWidth = Math.Max(50.0, MinItemWidth + MinColumnSpacing + 1.0);
-        double minHeight = Math.Max(50.0, MinItemHeight + MinRowSpacing + 1.0);
-
-        double w = double.IsNaN(finalSize.Width) || double.IsInfinity(finalSize.Width)
-            ? finalSize.Width
-            : Math.Max(finalSize.Width, minWidth);
-
-        double h = double.IsNaN(finalSize.Height) || double.IsInfinity(finalSize.Height)
-            ? finalSize.Height
-            : Math.Max(finalSize.Height, minHeight);
-
-        Size safeSize = new(w, h);
-
-        try
+        int itemCount = context.ItemCount;
+        if (itemCount <= 0 || _rowTops.Count == 0)
         {
-            return base.ArrangeOverride(context, safeSize);
+            return new Size(finalSize.Width, 0);
         }
-        catch (Exception ex)
+
+        int cols = Math.Max(1, MaximumRowsOrColumns);
+        double colSpacing = cols > 1 ? Math.Max(0.0, MinColumnSpacing) : 0.0;
+        double cellW = _lastCellWidth > 0
+            ? _lastCellWidth
+            : Math.Max(32.0, (finalSize.Width - (colSpacing * (cols - 1))) / cols);
+
+        foreach (RealizedItem item in _realizedItems)
         {
-            Debug.WriteLine($"[SafeUniformGridLayout] ArrangeOverride safely suppressed native exception: {ex.Message}");
-            return new Size(0, 0);
+            if (item.Index >= 0 && item.Index < itemCount && item.Row >= 0 && item.Row < _rowTops.Count)
+            {
+                try
+                {
+                    UIElement element = context.GetOrCreateElementAt(item.Index);
+                    double x = item.Column * (cellW + colSpacing);
+                    double y = _rowTops[item.Row];
+                    double h = _rowHeights[item.Row];
+                    element.Arrange(new Rect(x, y, cellW, h));
+                }
+                catch
+                {
+                }
+            }
         }
+
+        int lastRow = _rowTops.Count - 1;
+        double totalHeight = _rowTops[lastRow] + _rowHeights[lastRow];
+        return new Size(finalSize.Width, Math.Max(0.0, totalHeight));
     }
 }

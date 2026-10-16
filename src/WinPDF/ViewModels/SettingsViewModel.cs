@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Runtime.InteropServices;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -125,7 +126,10 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// <summary>
     /// Gets the application display version string.
     /// </summary>
-    public string AppVersion => "0.2.0-alpha.2";
+    public string AppVersion => typeof(SettingsViewModel).Assembly
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+        .InformationalVersion
+        .Split('+')[0] ?? "0.2.2-alpha.2";
 
     /// <summary>
     /// Gets the runtime processor architecture description.

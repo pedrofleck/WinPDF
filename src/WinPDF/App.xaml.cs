@@ -28,11 +28,22 @@ public partial class App : Application
     /// </summary>
     public IServiceProvider Services => _services;
 
+    [LibraryImport("shell32.dll", EntryPoint = "SetCurrentProcessExplicitAppUserModelID", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int SetCurrentProcessExplicitAppUserModelID(string appID);
+
     /// <summary>
     /// Initializes the singleton application object and configures dependency injection.
     /// </summary>
     public App()
     {
+        try
+        {
+            _ = SetCurrentProcessExplicitAppUserModelID("PedroFleck.WinPDF");
+        }
+        catch
+        {
+        }
+
         UnhandledException += OnAppUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnCurrentDomainUnhandledException;
         TaskScheduler.UnobservedTaskException += OnTaskSchedulerUnobservedTaskException;

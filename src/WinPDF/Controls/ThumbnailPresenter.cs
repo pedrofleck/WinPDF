@@ -81,13 +81,13 @@ public sealed class ThumbnailPresenter : Grid
     /// </summary>
     public ThumbnailPresenter()
     {
-        HorizontalAlignment = HorizontalAlignment.Center;
-        VerticalAlignment = VerticalAlignment.Center;
+        HorizontalAlignment = HorizontalAlignment.Stretch;
+        VerticalAlignment = VerticalAlignment.Stretch;
         _image = new Image
         {
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            Stretch = Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Stretch,
+            Stretch = Stretch.Fill,
         };
         Children.Add(_image);
 
@@ -163,11 +163,7 @@ public sealed class ThumbnailPresenter : Grid
         }
         else if (e.PropertyName is nameof(ThumbnailItemViewModel.WidthDip) or nameof(ThumbnailItemViewModel.HeightDip))
         {
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                UpdateDimensions();
-                UpdateImage();
-            });
+            DispatcherQueue.TryEnqueue(UpdateDimensions);
         }
     }
 
@@ -175,28 +171,20 @@ public sealed class ThumbnailPresenter : Grid
     {
         if (Item is not null)
         {
-            Width = Item.WidthDip;
-            Height = Item.HeightDip;
-            _image.Width = Item.WidthDip;
-            _image.Height = Item.HeightDip;
+            // Parent Border in ThumbnailsTabPage binds to WidthDip/HeightDip directly; stretch cleanly within it.
+            Width = double.NaN;
+            Height = double.NaN;
+            _image.Width = double.NaN;
+            _image.Height = double.NaN;
         }
         else if (PageInfo is not null)
         {
-            double w = PageInfo.DisplayWidthDip;
-            double h = PageInfo.DisplayHeightDip;
-            double aspect = (w > 0 && h > 0) ? (w / h) : 1.0;
-            if (aspect <= 1.0)
-            {
-                Height = 148.0;
-                Width = Math.Clamp(Math.Round(148.0 * aspect), 60.0, 112.0);
-            }
-            else
-            {
-                Width = 112.0;
-                Height = Math.Clamp(Math.Round(112.0 / aspect), 60.0, 148.0);
-            }
-            _image.Width = Width;
-            _image.Height = Height;
+            double aspect = DocumentViewModel.GetPageDisplayAspectRatio(PageInfo);
+            (double boxW, double boxH) = DocumentViewModel.ComputeThumbnailBox(aspect, 108.0, 156.0);
+            Width = boxW;
+            Height = boxH;
+            _image.Width = boxW;
+            _image.Height = boxH;
         }
     }
 

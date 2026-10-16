@@ -13,6 +13,11 @@ namespace WinPDF.ViewModels;
 /// </summary>
 public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 {
+    private const double DefaultMaxThumbnailWidthDip = 108.0;
+    private const double DefaultMaxThumbnailHeightDip = 156.0;
+    private const double MinThumbnailRenderWidthDip = 160.0;
+    private const double MinThumbnailRenderHeightDip = 232.0;
+
     /// <summary>
     /// Gets or sets the absolute file path on disk.
     /// </summary>
@@ -187,6 +192,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     partial void OnRotationChanged(int value)
     {
         UpdateDisplayedRows();
+        RefreshThumbnailsForRotation();
         ModeChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -287,7 +293,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
         foreach (PdfPageInfo page in info.Pages)
         {
-            (double widthDip, double heightDip) = FitThumbnail(page);
+            (double widthDip, double heightDip) = FitThumbnail(page, Rotation);
             Thumbnails.Add(new ThumbnailItemViewModel(page.Index, widthDip, heightDip) { Owner = this });
         }
 
@@ -322,28 +328,94 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         return viewModel;
     }
 
-    // Fits the page's aspect ratio within a max box of 112 × 148 DIPs.
-    private static (double Width, double Height) FitThumbnail(PdfPageInfo page)
+    /// <summary>
+    /// Computes the displayed aspect ratio (<c>width / height</c>) of a PDF page, accounting for both its
+    /// intrinsic <see cref="PdfPageInfo.Rotation"/> and optional user rotation in degrees.
+    /// </summary>
+    /// <param name="page">Page metadata.</param>
+    /// <param name="userRotationDegrees">Extra user rotation in degrees (0, 90, 180, 270).</param>
+    /// <returns>The positive displayed aspect ratio (<c>width / height</c>).</returns>
+    public static double GetPageDisplayAspectRatio(PdfPageInfo page, int userRotationDegrees = 0)
     {
-        double widthPt = page.WidthPt > 0 ? page.WidthPt : page.DisplayWidthDip;
-        double heightPt = page.HeightPt > 0 ? page.HeightPt : page.DisplayHeightDip;
-        if (widthPt <= 0 || heightPt <= 0)
+        ArgumentNullException.ThrowIfNull(page);
+
+        int effectiveRotation = PageCoordinateTransform.NormalizeRotation(page.Rotation + userRotationDegrees);
+        bool swap = effectiveRotation is 90 or 270;
+        double widthPt = swap ? page.HeightPt : page.WidthPt;
+        double heightPt = swap ? page.WidthPt : page.HeightPt;
+
+        if (!double.IsFinite(widthPt) || !double.IsFinite(heightPt) || widthPt <= 0 || heightPt <= 0)
         {
-            return (112.0, 148.0);
+            return 1.0 / Math.Sqrt(2.0);
         }
 
-        double aspect = widthPt / heightPt;
-        if (aspect <= 1.0)
+        return widthPt / heightPt;
+    }
+
+    /// <summary>
+    /// Fits a page with the specified <paramref name="aspectRatio"/> (<c>width / height</c>) inside a bounding box
+    /// of <paramref name="maxWidthDip"/> by <paramref name="maxHeightDip"/> while strictly preserving its aspect ratio.
+    /// </summary>
+    /// <param name="aspectRatio">Page aspect ratio (<c>width / height</c>).</param>
+    /// <param name="maxWidthDip">Maximum card width in DIPs.</param>
+    /// <param name="maxHeightDip">Maximum card height in DIPs.</param>
+    /// <returns>The proportional width and height in DIPs.</returns>
+    public static (double WidthDip, double HeightDip) ComputeThumbnailBox(double aspectRatio, double maxWidthDip, double maxHeightDip)
+    {
+        if (!double.IsFinite(aspectRatio) || aspectRatio <= 0.01)
         {
-            double h = 148.0;
-            double w = Math.Clamp(Math.Round(148.0 * aspect), 60.0, 112.0);
-            return (w, h);
+            aspectRatio = 1.0 / Math.Sqrt(2.0);
         }
-        else
+
+        double maxW = Math.Max(24.0, maxWidthDip);
+        double maxH = Math.Max(24.0, maxHeightDip);
+
+        double w = maxW;
+        double h = w / aspectRatio;
+        if (h > maxH)
         {
-            double w = 112.0;
-            double h = Math.Clamp(Math.Round(112.0 / aspect), 60.0, 148.0);
-            return (w, h);
+            h = maxH;
+            w = h * aspectRatio;
+        }
+
+        return (Math.Max(16.0, Math.Round(w)), Math.Max(16.0, Math.Round(h)));
+    }
+
+    // Fits the page's aspect ratio within the default thumbnail bounding box.
+    private static (double Width, double Height) FitThumbnail(PdfPageInfo page, int userRotationDegrees = 0)
+    {
+        double aspect = GetPageDisplayAspectRatio(page, userRotationDegrees);
+        return ComputeThumbnailBox(aspect, DefaultMaxThumbnailWidthDip, DefaultMaxThumbnailHeightDip);
+    }
+
+    private void RefreshThumbnailsForRotation()
+    {
+        for (int i = 0; i < Thumbnails.Count; i++)
+        {
+            ThumbnailItemViewModel item = Thumbnails[i];
+            if (item.LoadCancellation is not null)
+            {
+                item.LoadCancellation.Cancel();
+                item.LoadCancellation.Dispose();
+                item.LoadCancellation = null;
+            }
+
+            if (i < Pages.Count)
+            {
+                // Swap current card dimensions if already sized by the sidebar, otherwise recompute from default box.
+                double aspect = GetPageDisplayAspectRatio(Pages[i], Rotation);
+                double maxW = Math.Max(DefaultMaxThumbnailWidthDip, Math.Max(item.WidthDip, item.HeightDip / 1.45));
+                double maxH = Math.Round(maxW * 1.45);
+                (double w, double h) = ComputeThumbnailBox(aspect, maxW, maxH);
+                item.WidthDip = w;
+                item.HeightDip = h;
+            }
+
+            item.ClearImage();
+            if (_thumbnailsActive && item.IsRealized)
+            {
+                RequestThumbnail(item, _thumbnailScale);
+            }
         }
     }
 
@@ -693,12 +765,17 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     internal void OnThumbnailRealized(ThumbnailItemViewModel item, double scale)
     {
         item.IsRealized = true;
+        if (scale > 0)
+        {
+            _thumbnailScale = scale;
+        }
+
         if (!_thumbnailsActive || _isDisposed)
         {
             return;
         }
 
-        RequestThumbnail(item, scale > 0 ? scale : _thumbnailScale);
+        RequestThumbnail(item, _thumbnailScale);
     }
 
     internal void OnThumbnailRecycled(ThumbnailItemViewModel item)
@@ -721,6 +798,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             return;
         }
 
+        int effectiveRot = PageCoordinateTransform.NormalizeRotation(Rotation);
+
         TileKey key = new(
             DocumentId,
             item.PageIndex,
@@ -729,7 +808,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             TileX: 0,
             TileY: 0,
             RenderFlags: (int)PdfRenderFlags.Annotations,
-            Rotation: 0,
+            Rotation: effectiveRot,
             ScalePercent: (int)Math.Round(scale * 100));
 
         if (_tileCache.TryGet(in key, out TileCacheEntry? cachedEntry))
@@ -746,9 +825,17 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
         item.LoadCancellation = cts;
 
-        int widthPx = Math.Max(1, (int)Math.Round(item.WidthDip * scale));
-        int heightPx = Math.Max(1, (int)Math.Round(item.HeightDip * scale));
-        PdfRenderRequest request = PdfRenderRequest.ForThumbnail(DocumentId, item.PageIndex, widthPx, heightPx);
+        double aspect = (item.PageIndex >= 0 && item.PageIndex < Pages.Count)
+            ? GetPageDisplayAspectRatio(Pages[item.PageIndex], effectiveRot)
+            : (item.WidthDip / Math.Max(1.0, item.HeightDip));
+
+        double targetMaxW = Math.Max(MinThumbnailRenderWidthDip, item.WidthDip);
+        double targetMaxH = Math.Max(MinThumbnailRenderHeightDip, item.HeightDip);
+        (double renderDipW, double renderDipH) = ComputeThumbnailBox(aspect, targetMaxW, targetMaxH);
+
+        int widthPx = Math.Max(1, (int)Math.Round(renderDipW * scale));
+        int heightPx = Math.Max(1, (int)Math.Round(renderDipH * scale));
+        PdfRenderRequest request = PdfRenderRequest.ForThumbnail(DocumentId, item.PageIndex, widthPx, heightPx, effectiveRot);
 
         _ = LoadThumbnailAsync(item, key, request, cts);
     }
@@ -761,12 +848,9 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     {
         try
         {
-            PdfBitmapLease lease = await _pdfService.RenderPageAsync(
-                DocumentId,
-                item.PageIndex,
-                request.BitmapWidth,
-                request.BitmapHeight,
-                highPriority: false,
+            PdfBitmapLease lease = await _pdfService.RenderAsync(
+                request,
+                PdfJobPriority.Thumbnail,
                 cts.Token).ConfigureAwait(false);
 
             if (_isDisposed || cts.IsCancellationRequested || !item.IsRealized || !_thumbnailsActive)
@@ -831,4 +915,3 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         GC.Collect(2, GCCollectionMode.Forced, blocking: false, compacting: true);
     }
 }
-

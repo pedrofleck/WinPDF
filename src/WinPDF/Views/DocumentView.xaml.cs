@@ -335,7 +335,11 @@ public sealed partial class DocumentView : Page
                 {
                     ApplyZoomAroundCenter((float)_observedDocument.ZoomFactor);
                 }
-                UpdateViewportPages(_observedDocument.ZoomFactor);
+                else
+                {
+                    UpdateViewportPages(_observedDocument.ZoomFactor);
+                    ScheduleViewportUpdate();
+                }
             }
         }
     }
@@ -355,19 +359,32 @@ public sealed partial class DocumentView : Page
         {
             ViewModel.CurrentDocument.LastHorizontalOffset = ContinuousScrollViewer.HorizontalOffset;
             ViewModel.CurrentDocument.LastVerticalOffset = ContinuousScrollViewer.VerticalOffset;
+
+            double activeZoom = ContinuousScrollViewer.ZoomFactor;
+            if (!_isApplyingZoom && activeZoom > 0.05 && Math.Abs(ViewModel.CurrentDocument.ZoomFactor - activeZoom) > 0.005)
+            {
+                _isUpdatingZoomFromScrollViewer = true;
+                try
+                {
+                    ViewModel.CurrentDocument.ZoomFactor = activeZoom;
+                }
+                finally
+                {
+                    _isUpdatingZoomFromScrollViewer = false;
+                }
+            }
+
             if (!e.IsIntermediate)
             {
                 ViewModel.CurrentDocument.FractionalPageIndex = CalculateFractionalPageIndex();
             }
         }
 
-        if (e.IsIntermediate)
+        if (!e.IsIntermediate)
         {
-            _zoomDebounceCts?.Cancel();
-            return;
+            UpdateCurrentPageIndexFromViewport();
         }
 
-        UpdateCurrentPageIndexFromViewport();
         ScheduleViewportUpdate();
     }
 
@@ -390,6 +407,10 @@ public sealed partial class DocumentView : Page
         {
             DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
         }
+        else if (ViewModel?.CurrentDocument is { ZoomFactor: > 1.01 })
+        {
+            ScheduleViewportUpdate();
+        }
     }
 
     private void ScheduleViewportUpdate()
@@ -403,7 +424,7 @@ public sealed partial class DocumentView : Page
         {
             try
             {
-                await Task.Delay(120).ConfigureAwait(false);
+                await Task.Delay(100).ConfigureAwait(false);
                 if (cts.IsCancellationRequested)
                 {
                     return;
@@ -417,7 +438,12 @@ public sealed partial class DocumentView : Page
                     }
 
                     double activeZoom = ContinuousScrollViewer.ZoomFactor;
-                    if (Math.Abs(ViewModel.CurrentDocument.ZoomFactor - activeZoom) > 0.01)
+                    if (activeZoom <= 0.05)
+                    {
+                        activeZoom = ViewModel.CurrentDocument.ZoomFactor;
+                    }
+
+                    if (!_isApplyingZoom && Math.Abs(ViewModel.CurrentDocument.ZoomFactor - activeZoom) > 0.01)
                     {
                         _isUpdatingZoomFromScrollViewer = true;
                         try
@@ -560,6 +586,8 @@ public sealed partial class DocumentView : Page
         {
             ContinuousScrollViewer.ChangeView(0, 0, null, disableAnimation: true);
         }
+
+        ScheduleViewportUpdate();
     }
 
     private void ApplyZoomAroundCenter(float newZoom)
@@ -583,6 +611,11 @@ public sealed partial class DocumentView : Page
 
             ViewModel.SetZoom(newZoom);
             UpdateViewportPages(newZoom);
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                UpdateViewportPages(newZoom);
+            });
+            ScheduleViewportUpdate();
         }
         finally
         {
@@ -637,6 +670,7 @@ public sealed partial class DocumentView : Page
             _isFittedVertically = true;
             doc.ZoomFactor = targetZoom;
             UpdateViewportPages(targetZoom);
+            ScheduleViewportUpdate();
         }
         finally
         {
@@ -664,6 +698,7 @@ public sealed partial class DocumentView : Page
         ContinuousScrollViewer.ChangeView(null, null, (float)targetZoom, disableAnimation: true);
         doc.ZoomFactor = targetZoom;
         UpdateViewportPages(targetZoom);
+        ScheduleViewportUpdate();
     }
 
     private void OnScrollViewerPointerWheelChanged(object sender, PointerRoutedEventArgs e)
