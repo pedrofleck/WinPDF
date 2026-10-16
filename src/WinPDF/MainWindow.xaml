@@ -161,13 +161,18 @@
                     Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}" />
             </Grid>
 
-            <!-- Direita: Toggle Barra Anotações, Menu Documento (...), Configurações -->
+            <!-- Direita: Toggle Barra Anotações, Menu Documento (...), Configurações, Sair da Tela Cheia -->
             <StackPanel
                 Grid.Column="2"
                 VerticalAlignment="Center"
                 Orientation="Horizontal"
-                Spacing="4"
-                Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.IsSettingsOpen), Mode=OneWay}">
+                Spacing="4">
+
+                <!-- Grupo de Ferramentas do Modo Documento -->
+                <StackPanel
+                    Orientation="Horizontal"
+                    Spacing="4"
+                    Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.IsSettingsOpen), Mode=OneWay}">
 
                 <!-- Toggle da barra flutuante de anotações -->
                 <Button
@@ -279,6 +284,21 @@
                     CornerRadius="4"
                     Style="{StaticResource SubtleButtonStyle}">
                     <FontIcon FontSize="16" Glyph="&#xE713;" />
+                </Button>
+                </StackPanel>
+
+                <!-- Botão Sair da Tela Cheia (F11 / Duas Flechas) -->
+                <Button
+                    x:Name="ExitFullScreenBtn"
+                    x:Uid="ExitFullScreenButton"
+                    Width="36"
+                    Height="32"
+                    Padding="0"
+                    Command="{x:Bind ViewModel.ToggleFullScreenCommand}"
+                    CornerRadius="4"
+                    Style="{StaticResource SubtleButtonStyle}"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsFullScreen), Mode=OneWay}">
+                    <FontIcon FontSize="16" Glyph="&#xE73F;" />
                 </Button>
             </StackPanel>
         </Grid>

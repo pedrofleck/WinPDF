@@ -202,4 +202,6 @@
   <data name="Presentation_ExitButton" xml:space="preserve"><value>Sair da apresentação (Esc)</value></data>
   <data name="FullScreenInfoBar.Title" xml:space="preserve"><value>Tela cheia</value></data>
   <data name="FullScreenInfoBar.Message" xml:space="preserve"><value>Pressione Esc para sair da tela cheia</value></data>
+  <data name="ExitFullScreenButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Sair da tela cheia</value></data>
+  <data name="ExitFullScreenButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Sair da tela cheia (F11)</value></data>
 </root>

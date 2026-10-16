@@ -110,6 +110,7 @@ public sealed partial class MainWindow : Window
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         AppTitleBar.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
         SettingsBackBtn.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
+        ExitFullScreenBtn.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
 
         MainSplitView.OpenPaneLength = _savedSidebarWidth;
         MainSplitView.PaneOpening += (_, _) =>
@@ -275,7 +276,22 @@ public sealed partial class MainWindow : Window
 
     private void UpdateTitleBarInsets()
     {
-        if (AppWindowTitleBar.IsCustomizationSupported() && AppWindow.TitleBar.RightInset > 0)
+        if (!AppWindowTitleBar.IsCustomizationSupported())
+        {
+            return;
+        }
+
+        if (ViewModel.IsFullScreen)
+        {
+            if (Math.Abs(_lastRightInsetDip - 12.0) > 0.5)
+            {
+                _lastRightInsetDip = 12.0;
+                AppTitleBar.Padding = new Thickness(12, 0, 12, 0);
+            }
+            return;
+        }
+
+        if (AppWindow.TitleBar.RightInset > 0)
         {
             double scale = Content?.XamlRoot?.RasterizationScale ?? 1.0;
             double rightInsetDip = AppWindow.TitleBar.RightInset / scale;
@@ -283,6 +299,14 @@ public sealed partial class MainWindow : Window
             {
                 _lastRightInsetDip = rightInsetDip;
                 AppTitleBar.Padding = new Thickness(12, 0, Math.Max(140, rightInsetDip), 0);
+            }
+        }
+        else
+        {
+            if (_lastRightInsetDip < 140)
+            {
+                _lastRightInsetDip = 140;
+                AppTitleBar.Padding = new Thickness(12, 0, 140, 0);
             }
         }
     }
@@ -316,7 +340,7 @@ public sealed partial class MainWindow : Window
         _reusablePassthroughRects.Clear();
 
         FrameworkElement[] interactiveElements = ViewModel.IsSettingsOpen
-            ? (_settingsInteractiveElements ??= [SettingsBackBtn])
+            ? (_settingsInteractiveElements ??= [SettingsBackBtn, ExitFullScreenBtn])
             : (_documentInteractiveElements ??=
             [
                 SidebarToggleButton,
@@ -324,7 +348,8 @@ public sealed partial class MainWindow : Window
                 SearchBtn,
                 AnnotationToolsToggleBtn,
                 DocumentMenuBtn,
-                SettingsBtn
+                SettingsBtn,
+                ExitFullScreenBtn
             ]);
 
         foreach (var element in interactiveElements)
@@ -439,6 +464,12 @@ public sealed partial class MainWindow : Window
             {
                 ViewModel.IsFullScreen = isFullScreen;
             }
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                UpdateTitleBarInsets();
+                UpdateTitleBarNonClientRegions();
+            });
         }
     }
 
@@ -466,6 +497,11 @@ public sealed partial class MainWindow : Window
             }
 
             AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                UpdateTitleBarInsets();
+                UpdateTitleBarNonClientRegions();
+            });
         }
         else
         {
