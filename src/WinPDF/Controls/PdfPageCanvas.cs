@@ -553,7 +553,18 @@ public sealed partial class PdfPageCanvas : Grid
         {
             if (cached is CanvasBitmapEntry { IsDisposed: false } canvasEntry)
             {
-                _level0Bitmap = canvasEntry.Bitmap;
+                try
+                {
+                    if (canvasEntry.Bitmap.Device is not null)
+                    {
+                        _level0Bitmap = canvasEntry.Bitmap;
+                    }
+                }
+                catch
+                {
+                    _tileCache.RemovePage(EffectiveDocumentId, PageInfo.Index);
+                    _level0Bitmap = null;
+                }
             }
 
             cached?.Release();
@@ -617,6 +628,9 @@ public sealed partial class PdfPageCanvas : Grid
                 catch (Exception ex) when (ex is ObjectDisposedException or COMException)
                 {
                     _level0Bitmap = null;
+                    _tileCache.RemovePage(EffectiveDocumentId, PageInfo.Index);
+                    _needsLevel0Render = true;
+                    DispatcherQueue.TryEnqueue(() => UpdateRender());
                 }
             }
         }
@@ -862,7 +876,17 @@ public sealed partial class PdfPageCanvas : Grid
         {
             if (cached is CanvasBitmapEntry { IsDisposed: false } canvasEntry)
             {
-                if (PageInfo?.Index == targetPageIndex && EffectiveDocumentId == targetDocId && !_isUnloaded)
+                bool isValid = false;
+                try
+                {
+                    isValid = canvasEntry.Bitmap.Device is not null;
+                }
+                catch
+                {
+                    _tileCache.RemovePage(targetDocId, targetPageIndex);
+                }
+
+                if (isValid && PageInfo?.Index == targetPageIndex && EffectiveDocumentId == targetDocId && !_isUnloaded)
                 {
                     _level0Bitmap = canvasEntry.Bitmap;
                     _baseCanvas.Invalidate();
@@ -951,10 +975,8 @@ public sealed partial class PdfPageCanvas : Grid
                     CanvasBitmapEntry cacheEntry = new(newBitmap);
                     _tileCache.Add(in baseKey, cacheEntry);
 
-                    CanvasBitmap? oldBitmap = _level0Bitmap;
                     _level0Bitmap = newBitmap;
                     _baseCanvas.Invalidate();
-                    oldBitmap?.Dispose();
 
                     if (EffectiveZoom > DetailZoomThreshold)
                     {
@@ -1245,9 +1267,7 @@ public sealed partial class PdfPageCanvas : Grid
 
     private void ReleaseBitmaps()
     {
-        CanvasBitmap? b0 = _level0Bitmap;
         _level0Bitmap = null;
-        b0?.Dispose();
 
         CanvasBitmap? bd = _detailBitmap;
         _detailBitmap = null;

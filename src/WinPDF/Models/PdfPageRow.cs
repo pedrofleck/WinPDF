@@ -1,10 +1,18 @@
+using System.ComponentModel;
+
 namespace WinPDF.Models;
 
 /// <summary>
 /// Represents a row of one or two pages displayed within the unified document view.
 /// </summary>
-public sealed class PdfPageRow
+public sealed class PdfPageRow : INotifyPropertyChanged
 {
+    /// <inheritdoc/>
+    public event PropertyChangedEventHandler? PropertyChanged
+    {
+        add { }
+        remove { }
+    }
     /// <summary>
     /// Gets the primary (left) page of this row.
     /// </summary>

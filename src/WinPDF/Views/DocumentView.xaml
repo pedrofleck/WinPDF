@@ -100,36 +100,36 @@
                                     VerticalAlignment="Center">
                                     <!-- Página Esquerda (ou Única) -->
                                     <Border
-                                        Width="{x:Bind LeftPageWidth, Mode=OneTime}"
-                                        Height="{x:Bind LeftPageHeight, Mode=OneTime}"
+                                        Width="{x:Bind LeftPageWidth, Mode=OneWay}"
+                                        Height="{x:Bind LeftPageHeight, Mode=OneWay}"
                                         HorizontalAlignment="Center"
                                         VerticalAlignment="Center"
                                         Background="{ThemeResource LayerFillColorDefaultBrush}"
                                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                        BorderThickness="{x:Bind converters:UiHelpers.PresentationBorderThickness(IsPresentationMode), Mode=OneTime}"
-                                        CornerRadius="{x:Bind converters:UiHelpers.PresentationCornerRadius(IsPresentationMode), Mode=OneTime}">
+                                        BorderThickness="{x:Bind converters:UiHelpers.PresentationBorderThickness(IsPresentationMode), Mode=OneWay}"
+                                        CornerRadius="{x:Bind converters:UiHelpers.PresentationCornerRadius(IsPresentationMode), Mode=OneWay}">
                                         <controls:PdfPageCanvas
-                                            PageInfo="{x:Bind LeftPage, Mode=OneTime}"
-                                            IsNightMode="{x:Bind IsNightMode, Mode=OneTime}"
-                                            RotationAngle="{x:Bind Rotation, Mode=OneTime}" />
+                                            PageInfo="{x:Bind LeftPage, Mode=OneWay}"
+                                            IsNightMode="{x:Bind IsNightMode, Mode=OneWay}"
+                                            RotationAngle="{x:Bind Rotation, Mode=OneWay}" />
                                     </Border>
 
                                     <!-- Página Direita (quando Dupla) -->
                                     <Border
-                                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasRightPage), Mode=OneTime}"
-                                        Width="{x:Bind RightPageWidth, Mode=OneTime}"
-                                        Height="{x:Bind RightPageHeight, Mode=OneTime}"
+                                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasRightPage), Mode=OneWay}"
+                                        Width="{x:Bind RightPageWidth, Mode=OneWay}"
+                                        Height="{x:Bind RightPageHeight, Mode=OneWay}"
                                         HorizontalAlignment="Center"
                                         VerticalAlignment="Center"
                                         Background="{ThemeResource LayerFillColorDefaultBrush}"
                                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                        BorderThickness="{x:Bind converters:UiHelpers.PresentationBorderThickness(IsPresentationMode), Mode=OneTime}"
-                                        CornerRadius="{x:Bind converters:UiHelpers.PresentationCornerRadius(IsPresentationMode), Mode=OneTime}">
+                                        BorderThickness="{x:Bind converters:UiHelpers.PresentationBorderThickness(IsPresentationMode), Mode=OneWay}"
+                                        CornerRadius="{x:Bind converters:UiHelpers.PresentationCornerRadius(IsPresentationMode), Mode=OneWay}">
                                         <controls:PdfPageCanvas
-                                            Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasRightPage), Mode=OneTime}"
-                                            PageInfo="{x:Bind RightPage, Mode=OneTime}"
-                                            IsNightMode="{x:Bind IsNightMode, Mode=OneTime}"
-                                            RotationAngle="{x:Bind Rotation, Mode=OneTime}" />
+                                            Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasRightPage), Mode=OneWay}"
+                                            PageInfo="{x:Bind RightPage, Mode=OneWay}"
+                                            IsNightMode="{x:Bind IsNightMode, Mode=OneWay}"
+                                            RotationAngle="{x:Bind Rotation, Mode=OneWay}" />
                                     </Border>
                                 </StackPanel>
                             </DataTemplate>
