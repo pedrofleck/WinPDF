@@ -15,7 +15,7 @@
         <Button
             Grid.Row="0"
             HorizontalAlignment="Stretch"
-            Margin="4,4,4,6"
+            Margin="4,4,4,8"
             Command="{x:Bind ViewModel.ToggleBookmarkCurrentPageCommand}">
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <FontIcon FontSize="14" Glyph="&#xE728;" />
@@ -62,7 +62,7 @@
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="vm:BookmarkItemViewModel">
                     <Border
-                        Margin="0,2,0,2"
+                        Margin="0,4,0,0"
                         Padding="8,4,4,4"
                         Background="{ThemeResource LayerFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -87,8 +87,8 @@
                             <Button
                                 Grid.Column="1"
                                 x:Uid="RemoveBookmarkItemButton"
-                                Width="26"
-                                Height="26"
+                                Width="28"
+                                Height="28"
                                 Padding="0"
                                 VerticalAlignment="Center"
                                 Click="OnRemoveBookmarkItemClick"

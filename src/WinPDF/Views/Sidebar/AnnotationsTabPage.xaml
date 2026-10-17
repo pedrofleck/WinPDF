@@ -40,8 +40,8 @@
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="vm:AnnotationItemViewModel">
                     <Border
-                        Margin="0,2,0,2"
-                        Padding="8,6,8,6"
+                        Margin="0,4,0,0"
+                        Padding="8,4,8,4"
                         Background="{ThemeResource LayerFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1"

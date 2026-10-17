@@ -21,8 +21,13 @@
             SizeChanged="OnThumbnailsScrollViewerSizeChanged"
             PointerEntered="OnThumbnailsPointerEntered"
             PointerExited="OnThumbnailsPointerExited"
+            PointerPressed="OnThumbnailsPointerPressed"
+            PointerReleased="OnThumbnailsPointerReleased"
+            PointerCanceled="OnThumbnailsPointerCanceled"
+            PointerCaptureLost="OnThumbnailsPointerCaptureLost"
             PointerWheelChanged="OnThumbnailsPointerWheelChanged"
-            ViewChanging="OnThumbnailsScrollViewerViewChanging">
+            ViewChanging="OnThumbnailsScrollViewerViewChanging"
+            ViewChanged="OnThumbnailsScrollViewerViewChanged">
             <ItemsRepeater
                 x:Name="ThumbnailsRepeater"
                 ItemsSource="{x:Bind ViewModel.CurrentDocument.Thumbnails, Mode=OneWay}"
@@ -34,7 +39,7 @@
                         MinItemWidth="50"
                         MinItemHeight="40"
                         MinRowSpacing="4"
-                        MinColumnSpacing="10"
+                        MinColumnSpacing="8"
                         ItemsStretch="Fill"
                         MaximumRowsOrColumns="2" />
                 </ItemsRepeater.Layout>

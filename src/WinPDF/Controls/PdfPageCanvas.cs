@@ -29,6 +29,14 @@ public sealed partial class PdfPageCanvas : Grid
     private const double DetailZoomThreshold = 1.01;
     private const double MaxDetailPatchDimensionPx = 4096.0;
 
+    [ComImport]
+    [Guid("905a0fef-bc53-11df-8c49-001e4fc686da")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface ICanvasBufferByteAccess
+    {
+        unsafe byte* Buffer { get; }
+    }
+
     /// <summary>
     /// Identifies the <see cref="PageInfo"/> dependency property.
     /// </summary>
@@ -96,6 +104,7 @@ public sealed partial class PdfPageCanvas : Grid
     private CancellationTokenSource? _baseCts;
     private CancellationTokenSource? _detailCts;
     private DocumentViewModel? _observedDocument;
+    private ScrollViewer? _cachedScrollViewer;
     private int _loadedPageIndex = -1;
     private volatile bool _isUnloaded;
     private bool _isResourcesCreated;
@@ -191,7 +200,7 @@ public sealed partial class PdfPageCanvas : Grid
     {
         get
         {
-            var scrollViewer = FindAncestor<ScrollViewer>(this);
+            var scrollViewer = _cachedScrollViewer ??= FindAncestor<ScrollViewer>(this);
             if (scrollViewer is not null && scrollViewer.ZoomFactor > 0.05 && Math.Abs(scrollViewer.ZoomFactor - 1.0) > 0.001)
             {
                 return scrollViewer.ZoomFactor;
@@ -312,7 +321,7 @@ public sealed partial class PdfPageCanvas : Grid
         }
         else
         {
-            var scrollViewer = FindAncestor<ScrollViewer>(this);
+            var scrollViewer = _cachedScrollViewer ??= FindAncestor<ScrollViewer>(this);
             if (scrollViewer is not null && scrollViewer.ZoomFactor > 0.05)
             {
                 ZoomFactor = scrollViewer.ZoomFactor;
@@ -334,6 +343,7 @@ public sealed partial class PdfPageCanvas : Grid
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         _isUnloaded = true;
+        _cachedScrollViewer = null;
         CanvasUnloaded?.Invoke(this);
         CancelInFlightRenders();
         ReleaseHighResPatch();
@@ -978,40 +988,24 @@ public sealed partial class PdfPageCanvas : Grid
                     return;
                 }
 
-                using (var entry = new PdfBitmapEntry(lease))
+                float baseDpi = _baseCanvas.Dpi > 0 ? _baseCanvas.Dpi : (float)(96.0 * rasterizationScale);
+                CanvasBitmap? newBitmap = CreateCanvasBitmapFromLease(_baseCanvas, lease, baseDpi);
+                if (newBitmap is null)
                 {
-                    lease.Dispose();
+                    return;
+                }
 
-                    var buffer = entry.Pixels.AsBuffer(0, entry.ByteLength);
-                    float baseDpi = _baseCanvas.Dpi > 0 ? _baseCanvas.Dpi : (float)(96.0 * rasterizationScale);
-                    CanvasBitmap newBitmap;
-                    try
-                    {
-                        newBitmap = CanvasBitmap.CreateFromBytes(
-                            _baseCanvas,
-                            buffer,
-                            entry.Width,
-                            entry.Height,
-                            DirectXPixelFormat.B8G8R8A8UIntNormalized,
-                            baseDpi);
-                    }
-                    catch (Exception ex) when (ex is ObjectDisposedException or COMException)
-                    {
-                        return;
-                    }
+                CanvasBitmapEntry cacheEntry = new(newBitmap);
+                _tileCache.Add(in baseKey, cacheEntry);
 
-                    CanvasBitmapEntry cacheEntry = new(newBitmap);
-                    _tileCache.Add(in baseKey, cacheEntry);
+                _level0Entry?.Release();
+                _level0Entry = cacheEntry;
+                _level0Bitmap = newBitmap;
+                _baseCanvas.Invalidate();
 
-                    _level0Entry?.Release();
-                    _level0Entry = cacheEntry;
-                    _level0Bitmap = newBitmap;
-                    _baseCanvas.Invalidate();
-
-                    if (EffectiveZoom > DetailZoomThreshold)
-                    {
-                        UpdateViewport(EffectiveZoom);
-                    }
+                if (EffectiveZoom > DetailZoomThreshold)
+                {
+                    UpdateViewport(EffectiveZoom);
                 }
             }
             catch (Exception ex)
@@ -1122,48 +1116,32 @@ public sealed partial class PdfPageCanvas : Grid
                 float targetDpiScale = (float)Math.Max(1.0, pixelScale / Math.Max(0.1, activeRasterScale));
                 float targetDpi = (float)(96.0 * activeRasterScale * targetDpiScale);
 
-                using (var entry = new PdfBitmapEntry(lease))
+                CanvasBitmap? newBitmap = CreateCanvasBitmapFromLease(resourceCreator, lease, targetDpi);
+                if (newBitmap is null)
                 {
-                    lease.Dispose();
-
-                    var buffer = entry.Pixels.AsBuffer(0, entry.ByteLength);
-                    CanvasBitmap newBitmap;
-                    try
-                    {
-                        newBitmap = CanvasBitmap.CreateFromBytes(
-                            resourceCreator,
-                            buffer,
-                            entry.Width,
-                            entry.Height,
-                            DirectXPixelFormat.B8G8R8A8UIntNormalized,
-                            targetDpi);
-                    }
-                    catch (Exception ex) when (ex is ObjectDisposedException or COMException)
-                    {
-                        return;
-                    }
-
-                    CanvasBitmap? oldDetail = _detailBitmap;
-                    _detailBitmap = newBitmap;
-                    _detailRectDip = exactPatchDip;
-                    _renderedZoom = currentZoom;
-                    _renderedPixelScale = pixelScale;
-
-                    _detailTranslate.X = exactPatchDip.X;
-                    _detailTranslate.Y = exactPatchDip.Y;
-                    _detailCanvas.Width = Math.Max(1.0, exactPatchDip.Width);
-                    _detailCanvas.Height = Math.Max(1.0, exactPatchDip.Height);
-
-                    if (Math.Abs(_detailCanvas.DpiScale - targetDpiScale) > 0.001f)
-                    {
-                        _detailCanvas.DpiScale = targetDpiScale;
-                    }
-
-                    _detailCanvas.Opacity = 1.0;
-                    _detailCanvas.Visibility = Visibility.Visible;
-                    _detailCanvas.Invalidate();
-                    oldDetail?.Dispose();
+                    return;
                 }
+
+                CanvasBitmap? oldDetail = _detailBitmap;
+                _detailBitmap = newBitmap;
+                _detailRectDip = exactPatchDip;
+                _renderedZoom = currentZoom;
+                _renderedPixelScale = pixelScale;
+
+                _detailTranslate.X = exactPatchDip.X;
+                _detailTranslate.Y = exactPatchDip.Y;
+                _detailCanvas.Width = Math.Max(1.0, exactPatchDip.Width);
+                _detailCanvas.Height = Math.Max(1.0, exactPatchDip.Height);
+
+                if (Math.Abs(_detailCanvas.DpiScale - targetDpiScale) > 0.001f)
+                {
+                    _detailCanvas.DpiScale = targetDpiScale;
+                }
+
+                _detailCanvas.Opacity = 1.0;
+                _detailCanvas.Visibility = Visibility.Visible;
+                _detailCanvas.Invalidate();
+                oldDetail?.Dispose();
             }
             catch (Exception ex)
             {
@@ -1293,6 +1271,54 @@ public sealed partial class PdfPageCanvas : Grid
         _detailCts?.Cancel();
         _detailCts?.Dispose();
         _detailCts = null;
+    }
+
+    private static unsafe CanvasBitmap? CreateCanvasBitmapFromLease(
+        ICanvasResourceCreator resourceCreator,
+        PdfBitmapLease lease,
+        float dpi)
+    {
+        try
+        {
+            if (lease.IsDisposed || lease.Width <= 0 || lease.Height <= 0 || lease.SizeInBytes <= 0 || lease.SizeInBytes > int.MaxValue)
+            {
+                return null;
+            }
+
+            int byteLength = (int)lease.SizeInBytes;
+            Windows.Storage.Streams.IBuffer nativeBuffer = new Windows.Storage.Streams.Buffer((uint)byteLength)
+            {
+                Length = (uint)byteLength
+            };
+
+            if (nativeBuffer is ICanvasBufferByteAccess byteAccess)
+            {
+                byte* dst = byteAccess.Buffer;
+                byte* src = (byte*)lease.Scan0;
+                System.Buffer.MemoryCopy(src, dst, byteLength, byteLength);
+            }
+            else
+            {
+                using var stream = nativeBuffer.AsStream();
+                stream.Write(lease.AsSpan());
+            }
+
+            return CanvasBitmap.CreateFromBytes(
+                resourceCreator,
+                nativeBuffer,
+                lease.Width,
+                lease.Height,
+                DirectXPixelFormat.B8G8R8A8UIntNormalized,
+                dpi);
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or COMException)
+        {
+            return null;
+        }
+        finally
+        {
+            lease.Dispose();
+        }
     }
 
     private void ReleaseBitmaps()

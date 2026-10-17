@@ -193,10 +193,6 @@ public static class UiHelpers
             ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["AccentTextFillColorPrimaryBrush"]
             : (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
 
-    /// <summary>
-    /// Checks if the properties sidebar pane should be open, requiring both an open document and properties requested.
-    /// </summary>
-    public static bool IsPropertiesOpenWithDoc(bool hasDoc, bool isPropertiesOpen) => hasDoc && isPropertiesOpen;
 
     /// <summary>
     /// Returns <see cref="Visibility.Visible"/> if the string is not null or whitespace; otherwise, <see cref="Visibility.Collapsed"/>.

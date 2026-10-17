@@ -114,33 +114,8 @@ public sealed partial class MainWindow : Window
         RegisterTitleBarAnimatedIconPointerHandlers();
 
         _savedSidebarWidth = Math.Clamp(ViewModel.SettingsService.Settings.SidebarWidth, MinSidebarWidth, MaxSidebarWidth);
-        MainSplitView.OpenPaneLength = _savedSidebarWidth;
+        SidebarPaneContainer.Width = _savedSidebarWidth;
         Closed += OnMainWindowClosed;
-        MainSplitView.PaneOpening += (_, _) =>
-        {
-            if (ViewModel.HasDocument && !ViewModel.IsSettingsOpen)
-            {
-                MainContentBackdropBorder.CornerRadius = new CornerRadius(8, 0, 0, 0);
-                MainContentBackdropBorder.BorderThickness = new Thickness(1, 1, 0, 0);
-            }
-
-            if (SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage)
-            {
-                DispatcherQueue.TryEnqueue(thumbPage.RefreshAfterVisibilityRestored);
-            }
-        };
-        MainSplitView.PaneOpened += (_, _) =>
-        {
-            if (SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage)
-            {
-                DispatcherQueue.TryEnqueue(thumbPage.RefreshAfterVisibilityRestored);
-            }
-        };
-        MainSplitView.PaneClosing += (_, _) =>
-        {
-            MainContentBackdropBorder.CornerRadius = new CornerRadius(0);
-            MainContentBackdropBorder.BorderThickness = ViewModel.HasDocument ? new Thickness(0, 1, 0, 0) : new Thickness(0);
-        };
 
         SelectSidebarTab(ViewModel.SidebarTab);
 
@@ -160,6 +135,13 @@ public sealed partial class MainWindow : Window
 
                 // Initial frame navigation
                 MainContentFrame.Navigate(typeof(DocumentView), ViewModel);
+                if (MainContentFrame.Content is DocumentView initialDocView)
+                {
+                    initialDocView.SetSidebarStateImmediate(
+                        ViewModel.HasDocument && ViewModel.IsSidebarOpen,
+                        _savedSidebarWidth);
+                }
+
                 SelectSidebarTab(ViewModel.SidebarTab);
 
                 if (root.XamlRoot is not null)
@@ -281,12 +263,6 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        if (ViewModel.IsPropertiesOpen && e.Key == Windows.System.VirtualKey.Escape)
-        {
-            e.Handled = true;
-            ViewModel.CloseProperties();
-            return;
-        }
 
         if (MainContentFrame.Content is DocumentView docView)
         {
@@ -350,6 +326,8 @@ public sealed partial class MainWindow : Window
 
     private Storyboard? _ellipsisWaveStoryboard;
     private Storyboard? _settingsTransitionStoryboard;
+    private Storyboard? _sidebarStoryboard;
+    private bool _isSidebarVisualOpen;
 
     private void AnimateSettingsTransition(bool opening)
     {
@@ -368,56 +346,47 @@ public sealed partial class MainWindow : Window
 
             MainSplitView.Opacity = 1.0;
             MainSplitViewTransform.TranslateX = 0.0;
+            MainSplitViewTransform.TranslateY = 0.0;
             SettingsContentFrame.Opacity = 0.0;
-            SettingsFrameTransform.TranslateX = 56.0;
+            SettingsFrameTransform.TranslateX = 0.0;
+            SettingsFrameTransform.TranslateY = -28.0;
 
             var sb = new Storyboard();
             var outEase = new CubicEase { EasingMode = EasingMode.EaseOut };
-            var inEase = new ExponentialEase { Exponent = 4.5, EasingMode = EasingMode.EaseOut };
+            var inEase = new ExponentialEase { Exponent = 5.0, EasingMode = EasingMode.EaseOut };
 
             var splitOpacityAnim = new DoubleAnimation
             {
                 From = 1.0,
                 To = 0.0,
-                Duration = new Duration(TimeSpan.FromMilliseconds(140)),
+                Duration = new Duration(TimeSpan.FromMilliseconds(110)),
                 EasingFunction = outEase
             };
             Storyboard.SetTarget(splitOpacityAnim, MainSplitView);
             Storyboard.SetTargetProperty(splitOpacityAnim, "Opacity");
             sb.Children.Add(splitOpacityAnim);
 
-            var splitTranslateAnim = new DoubleAnimation
-            {
-                From = 0.0,
-                To = -36.0,
-                Duration = new Duration(TimeSpan.FromMilliseconds(190)),
-                EasingFunction = outEase
-            };
-            Storyboard.SetTarget(splitTranslateAnim, MainSplitViewTransform);
-            Storyboard.SetTargetProperty(splitTranslateAnim, "TranslateX");
-            sb.Children.Add(splitTranslateAnim);
-
             var settingsOpacityAnim = new DoubleAnimation
             {
                 From = 0.0,
                 To = 1.0,
-                Duration = new Duration(TimeSpan.FromMilliseconds(190)),
+                Duration = new Duration(TimeSpan.FromMilliseconds(180)),
                 EasingFunction = outEase
             };
             Storyboard.SetTarget(settingsOpacityAnim, SettingsContentFrame);
             Storyboard.SetTargetProperty(settingsOpacityAnim, "Opacity");
             sb.Children.Add(settingsOpacityAnim);
 
-            var settingsTranslateAnim = new DoubleAnimation
+            var settingsDropAnim = new DoubleAnimation
             {
-                From = 56.0,
+                From = -28.0,
                 To = 0.0,
-                Duration = new Duration(TimeSpan.FromMilliseconds(240)),
+                Duration = new Duration(TimeSpan.FromMilliseconds(280)),
                 EasingFunction = inEase
             };
-            Storyboard.SetTarget(settingsTranslateAnim, SettingsFrameTransform);
-            Storyboard.SetTargetProperty(settingsTranslateAnim, "TranslateX");
-            sb.Children.Add(settingsTranslateAnim);
+            Storyboard.SetTarget(settingsDropAnim, SettingsFrameTransform);
+            Storyboard.SetTargetProperty(settingsDropAnim, "TranslateY");
+            sb.Children.Add(settingsDropAnim);
 
             sb.Completed += (_, _) =>
             {
@@ -425,8 +394,10 @@ public sealed partial class MainWindow : Window
                 {
                     MainSplitView.Opacity = 0.0;
                     MainSplitViewTransform.TranslateX = 0.0;
+                    MainSplitViewTransform.TranslateY = 0.0;
                     SettingsContentFrame.Opacity = 1.0;
                     SettingsFrameTransform.TranslateX = 0.0;
+                    SettingsFrameTransform.TranslateY = 0.0;
                 }
             };
 
@@ -451,8 +422,10 @@ public sealed partial class MainWindow : Window
             SettingsContentFrame.Visibility = Visibility.Visible;
             SettingsContentFrame.Opacity = 1.0;
             SettingsFrameTransform.TranslateX = 0.0;
+            SettingsFrameTransform.TranslateY = 0.0;
             MainSplitView.Opacity = 0.0;
-            MainSplitViewTransform.TranslateX = -48.0;
+            MainSplitViewTransform.TranslateX = 0.0;
+            MainSplitViewTransform.TranslateY = -20.0;
 
             var sb = new Storyboard();
             var outEase = new CubicEase { EasingMode = EasingMode.EaseOut };
@@ -462,7 +435,7 @@ public sealed partial class MainWindow : Window
             {
                 From = 1.0,
                 To = 0.0,
-                Duration = new Duration(TimeSpan.FromMilliseconds(140)),
+                Duration = new Duration(TimeSpan.FromMilliseconds(130)),
                 EasingFunction = outEase
             };
             Storyboard.SetTarget(settingsOpacityAnim, SettingsContentFrame);
@@ -472,19 +445,19 @@ public sealed partial class MainWindow : Window
             var settingsTranslateAnim = new DoubleAnimation
             {
                 From = 0.0,
-                To = 56.0,
-                Duration = new Duration(TimeSpan.FromMilliseconds(190)),
+                To = 20.0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(160)),
                 EasingFunction = outEase
             };
             Storyboard.SetTarget(settingsTranslateAnim, SettingsFrameTransform);
-            Storyboard.SetTargetProperty(settingsTranslateAnim, "TranslateX");
+            Storyboard.SetTargetProperty(settingsTranslateAnim, "TranslateY");
             sb.Children.Add(settingsTranslateAnim);
 
             var splitOpacityAnim = new DoubleAnimation
             {
                 From = 0.0,
                 To = 1.0,
-                Duration = new Duration(TimeSpan.FromMilliseconds(190)),
+                Duration = new Duration(TimeSpan.FromMilliseconds(200)),
                 EasingFunction = outEase
             };
             Storyboard.SetTarget(splitOpacityAnim, MainSplitView);
@@ -493,13 +466,13 @@ public sealed partial class MainWindow : Window
 
             var splitTranslateAnim = new DoubleAnimation
             {
-                From = -48.0,
+                From = -20.0,
                 To = 0.0,
-                Duration = new Duration(TimeSpan.FromMilliseconds(250)),
+                Duration = new Duration(TimeSpan.FromMilliseconds(260)),
                 EasingFunction = inEase
             };
             Storyboard.SetTarget(splitTranslateAnim, MainSplitViewTransform);
-            Storyboard.SetTargetProperty(splitTranslateAnim, "TranslateX");
+            Storyboard.SetTargetProperty(splitTranslateAnim, "TranslateY");
             sb.Children.Add(splitTranslateAnim);
 
             sb.Completed += (_, _) =>
@@ -509,8 +482,10 @@ public sealed partial class MainWindow : Window
                     SettingsContentFrame.Visibility = Visibility.Collapsed;
                     SettingsContentFrame.Opacity = 0.0;
                     SettingsFrameTransform.TranslateX = 0.0;
+                    SettingsFrameTransform.TranslateY = 0.0;
                     MainSplitView.Opacity = 1.0;
                     MainSplitViewTransform.TranslateX = 0.0;
+                    MainSplitViewTransform.TranslateY = 0.0;
                 }
             };
 
@@ -547,7 +522,7 @@ public sealed partial class MainWindow : Window
             keyFrames.KeyFrames.Add(new EasingDoubleKeyFrame
             {
                 KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(105)),
-                Value = -3.0,
+                Value = -2.5,
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
             });
             keyFrames.KeyFrames.Add(new EasingDoubleKeyFrame
@@ -619,31 +594,222 @@ public sealed partial class MainWindow : Window
 
     private void OnSidebarSplitterDragDelta(object sender, DragDeltaEventArgs e)
     {
-        double currentWidth = MainSplitView.OpenPaneLength > 0 ? MainSplitView.OpenPaneLength : _savedSidebarWidth;
+        double currentWidth = SidebarPaneContainer.Width > 0 ? SidebarPaneContainer.Width : _savedSidebarWidth;
         double newWidth = Math.Clamp(currentWidth + e.HorizontalChange, MinSidebarWidth, MaxSidebarWidth);
         _savedSidebarWidth = newWidth;
-        MainSplitView.OpenPaneLength = newWidth;
+        SidebarPaneContainer.Width = newWidth;
         ViewModel.SettingsService.Settings.SidebarWidth = newWidth;
+
+        if (ViewModel.HasDocument && ViewModel.IsSidebarOpen)
+        {
+            MainContentBackdropTransform.TranslateX = newWidth;
+            MainContentClipTransform.TranslateX = newWidth;
+            if (MainContentFrame.Content is DocumentView docView)
+            {
+                docView.SetSidebarStateImmediate(true, newWidth);
+            }
+        }
     }
 
-    private void UpdateSidebarLayout()
+    private void OnMainContentContainerSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (e.NewSize.Width > 0 && e.NewSize.Height > 0)
+        {
+            MainContentClipGeometry.Rect = new Windows.Foundation.Rect(0, 0, e.NewSize.Width + 600, e.NewSize.Height + 100);
+        }
+    }
+
+    private void UpdateSidebarLayout(bool animate = false)
     {
         bool shouldOpenPane = ViewModel.HasDocument && ViewModel.IsSidebarOpen;
-        if (MainSplitView.IsPaneOpen != shouldOpenPane)
-        {
-            MainSplitView.IsPaneOpen = shouldOpenPane;
-        }
+        double paneWidth = _savedSidebarWidth > 0 ? _savedSidebarWidth : DefaultSidebarWidth;
+        SidebarPaneContainer.Width = paneWidth;
 
         if (!ViewModel.HasDocument)
         {
             MainContentBackdropBorder.CornerRadius = new CornerRadius(0);
             MainContentBackdropBorder.BorderThickness = new Thickness(0);
         }
+        else if (shouldOpenPane)
+        {
+            MainContentBackdropBorder.CornerRadius = new CornerRadius(8, 0, 0, 0);
+            MainContentBackdropBorder.BorderThickness = new Thickness(1, 1, 0, 0);
+        }
+
+        if (!animate || !ViewModel.HasDocument || ViewModel.IsSettingsOpen || ViewModel.IsPresentationMode)
+        {
+            _sidebarStoryboard?.Stop();
+            _isSidebarVisualOpen = shouldOpenPane;
+            SidebarPaneContainer.Visibility = shouldOpenPane ? Visibility.Visible : Visibility.Collapsed;
+            SidebarPaneContainer.Opacity = shouldOpenPane ? 1.0 : 0.0;
+            SidebarPaneTransform.TranslateX = shouldOpenPane ? 0.0 : -paneWidth;
+            MainContentBackdropTransform.TranslateX = shouldOpenPane ? paneWidth : 0.0;
+            MainContentClipTransform.TranslateX = shouldOpenPane ? paneWidth : 0.0;
+
+            if (!shouldOpenPane && ViewModel.HasDocument)
+            {
+                MainContentBackdropBorder.CornerRadius = new CornerRadius(0);
+                MainContentBackdropBorder.BorderThickness = new Thickness(0, 1, 0, 0);
+            }
+
+            if (MainContentFrame.Content is DocumentView docViewImmediate)
+            {
+                docViewImmediate.SetSidebarStateImmediate(shouldOpenPane, paneWidth);
+            }
+
+            if (shouldOpenPane && SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage)
+            {
+                DispatcherQueue.TryEnqueue(thumbPage.RefreshAfterVisibilityRestored);
+            }
+
+            return;
+        }
+
+        if (_isSidebarVisualOpen == shouldOpenPane)
+        {
+            return;
+        }
+
+        _isSidebarVisualOpen = shouldOpenPane;
+        _sidebarStoryboard?.Stop();
+
+        if (MainContentFrame.Content is DocumentView docView)
+        {
+            docView.AnimateSidebarTransition(shouldOpenPane, paneWidth);
+        }
+
+        var sb = new Storyboard();
+        var ease = new ExponentialEase { Exponent = 4.5, EasingMode = EasingMode.EaseOut };
+        var duration = new Duration(TimeSpan.FromMilliseconds(250));
+
+        if (shouldOpenPane)
+        {
+            if (SidebarPaneContainer.Visibility == Visibility.Collapsed)
+            {
+                SidebarPaneTransform.TranslateX = -paneWidth;
+                SidebarPaneContainer.Opacity = 0.0;
+                SidebarPaneContainer.Visibility = Visibility.Visible;
+            }
+
+            var paneTranslate = new DoubleAnimation
+            {
+                To = 0.0,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(paneTranslate, SidebarPaneTransform);
+            Storyboard.SetTargetProperty(paneTranslate, "TranslateX");
+            sb.Children.Add(paneTranslate);
+
+            var paneOpacity = new DoubleAnimation
+            {
+                To = 1.0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(180)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(paneOpacity, SidebarPaneContainer);
+            Storyboard.SetTargetProperty(paneOpacity, "Opacity");
+            sb.Children.Add(paneOpacity);
+
+            var backdropTranslate = new DoubleAnimation
+            {
+                To = paneWidth,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(backdropTranslate, MainContentBackdropTransform);
+            Storyboard.SetTargetProperty(backdropTranslate, "TranslateX");
+            sb.Children.Add(backdropTranslate);
+
+            var clipTranslate = new DoubleAnimation
+            {
+                To = paneWidth,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(clipTranslate, MainContentClipTransform);
+            Storyboard.SetTargetProperty(clipTranslate, "TranslateX");
+            sb.Children.Add(clipTranslate);
+
+            if (SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage)
+            {
+                DispatcherQueue.TryEnqueue(thumbPage.RefreshAfterVisibilityRestored);
+            }
+
+            sb.Completed += (_, _) =>
+            {
+                if (ViewModel.IsSidebarOpen && ViewModel.HasDocument)
+                {
+                    SidebarPaneTransform.TranslateX = 0.0;
+                    SidebarPaneContainer.Opacity = 1.0;
+                    MainContentBackdropTransform.TranslateX = paneWidth;
+                    MainContentClipTransform.TranslateX = paneWidth;
+                    if (SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage tp)
+                    {
+                        DispatcherQueue.TryEnqueue(tp.RefreshAfterVisibilityRestored);
+                    }
+                }
+            };
+        }
         else
         {
-            MainContentBackdropBorder.CornerRadius = ViewModel.IsSidebarOpen ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
-            MainContentBackdropBorder.BorderThickness = ViewModel.IsSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0);
+            var paneTranslate = new DoubleAnimation
+            {
+                To = -paneWidth,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(paneTranslate, SidebarPaneTransform);
+            Storyboard.SetTargetProperty(paneTranslate, "TranslateX");
+            sb.Children.Add(paneTranslate);
+
+            var paneOpacity = new DoubleAnimation
+            {
+                To = 0.0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(170)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(paneOpacity, SidebarPaneContainer);
+            Storyboard.SetTargetProperty(paneOpacity, "Opacity");
+            sb.Children.Add(paneOpacity);
+
+            var backdropTranslate = new DoubleAnimation
+            {
+                To = 0.0,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(backdropTranslate, MainContentBackdropTransform);
+            Storyboard.SetTargetProperty(backdropTranslate, "TranslateX");
+            sb.Children.Add(backdropTranslate);
+
+            var clipTranslate = new DoubleAnimation
+            {
+                To = 0.0,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(clipTranslate, MainContentClipTransform);
+            Storyboard.SetTargetProperty(clipTranslate, "TranslateX");
+            sb.Children.Add(clipTranslate);
+
+            sb.Completed += (_, _) =>
+            {
+                if (!ViewModel.IsSidebarOpen || !ViewModel.HasDocument)
+                {
+                    SidebarPaneContainer.Visibility = Visibility.Collapsed;
+                    SidebarPaneContainer.Opacity = 0.0;
+                    SidebarPaneTransform.TranslateX = -paneWidth;
+                    MainContentBackdropTransform.TranslateX = 0.0;
+                    MainContentClipTransform.TranslateX = 0.0;
+                    MainContentBackdropBorder.CornerRadius = new CornerRadius(0);
+                    MainContentBackdropBorder.BorderThickness = ViewModel.HasDocument ? new Thickness(0, 1, 0, 0) : new Thickness(0);
+                }
+            };
         }
+
+        _sidebarStoryboard = sb;
+        sb.Begin();
     }
 
     private void UpdateMainContainerStyle()
@@ -756,7 +922,7 @@ public sealed partial class MainWindow : Window
                 _wasSidebarClosedByNarrowWindow = false;
             }
 
-            UpdateSidebarLayout();
+            UpdateSidebarLayout(animate: !_isInternalSidebarToggle);
         }
         else if (e.PropertyName == nameof(ShellViewModel.HasDocument))
         {

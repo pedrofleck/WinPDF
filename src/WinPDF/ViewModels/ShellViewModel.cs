@@ -51,11 +51,6 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsSidebarOpen { get; set; } = true;
 
-    /// <summary>
-    /// Gets or sets a value indicating whether the right-hand document properties sidebar is open.
-    /// </summary>
-    [ObservableProperty]
-    public partial bool IsPropertiesOpen { get; set; }
 
     /// <summary>
     /// Gets or sets the active tab displayed in the sidebar (Thumbnails, Outline, Annotations, Bookmarks, Attachments).
@@ -632,6 +627,11 @@ public sealed partial class ShellViewModel : ObservableObject
     private bool _isPrinting;
 
     /// <summary>
+    /// Event raised when the active document should be printed using the Windows 11 PrintManager preview pipeline.
+    /// </summary>
+    public event Func<Task>? PrintRequested;
+
+    /// <summary>
     /// Gets the command that opens the native print dialog and spools the current document.
     /// </summary>
     public IAsyncRelayCommand PrintDocumentCommand => PrintCommand;
@@ -764,6 +764,12 @@ public sealed partial class ShellViewModel : ObservableObject
         _isPrinting = true;
         try
         {
+            if (PrintRequested is not null)
+            {
+                await PrintRequested.Invoke();
+                return;
+            }
+
             DocumentViewModel doc = CurrentDocument;
             Dictionary<int, int>? pageRotations = null;
             if (doc.Rotation != 0)
@@ -877,7 +883,6 @@ public sealed partial class ShellViewModel : ObservableObject
 
         int preservedPage = CurrentDocument.CurrentPageIndex;
         IsSidebarOpen = false;
-        IsPropertiesOpen = false;
         IsSearchOpen = false;
         IsAnnotationToolbarOpen = false;
         IsPresentationMode = true;
@@ -1034,7 +1039,6 @@ public sealed partial class ShellViewModel : ObservableObject
             return;
         }
 
-        IsPropertiesOpen = false;
         IsSearchOpen = false;
         IsAnnotationToolbarOpen = false;
         if (IsPresentationMode)
@@ -1214,29 +1218,14 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Toggles the document properties sidebar between open and closed.
+    /// Displays the document properties modal dialog.
     /// </summary>
     [RelayCommand]
-    public void ToggleProperties()
+    public async Task TogglePropertiesAsync()
     {
-        if (CurrentDocument is null)
+        if (CurrentDocument is not null)
         {
-            IsPropertiesOpen = false;
-            return;
-        }
-
-        IsPropertiesOpen = !IsPropertiesOpen;
-    }
-
-    /// <summary>
-    /// Closes the document properties sidebar.
-    /// </summary>
-    [RelayCommand]
-    public void CloseProperties()
-    {
-        if (IsPropertiesOpen)
-        {
-            IsPropertiesOpen = false;
+            await _dialogService.ShowDocumentPropertiesAsync(CurrentDocument);
         }
     }
 
@@ -1304,13 +1293,15 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Displays or toggles the document properties sidebar.
+    /// Displays the document properties modal dialog.
     /// </summary>
     [RelayCommand]
-    public Task ShowPropertiesAsync()
+    public async Task ShowPropertiesAsync()
     {
-        ToggleProperties();
-        return Task.CompletedTask;
+        if (CurrentDocument is not null)
+        {
+            await _dialogService.ShowDocumentPropertiesAsync(CurrentDocument);
+        }
     }
 
     /// <summary>

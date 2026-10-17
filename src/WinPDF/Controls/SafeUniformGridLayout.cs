@@ -50,9 +50,25 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
     public UniformGridLayoutItemsStretch ItemsStretch { get; set; } = UniformGridLayoutItemsStretch.Fill;
 
     /// <summary>
-    /// Gets or sets the maximum number of columns per row.
+    /// Gets the maximum number of columns per row.
     /// </summary>
     public int MaximumRowsOrColumns { get; set; } = 2;
+
+    /// <summary>
+    /// Gets the total computed content height of all rows including spacing.
+    /// </summary>
+    public double TotalContentHeight
+    {
+        get
+        {
+            if (_rowTops.Count > 0 && _rowHeights.Count == _rowTops.Count)
+            {
+                int last = _rowTops.Count - 1;
+                return _rowTops[last] + _rowHeights[last];
+            }
+            return 0.0;
+        }
+    }
 
     /// <summary>
     /// Pre-computes row vertical positions from the current thumbnail view models and invalidates layout measurement.
@@ -124,13 +140,19 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
             int clampedRow = Math.Clamp(rowIdx, 0, _rowTops.Count - 1);
             rowTop = _rowTops[clampedRow];
             rowHeight = _rowHeights[clampedRow];
-            centerY = rowTop + (rowHeight * (0.5 + (rowFraction * 0.5)));
+
+            double currentCenterY = rowTop + (rowHeight * 0.5);
+            double nextCenterY = (clampedRow < _rowTops.Count - 1)
+                ? _rowTops[clampedRow + 1] + (_rowHeights[clampedRow + 1] * 0.5)
+                : rowTop + rowHeight + MinRowSpacing + (rowHeight * 0.5);
+
+            centerY = currentCenterY + (rowFraction * (nextCenterY - currentCenterY));
             return;
         }
 
         rowHeight = fallbackRowHeight > 40.0 ? fallbackRowHeight : 180.0;
         rowTop = rowIdx * (rowHeight + MinRowSpacing);
-        centerY = (fracRow * (rowHeight + MinRowSpacing)) + (rowHeight / 2.0);
+        centerY = rowTop + (rowHeight * 0.5) + (rowFraction * (rowHeight + MinRowSpacing));
     }
 
     /// <inheritdoc/>

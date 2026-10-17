@@ -52,7 +52,7 @@
                 Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.IsSettingsOpen), Mode=OneWay}">
 
                 <!-- Group 1: Sidebar Toggle and App Logo/Name -->
-                <StackPanel Orientation="Horizontal" Spacing="10">
+                <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button
                         x:Name="SidebarToggleButton"
                         x:Uid="SidebarToggle"
@@ -82,7 +82,7 @@
                     <StackPanel
                         VerticalAlignment="Center"
                         Orientation="Horizontal"
-                        Spacing="6">
+                        Spacing="8">
                         <Image
                             Width="16"
                             Height="16"
@@ -177,7 +177,7 @@
                 <StackPanel
                     VerticalAlignment="Center"
                     Orientation="Horizontal"
-                    Spacing="6">
+                    Spacing="8">
                     <Image
                         Width="16"
                         Height="16"
@@ -250,13 +250,13 @@
                     Style="{StaticResource SubtleButtonStyle}">
                     <StackPanel
                         Orientation="Horizontal"
-                        Spacing="2.5"
+                        Spacing="3"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center">
                         <Ellipse
                             x:Name="EllipsisDot1"
-                            Width="3.5"
-                            Height="3.5"
+                            Width="2.5"
+                            Height="2.5"
                             Fill="{ThemeResource TextFillColorPrimaryBrush}">
                             <Ellipse.RenderTransform>
                                 <TranslateTransform x:Name="EllipsisDot1Transform" />
@@ -264,8 +264,8 @@
                         </Ellipse>
                         <Ellipse
                             x:Name="EllipsisDot2"
-                            Width="3.5"
-                            Height="3.5"
+                            Width="2.5"
+                            Height="2.5"
                             Fill="{ThemeResource TextFillColorPrimaryBrush}">
                             <Ellipse.RenderTransform>
                                 <TranslateTransform x:Name="EllipsisDot2Transform" />
@@ -273,8 +273,8 @@
                         </Ellipse>
                         <Ellipse
                             x:Name="EllipsisDot3"
-                            Width="3.5"
-                            Height="3.5"
+                            Width="2.5"
+                            Height="2.5"
                             Fill="{ThemeResource TextFillColorPrimaryBrush}">
                             <Ellipse.RenderTransform>
                                 <TranslateTransform x:Name="EllipsisDot3Transform" />
@@ -416,19 +416,25 @@
         <!-- Main Layout: SplitView with native GPU animation on the Pane      -->
         <!-- + Draggable 8 DIPs splitter across the full vertical height       -->
         <!-- ================================================================= -->
-        <SplitView
+        <Grid
             x:Name="MainSplitView"
             Grid.Row="1"
-            DisplayMode="Inline"
-            IsPaneOpen="{x:Bind converters:UiHelpers.IsSidebarOpenWithDoc(ViewModel.HasDocument, ViewModel.IsSidebarOpen), Mode=OneWay}"
-            OpenPaneLength="260"
-            PaneBackground="Transparent"
-            PanePlacement="Left"
             RenderTransformOrigin="0.5,0.5">
-            <SplitView.RenderTransform>
+            <Grid.RenderTransform>
                 <CompositeTransform x:Name="MainSplitViewTransform" />
-            </SplitView.RenderTransform>
-            <SplitView.Pane>
+            </Grid.RenderTransform>
+            <Border
+                x:Name="SidebarPaneContainer"
+                Width="260"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Stretch"
+                Background="Transparent"
+                Canvas.ZIndex="20"
+                RenderTransformOrigin="0.5,0.5"
+                Visibility="Collapsed">
+                <Border.RenderTransform>
+                    <CompositeTransform x:Name="SidebarPaneTransform" />
+                </Border.RenderTransform>
                 <Grid Background="Transparent">
                     <Grid.ColumnDefinitions>
                         <!-- Sidebar Content (Tabs + Footer) -->
@@ -457,7 +463,7 @@
                                 x:Name="SidebarFooterButtonsPanel"
                                 Orientation="Horizontal"
                                 HorizontalAlignment="Center"
-                                Spacing="2">
+                                Spacing="4">
                                 <!-- Tab 1: Page Thumbnails -->
                                 <Button
                                     x:Name="ThumbnailsTabBtn"
@@ -471,7 +477,7 @@
                                     Tag="Thumbnails">
                                     <Grid Width="40" Height="36" Background="Transparent">
                                         <FontIcon
-                                            FontSize="20"
+                                            FontSize="16"
                                             Glyph="&#xF0E2;"
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Center" />
@@ -482,7 +488,7 @@
                                             RadiusY="1.5"
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Bottom"
-                                            Margin="0,0,0,2"
+                                            Margin="0"
                                             Fill="{ThemeResource AccentFillColorDefaultBrush}"
                                             Visibility="{x:Bind converters:UiHelpers.ThumbnailsVisibility(ViewModel.SidebarTab), Mode=OneWay}" />
                                     </Grid>
@@ -501,7 +507,7 @@
                                     Tag="Outline">
                                     <Grid Width="40" Height="36" Background="Transparent">
                                         <FontIcon
-                                            FontSize="20"
+                                            FontSize="16"
                                             Glyph="&#xE8FD;"
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Center" />
@@ -512,7 +518,7 @@
                                             RadiusY="1.5"
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Bottom"
-                                            Margin="0,0,0,2"
+                                            Margin="0"
                                             Fill="{ThemeResource AccentFillColorDefaultBrush}"
                                             Visibility="{x:Bind converters:UiHelpers.OutlineVisibility(ViewModel.SidebarTab), Mode=OneWay}" />
                                     </Grid>
@@ -531,7 +537,7 @@
                                     Tag="Annotations">
                                     <Grid Width="40" Height="36" Background="Transparent">
                                         <FontIcon
-                                            FontSize="20"
+                                            FontSize="16"
                                             Glyph="&#xE90A;"
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Center" />
@@ -542,7 +548,7 @@
                                             RadiusY="1.5"
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Bottom"
-                                            Margin="0,0,0,2"
+                                            Margin="0"
                                             Fill="{ThemeResource AccentFillColorDefaultBrush}"
                                             Visibility="{x:Bind converters:UiHelpers.AnnotationsVisibility(ViewModel.SidebarTab), Mode=OneWay}" />
                                     </Grid>
@@ -561,7 +567,7 @@
                                     Tag="Bookmarks">
                                     <Grid Width="40" Height="36" Background="Transparent">
                                         <FontIcon
-                                            FontSize="20"
+                                            FontSize="16"
                                             Glyph="&#xE728;"
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Center" />
@@ -572,7 +578,7 @@
                                             RadiusY="1.5"
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Bottom"
-                                            Margin="0,0,0,2"
+                                            Margin="0"
                                             Fill="{ThemeResource AccentFillColorDefaultBrush}"
                                             Visibility="{x:Bind converters:UiHelpers.BookmarksVisibility(ViewModel.SidebarTab), Mode=OneWay}" />
                                     </Grid>
@@ -591,7 +597,7 @@
                                     Tag="Attachments">
                                     <Grid Width="40" Height="36" Background="Transparent">
                                         <FontIcon
-                                            FontSize="20"
+                                            FontSize="16"
                                             Glyph="&#xE723;"
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Center" />
@@ -602,7 +608,7 @@
                                             RadiusY="1.5"
                                             HorizontalAlignment="Center"
                                             VerticalAlignment="Bottom"
-                                            Margin="0,0,0,2"
+                                            Margin="0"
                                             Fill="{ThemeResource AccentFillColorDefaultBrush}"
                                             Visibility="{x:Bind converters:UiHelpers.AttachmentsVisibility(ViewModel.SidebarTab), Mode=OneWay}" />
                                     </Grid>
@@ -639,17 +645,32 @@
                         </Thumb>
                     </controls:SplitterContainer>
                 </Grid>
-            </SplitView.Pane>
+            </Border>
 
-            <!-- Main Rounded Container (Uses native ThemeResource for instant light/dark switching) -->
-            <Grid x:Name="MainContentContainer">
+            <!-- Main Rounded Container (Clipped at sidebar boundary so document never goes under Mica sidebar) -->
+            <Grid
+                x:Name="MainContentContainer"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch"
+                SizeChanged="OnMainContentContainerSizeChanged">
+                <Grid.Clip>
+                    <RectangleGeometry x:Name="MainContentClipGeometry" Rect="0,0,4000,4000">
+                        <RectangleGeometry.Transform>
+                            <CompositeTransform x:Name="MainContentClipTransform" />
+                        </RectangleGeometry.Transform>
+                    </RectangleGeometry>
+                </Grid.Clip>
                 <Border
                     x:Name="MainContentBackdropBorder"
-                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="{x:Bind converters:UiHelpers.MainContainerBorderThickness(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}"
                     CornerRadius="{x:Bind converters:UiHelpers.MainContainerCornerRadius(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}"
-                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}" />
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
+                    <Border.RenderTransform>
+                        <CompositeTransform x:Name="MainContentBackdropTransform" />
+                    </Border.RenderTransform>
+                </Border>
 
                 <!-- Main Content Frame (DocumentView always preserved in visual tree) -->
                 <Frame
@@ -657,7 +678,7 @@
                     Background="Transparent"
                     IsNavigationStackEnabled="False" />
             </Grid>
-        </SplitView>
+        </Grid>
 
         <!-- Full-page Settings Frame (Overlayed without unloading DocumentView or Sidebar) -->
         <Frame

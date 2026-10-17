@@ -4,15 +4,15 @@ using WinPDF.Services;
 namespace WinPDF.Rendering;
 
 /// <summary>
-/// <see cref="TileCacheEntry"/> wrapping a rented buffer from <see cref="ArrayPool{T}.Shared"/> (CPU-resident pixels,
-/// e.g. sidebar thumbnails) for zero-LOH allocation. Not device-bound, so it survives <see cref="TileCache.HandleDeviceLost"/>.
+/// <see cref="TileCacheEntry"/> wrapping CPU-resident pixels (either an unmanaged <see cref="PdfBitmapLease"/>
+/// or a rented buffer) with true zero-LOH allocation. Not device-bound, so it survives <see cref="TileCache.HandleDeviceLost"/>.
 /// </summary>
 public sealed class PdfBitmapEntry : TileCacheEntry, IDisposable
 {
     private int _disposed;
 
     /// <summary>
-    /// Gets the rented pixel buffer array.
+    /// Gets the rented pixel buffer array, or an empty array when backed directly by <see cref="Bitmap"/>.
     /// </summary>
     public byte[] Pixels { get; }
 
@@ -70,9 +70,10 @@ public sealed class PdfBitmapEntry : TileCacheEntry, IDisposable
     }
 
     /// <summary>
-    /// Initializes a new entry by copying pixels from a <see cref="PdfBitmapLease"/> into a rented buffer.
+    /// Initializes a new entry taking direct ownership of a native <see cref="PdfBitmapLease"/>
+    /// with zero managed heap / LOH allocation and zero extra CPU copy.
     /// </summary>
-    /// <param name="bitmap">The source bitmap lease.</param>
+    /// <param name="bitmap">The source native bitmap lease.</param>
     public PdfBitmapEntry(PdfBitmapLease bitmap)
     {
         ArgumentNullException.ThrowIfNull(bitmap);
@@ -80,26 +81,12 @@ public sealed class PdfBitmapEntry : TileCacheEntry, IDisposable
         Height = bitmap.Height;
         Stride = bitmap.Stride;
         ByteLength = checked((int)bitmap.SizeInBytes);
-        Pixels = ArrayPool<byte>.Shared.Rent(ByteLength);
-
-        try
-        {
-            unsafe
-            {
-                fixed (byte* pDst = Pixels)
-                {
-                    Buffer.MemoryCopy((void*)bitmap.Scan0, pDst, ByteLength, ByteLength);
-                }
-            }
-        }
-        finally
-        {
-            bitmap.Dispose();
-        }
+        Pixels = Array.Empty<byte>();
+        Bitmap = bitmap;
     }
 
     /// <summary>
-    /// Returns the rented buffer to <see cref="ArrayPool{T}.Shared"/> and disposes underlying native resources.
+    /// Returns any rented buffer to <see cref="ArrayPool{T}.Shared"/> and disposes underlying native resources.
     /// </summary>
     public void Dispose()
     {

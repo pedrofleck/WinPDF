@@ -12,7 +12,7 @@
     <ScrollViewer HorizontalAlignment="Stretch" HorizontalScrollBarVisibility="Disabled">
         <Grid
             x:Name="SettingsRootGrid"
-            Margin="48,24,48,48"
+            Margin="36,40,36,36"
             HorizontalAlignment="Stretch">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition x:Name="CardsColumn" Width="*" />
@@ -27,13 +27,18 @@
 
             <!-- Main "Settings" header at the top -->
             <TextBlock
+                x:Name="SettingsHeaderTitle"
                 Grid.Row="0"
                 Grid.Column="0"
                 Grid.ColumnSpan="3"
                 x:Uid="Settings_Page_Title"
                 FontSize="28"
                 FontWeight="SemiBold"
-                Margin="0,0,0,24" />
+                Margin="0,0,0,36">
+                <TextBlock.RenderTransform>
+                    <CompositeTransform x:Name="SettingsHeaderTransform" />
+                </TextBlock.RenderTransform>
+            </TextBlock>
 
             <!-- Column 0: Configuration cards (Wide, proportional) -->
             <StackPanel
@@ -46,7 +51,10 @@
                 <!-- ========================================================= -->
                 <!-- Section 1: APPEARANCE                                     -->
                 <!-- ========================================================= -->
-                <StackPanel Spacing="10">
+                <StackPanel x:Name="AppearanceSectionPanel" Spacing="12">
+                    <StackPanel.RenderTransform>
+                        <CompositeTransform x:Name="AppearanceSectionTransform" />
+                    </StackPanel.RenderTransform>
                     <TextBlock
                         x:Uid="Settings_Nav_Appearance"
                         FontWeight="SemiBold"
@@ -65,7 +73,7 @@
                                 FontSize="20"
                                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                 Glyph="&#xE790;" />
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
                                 <TextBlock
                                     x:Uid="Settings_Theme_Header"
                                     FontWeight="SemiBold"
@@ -92,7 +100,10 @@
                 <!-- ========================================================= -->
                 <!-- Section 2: VIEWING                                        -->
                 <!-- ========================================================= -->
-                <StackPanel Spacing="10">
+                <StackPanel x:Name="ViewingSectionPanel" Spacing="12">
+                    <StackPanel.RenderTransform>
+                        <CompositeTransform x:Name="ViewingSectionTransform" />
+                    </StackPanel.RenderTransform>
                     <TextBlock
                         x:Uid="Settings_Nav_Viewing"
                         FontWeight="SemiBold"
@@ -112,7 +123,7 @@
                                 FontSize="20"
                                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                 Glyph="&#xE8A5;" />
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
                                 <TextBlock
                                     x:Uid="Settings_Viewing_ModeHeader"
                                     FontWeight="SemiBold"
@@ -148,7 +159,7 @@
                                 FontSize="20"
                                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                 Glyph="&#xE71E;" />
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
                                 <TextBlock
                                     x:Uid="Settings_Viewing_ZoomHeader"
                                     FontWeight="SemiBold"
@@ -185,7 +196,7 @@
                                 FontSize="20"
                                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                 Glyph="&#xE81C;" />
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
                                 <TextBlock
                                     x:Uid="Settings_Viewing_ReopenHeader"
                                     FontWeight="SemiBold"
@@ -207,7 +218,10 @@
                 <!-- ========================================================= -->
                 <!-- Section 3: ANNOTATIONS                                    -->
                 <!-- ========================================================= -->
-                <StackPanel Spacing="10">
+                <StackPanel x:Name="AnnotationsSectionPanel" Spacing="12">
+                    <StackPanel.RenderTransform>
+                        <CompositeTransform x:Name="AnnotationsSectionTransform" />
+                    </StackPanel.RenderTransform>
                     <TextBlock
                         x:Uid="Settings_Nav_Annotations"
                         FontWeight="SemiBold"
@@ -227,7 +241,7 @@
                                 FontSize="20"
                                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                 Glyph="&#xE70F;" />
-                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
                                 <TextBlock
                                     x:Uid="Settings_Annotations_TouchHeader"
                                     FontWeight="SemiBold"
@@ -258,6 +272,9 @@
                 HorizontalAlignment="Right"
                 VerticalAlignment="Top"
                 Spacing="16">
+                <StackPanel.RenderTransform>
+                    <CompositeTransform x:Name="AboutPanelTransform" />
+                </StackPanel.RenderTransform>
 
                 <TextBlock
                     x:Uid="Settings_Nav_About"
@@ -270,7 +287,7 @@
                         Height="36"
                         VerticalAlignment="Center"
                         Source="ms-appx:///Assets/appicon.png" />
-                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                    <StackPanel VerticalAlignment="Center" Spacing="4">
                         <TextBlock
                             x:Uid="Settings_About_AppHeader"
                             FontWeight="SemiBold"

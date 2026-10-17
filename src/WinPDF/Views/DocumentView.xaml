@@ -8,7 +8,6 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:models="using:WinPDF.Models"
-    xmlns:views="using:WinPDF.Views"
     xmlns:vm="using:WinPDF.ViewModels"
     Background="Transparent"
     mc:Ignorable="d">
@@ -82,20 +81,18 @@
         <!-- Document display area -->
         <Grid
             x:Name="DocumentAreaGrid"
-            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+            Background="Transparent"
             RenderTransformOrigin="0.5,0.5"
             Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}"
-            ColumnDefinitions="*,Auto"
             RowDefinitions="*,Auto">
             <Grid.RenderTransform>
                 <CompositeTransform x:Name="DocumentAreaTransform" />
             </Grid.RenderTransform>
 
-            <!-- Row 0, Col 0: Unified document viewer (Continuous and Paged) -->
+            <!-- Row 0: Unified document viewer (Continuous and Paged) -->
             <Grid
                 x:Name="ScrollViewerContentRoot"
                 Grid.Row="0"
-                Grid.Column="0"
                 Background="Transparent">
                 <Grid.ContextFlyout>
                     <MenuFlyout>
@@ -124,7 +121,7 @@
                             Click="OnFitPageClick"
                             KeyboardAcceleratorTextOverride="Ctrl+0">
                             <MenuFlyoutItem.Icon>
-                                <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xF616;" />
+                                <FontIcon Glyph="&#xE9A6;" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
 
@@ -133,7 +130,7 @@
                             Click="OnFitWidthClick"
                             KeyboardAcceleratorTextOverride="Ctrl+2">
                             <MenuFlyoutItem.Icon>
-                                <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xF617;" />
+                                <FontIcon Glyph="&#xF58A;" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
 
@@ -232,6 +229,14 @@
                     IsHitTestVisible="False"
                     Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsPresentationMode), Mode=OneWay}" />
 
+                <!-- Hidden staging canvas for PrintDocument WriteableBitmap surface realization -->
+                <Canvas
+                    x:Name="PrintStagingCanvas"
+                    Width="0"
+                    Height="0"
+                    IsHitTestVisible="False"
+                    Opacity="0" />
+
                 <ScrollViewer
                     x:Name="ContinuousScrollViewer"
                     HorizontalScrollBarVisibility="Auto"
@@ -314,6 +319,9 @@
                     PointerExited="OnPrevZonePointerExited"
                     Tapped="OnPrevZoneTapped"
                     Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.CurrentDocument.IsContinuous), Mode=OneWay}">
+                    <Grid.RenderTransform>
+                        <CompositeTransform x:Name="PrevPageZoneTransform" />
+                    </Grid.RenderTransform>
                     <Border
                         x:Name="PrevPageArrowPill"
                         HorizontalAlignment="Center"
@@ -343,6 +351,9 @@
                     PointerExited="OnNextZonePointerExited"
                     Tapped="OnNextZoneTapped"
                     Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.CurrentDocument.IsContinuous), Mode=OneWay}">
+                    <Grid.RenderTransform>
+                        <CompositeTransform x:Name="NextPageZoneTransform" />
+                    </Grid.RenderTransform>
                     <Border
                         x:Name="NextPageArrowPill"
                         HorizontalAlignment="Center"
@@ -408,17 +419,21 @@
 
                 <!-- Centered top container for floating search (Acrylic) and annotation toolbar -->
                 <StackPanel
+                    x:Name="FloatingTopContainer"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Top"
-                    Margin="0,10,0,0"
+                    Margin="0,12,0,0"
                     Spacing="8"
                     Canvas.ZIndex="95">
+                    <StackPanel.RenderTransform>
+                        <CompositeTransform x:Name="FloatingTopTransform" />
+                    </StackPanel.RenderTransform>
 
                     <!-- Floating search bar in Acrylic (Windows 11 Notepad style) -->
                     <Border
                         x:Name="FloatingSearchBar"
                         HorizontalAlignment="Center"
-                        Padding="8,5"
+                        Padding="8,4"
                         Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
                         BackgroundSizing="InnerBorderEdge"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -454,7 +469,7 @@
                                 <FontIcon
                                     Glyph="&#xE721;"
                                     FontSize="12"
-                                    Margin="9,0,0,0"
+                                    Margin="8,0,0,0"
                                     HorizontalAlignment="Left"
                                     VerticalAlignment="Center"
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -497,8 +512,15 @@
                                 Padding="0"
                                 CornerRadius="4"
                                 IsTabStop="False"
-                                Background="Transparent"
                                 BorderThickness="0">
+                                <ToggleButton.Resources>
+                                    <StaticResource x:Key="ToggleButtonBackground" ResourceKey="SubtleFillColorTransparentBrush" />
+                                    <StaticResource x:Key="ToggleButtonBackgroundPointerOver" ResourceKey="SubtleFillColorSecondaryBrush" />
+                                    <StaticResource x:Key="ToggleButtonBackgroundPressed" ResourceKey="SubtleFillColorTertiaryBrush" />
+                                    <StaticResource x:Key="ToggleButtonBorderBrush" ResourceKey="SubtleFillColorTransparentBrush" />
+                                    <StaticResource x:Key="ToggleButtonBorderBrushPointerOver" ResourceKey="SubtleFillColorTransparentBrush" />
+                                    <StaticResource x:Key="ToggleButtonBorderBrushPressed" ResourceKey="SubtleFillColorTransparentBrush" />
+                                </ToggleButton.Resources>
                                 <TextBlock
                                     Text="Aa"
                                     FontSize="12"
@@ -510,7 +532,7 @@
                             <Border
                                 Width="1"
                                 Height="18"
-                                Margin="2,0"
+                                Margin="4,0"
                                 VerticalAlignment="Center"
                                 Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
 
@@ -533,7 +555,7 @@
                     <Border
                         HorizontalAlignment="Center"
                         VerticalAlignment="Top"
-                        Padding="6,4,6,4"
+                        Padding="8,4,8,4"
                         Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1"
@@ -571,7 +593,7 @@
                                 <FontIcon FontSize="14" Glyph="&#xE70B;" />
                             </ToggleButton>
 
-                            <AppBarSeparator Margin="4,2,4,2" />
+                            <AppBarSeparator Margin="4,4,4,4" />
 
                             <ToggleButton
                                 x:Uid="TouchDrawingToggle"
@@ -584,32 +606,25 @@
                 </StackPanel>
             </Grid>
 
-            <!-- Row 0, Col 1: Floating file info card (Windows 11 Photos style) -->
-            <Border
-                x:Name="PropertiesPaneContainer"
-                Grid.Row="0"
-                Grid.Column="1"
-                VerticalAlignment="Stretch"
-                RenderTransformOrigin="0.5,0.5"
-                Visibility="Collapsed">
-                <Border.RenderTransform>
-                    <CompositeTransform x:Name="PropertiesPaneTransform" />
-                </Border.RenderTransform>
-                <views:DocumentPropertiesView x:Name="DocumentPropertiesPanel" />
-            </Border>
+
 
             <!-- Row 1: Native 32 DIPs bottom status bar (Paint / Photos / Notepad style) -->
-            <Border
+            <Grid
                 x:Name="StatusBarBorder"
                 Grid.Row="1"
-                Grid.ColumnSpan="2"
                 Height="32"
-                Padding="12,0"
-                BorderThickness="0,1,0,0"
-                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
-                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                Background="Transparent"
                 Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.IsPresentationMode), Mode=OneWay}">
-                <Grid>
+                <Border
+                    x:Name="StatusBarBackdropBorder"
+                    BorderThickness="0,1,0,0"
+                    BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}">
+                    <Border.RenderTransform>
+                        <CompositeTransform x:Name="StatusBarBackdropTransform" />
+                    </Border.RenderTransform>
+                </Border>
+                <Grid Padding="12,0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="*" />
@@ -617,10 +632,14 @@
 
                     <!-- Left-aligned elements -->
                     <StackPanel
+                        x:Name="StatusBarLeftPanel"
                         Grid.Column="0"
                         Orientation="Horizontal"
-                        Spacing="6"
+                        Spacing="8"
                         VerticalAlignment="Center">
+                        <StackPanel.RenderTransform>
+                            <CompositeTransform x:Name="StatusBarLeftTransform" />
+                        </StackPanel.RenderTransform>
 
                         <!-- 1. "Inline Pill" page selector (Page [ X ] of Y) -->
                         <StackPanel
@@ -637,9 +656,9 @@
                                 x:Name="StatusBarPageBox"
                                 Height="24"
                                 MinHeight="24"
-                                MinWidth="34"
+                                MinWidth="36"
                                 MaxWidth="56"
-                                Padding="4,2,4,2"
+                                Padding="4,4,4,0"
                                 FontSize="12"
                                 TextAlignment="Center"
                                 VerticalAlignment="Center"
@@ -656,7 +675,8 @@
                                 Text="{x:Bind ViewModel.CurrentDocument.CurrentPageNumber, Mode=OneWay}">
                                 <TextBox.Resources>
                                     <x:Double x:Key="TextControlThemeMinHeight">24</x:Double>
-                                    <x:Double x:Key="TextControlThemeMinWidth">34</x:Double>
+                                    <x:Double x:Key="TextControlThemeMinWidth">36</x:Double>
+                                    <Thickness x:Key="TextControlThemePadding">4,4,4,0</Thickness>
                                     <Thickness x:Key="TextControlBorderThemeThicknessFocused">1</Thickness>
                                 </TextBox.Resources>
                             </TextBox>
@@ -681,20 +701,23 @@
                         <!-- 4. Separator | -->
                         <Border Width="1" Height="16" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="4,0" VerticalAlignment="Center" />
 
-                        <!-- 5. Unified clickable info and size button [ ⓘ . Size Icon . XB ] -->
+                        <!-- 5. Unified clickable info and size Button [ ⓘ . XB ] -->
                         <Button
-                            Style="{StaticResource SubtleButtonStyle}"
-                            Padding="6,2"
+                            Padding="8,0"
                             Height="24"
+                            MinHeight="24"
+                            MinWidth="0"
                             CornerRadius="4"
+                            BorderThickness="0"
+                            IsTabStop="False"
+                            Style="{StaticResource SubtleButtonStyle}"
                             Command="{x:Bind ViewModel.ShowPropertiesCommand}"
                             ToolTipService.ToolTip="{x:Bind PropertiesToolTipText, Mode=OneTime}">
-                            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                <FontIcon Glyph="&#xE946;" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <FontIcon Glyph="&#xE946;" FontSize="12" VerticalAlignment="Center" />
                                 <TextBlock
                                     Text="{x:Bind ViewModel.CurrentDocument.FormattedFileSize, Mode=OneWay}"
                                     FontSize="12"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                     VerticalAlignment="Center" />
                             </StackPanel>
                         </Button>
@@ -710,17 +733,24 @@
 
                         <!-- 1. Double page toggle (Two pages on/off) -->
                         <ToggleButton
-                            Width="26"
+                            Width="28"
                             Height="24"
                             Padding="0"
-                            MinWidth="26"
+                            MinWidth="28"
                             MinHeight="24"
                             CornerRadius="4"
                             IsChecked="{x:Bind ViewModel.CurrentDocument.IsDoublePage, Mode=TwoWay}"
-                            Background="Transparent"
                             BorderThickness="0"
                             ToolTipService.ToolTip="{x:Bind DoublePageToolTipText, Mode=OneTime}">
-                            <FontIcon Glyph="&#xE89A;" FontSize="13" />
+                            <ToggleButton.Resources>
+                                <StaticResource x:Key="ToggleButtonBackground" ResourceKey="SubtleFillColorTransparentBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundPointerOver" ResourceKey="SubtleFillColorSecondaryBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundPressed" ResourceKey="SubtleFillColorTertiaryBrush" />
+                                <StaticResource x:Key="ToggleButtonBorderBrush" ResourceKey="SubtleFillColorTransparentBrush" />
+                                <StaticResource x:Key="ToggleButtonBorderBrushPointerOver" ResourceKey="SubtleFillColorTransparentBrush" />
+                                <StaticResource x:Key="ToggleButtonBorderBrushPressed" ResourceKey="SubtleFillColorTransparentBrush" />
+                            </ToggleButton.Resources>
+                            <FontIcon Glyph="&#xE89A;" FontSize="12" VerticalAlignment="Center" />
                         </ToggleButton>
 
                         <!-- 2. Separator | -->
@@ -728,17 +758,24 @@
 
                         <!-- 3. Continuous scroll toggle (Continuous on/off) -->
                         <ToggleButton
-                            Width="26"
+                            Width="28"
                             Height="24"
                             Padding="0"
-                            MinWidth="26"
+                            MinWidth="28"
                             MinHeight="24"
                             CornerRadius="4"
                             IsChecked="{x:Bind ViewModel.CurrentDocument.IsContinuous, Mode=TwoWay}"
-                            Background="Transparent"
                             BorderThickness="0"
                             ToolTipService.ToolTip="{x:Bind ContinuousToolTipText, Mode=OneTime}">
-                            <FontIcon Glyph="&#xEC8F;" FontSize="13" />
+                            <ToggleButton.Resources>
+                                <StaticResource x:Key="ToggleButtonBackground" ResourceKey="SubtleFillColorTransparentBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundPointerOver" ResourceKey="SubtleFillColorSecondaryBrush" />
+                                <StaticResource x:Key="ToggleButtonBackgroundPressed" ResourceKey="SubtleFillColorTertiaryBrush" />
+                                <StaticResource x:Key="ToggleButtonBorderBrush" ResourceKey="SubtleFillColorTransparentBrush" />
+                                <StaticResource x:Key="ToggleButtonBorderBrushPointerOver" ResourceKey="SubtleFillColorTransparentBrush" />
+                                <StaticResource x:Key="ToggleButtonBorderBrushPressed" ResourceKey="SubtleFillColorTransparentBrush" />
+                            </ToggleButton.Resources>
+                            <FontIcon Glyph="&#xEC8F;" FontSize="12" VerticalAlignment="Center" />
                         </ToggleButton>
 
                         <!-- 4. Separator | -->
@@ -748,37 +785,37 @@
                         <!-- Fit Vertical button (Fit to page) -->
                         <Button
                             Style="{StaticResource SubtleButtonStyle}"
-                            Width="26"
+                            Width="28"
                             Height="24"
                             Padding="0"
-                            MinWidth="26"
+                            MinWidth="28"
                             MinHeight="24"
                             CornerRadius="4"
                             Click="OnFitPageClick"
                             ToolTipService.ToolTip="{x:Bind FitVerticalToolTipText, Mode=OneTime}">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xF616;" FontSize="13" />
+                            <FontIcon Glyph="&#xE9A6;" FontSize="13" />
                         </Button>
 
                         <!-- Fit Horizontal button (Fit to width) -->
                         <Button
                             Style="{StaticResource SubtleButtonStyle}"
-                            Width="26"
+                            Width="28"
                             Height="24"
                             Padding="0"
-                            MinWidth="26"
+                            MinWidth="28"
                             MinHeight="24"
                             CornerRadius="4"
                             Click="OnFitWidthClick"
                             ToolTipService.ToolTip="{x:Bind FitHorizontalToolTipText, Mode=OneTime}">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xF617;" FontSize="13" />
+                            <FontIcon Glyph="&#xF58A;" FontSize="13" />
                         </Button>
 
                         <!-- Zoom preset dropdown (100% ▾) -->
                         <Button
                             Style="{StaticResource SubtleButtonStyle}"
                             Height="24"
-                            Padding="6,0"
-                            MinWidth="58"
+                            Padding="8,0"
+                            MinWidth="60"
                             CornerRadius="4"
                             ToolTipService.ToolTip="{x:Bind ZoomPresetToolTipText, Mode=OneTime}">
                             <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
@@ -876,7 +913,7 @@
                         </Button>
                     </StackPanel>
                 </Grid>
-            </Border>
+            </Grid>
         </Grid>
     </Grid>
 </Page>

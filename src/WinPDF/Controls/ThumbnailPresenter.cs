@@ -48,6 +48,7 @@ public sealed class ThumbnailPresenter : Grid
 
     private readonly Image _image;
     private ThumbnailItemViewModel? _observedItem;
+    private WriteableBitmap? _reusableBitmap;
 
     /// <summary>
     /// Gets or sets the thumbnail view model to display.
@@ -245,15 +246,23 @@ public sealed class ThumbnailPresenter : Grid
             return;
         }
 
-        _image.Source = CreateWriteableBitmap(entry);
-        _image.Visibility = Visibility.Visible;
+        WriteableBitmap? bmp = PopulateWriteableBitmap(entry);
+        if (bmp is not null)
+        {
+            _image.Source = bmp;
+            _image.Visibility = Visibility.Visible;
+        }
     }
 
-    private static unsafe WriteableBitmap? CreateWriteableBitmap(PdfBitmapEntry entry)
+    private unsafe WriteableBitmap? PopulateWriteableBitmap(PdfBitmapEntry entry)
     {
         try
         {
-            WriteableBitmap bitmap = new(entry.Width, entry.Height);
+            WriteableBitmap bitmap = (_reusableBitmap is not null &&
+                                      _reusableBitmap.PixelWidth == entry.Width &&
+                                      _reusableBitmap.PixelHeight == entry.Height)
+                ? _reusableBitmap
+                : (_reusableBitmap = new WriteableBitmap(entry.Width, entry.Height));
             if (bitmap.PixelBuffer is IBufferByteAccess byteAccess)
             {
                 byte* dest = byteAccess.Buffer;

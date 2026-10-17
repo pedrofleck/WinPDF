@@ -1,7 +1,11 @@
 using System.ComponentModel;
 using System.Globalization;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
+using Windows.Graphics.Printing;
 using Windows.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
@@ -9,10 +13,14 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.UI.Xaml.Navigation;
+using Microsoft.UI.Xaml.Printing;
 using WinPDF.Controls;
 using WinPDF.Helpers;
 using WinPDF.Models;
+using WinPDF.Rendering;
+using WinPDF.Services;
 using WinPDF.ViewModels;
 
 namespace WinPDF.Views;
@@ -22,11 +30,23 @@ namespace WinPDF.Views;
 /// </summary>
 public sealed partial class DocumentView : Page
 {
+
+    [ComImport]
+    [Guid("905a0fef-bc53-11df-8c49-001e4fc686da")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IPrintBufferByteAccess
+    {
+        unsafe byte* Buffer { get; }
+    }
+
     private readonly HashSet<PdfPageCanvas> _activeCanvases = new();
     private readonly DispatcherTimer _presentationHideTimer = new() { Interval = TimeSpan.FromSeconds(3) };
     private readonly DispatcherTimer _topNotificationTimer = new() { Interval = TimeSpan.FromSeconds(5) };
-    private CancellationTokenSource? _zoomDebounceCts;
+    private readonly DispatcherTimer _viewportDebounceTimer = new() { Interval = TimeSpan.FromMilliseconds(85) };
+    private readonly IPdfService _pdfService;
+    private readonly IWindowContext _windowContext;
     private DocumentViewModel? _observedDocument;
+    private bool _isProgrammaticPageScroll;
     private bool _isUpdatingPageFromScroll;
     private bool _isApplyingZoom;
     private bool _isUpdatingZoomFromScrollViewer;
@@ -40,11 +60,19 @@ public sealed partial class DocumentView : Page
     private bool _wasInPresentationMode;
     private bool _prePresentationFittedVertically;
     private double _prePresentationZoom = 1.0;
+    private double _currentSidebarWidthDip = 260.0;
+    private bool _isHorizontalPushAnimating;
     private UIElement? _hookedScrollTemplateRoot;
     private PointerEventHandler? _wheelHandler;
     private Storyboard? _transitionStoryboard;
     private Storyboard? _searchBarStoryboard;
-    private Storyboard? _propertiesPaneStoryboard;
+    private Storyboard? _horizontalPushStoryboard;
+    private PrintManager? _registeredPrintManager;
+    private nint _registeredPrintHwnd;
+    private PrintDocument? _printDocument;
+    private IPrintDocumentSource? _printDocumentSource;
+    private DocumentViewModel? _activePrintDocumentVm;
+    private PrintTaskOptions? _currentPrintTaskOptions;
 
     /// <summary>Gets the localized page prefix text.</summary>
     public string PagePrefixText => ResourceStrings.Get(ResourceKeys.StatusBarPagePrefix);
@@ -103,6 +131,9 @@ public sealed partial class DocumentView : Page
     {
         NavigationCacheMode = NavigationCacheMode.Required;
         ViewModel = App.CurrentApp.Services.GetRequiredService<ShellViewModel>();
+        _pdfService = App.CurrentApp.Services.GetRequiredService<IPdfService>();
+        _windowContext = App.CurrentApp.Services.GetRequiredService<IWindowContext>();
+        _currentSidebarWidthDip = Math.Clamp(ViewModel.SettingsService.Settings.SidebarWidth, 220.0, 480.0);
         InitializeComponent();
 
         _wheelHandler = new PointerEventHandler(OnScrollViewerPointerWheelChanged);
@@ -116,6 +147,7 @@ public sealed partial class DocumentView : Page
 
         _presentationHideTimer.Tick += OnPresentationHideTimerTick;
         _topNotificationTimer.Tick += OnTopNotificationTimerTick;
+        _viewportDebounceTimer.Tick += OnViewportDebounceTimerTick;
 
         PdfPageCanvas.CanvasLoaded += OnCanvasLoaded;
         PdfPageCanvas.CanvasUnloaded += OnCanvasUnloaded;
@@ -154,6 +186,8 @@ public sealed partial class DocumentView : Page
         ViewModel.NotificationRequested += OnNotificationRequested;
         ViewModel.DefaultZoomPreferenceChanged -= OnDefaultZoomPreferenceChanged;
         ViewModel.DefaultZoomPreferenceChanged += OnDefaultZoomPreferenceChanged;
+        ViewModel.PrintRequested -= OnPrintRequestedAsync;
+        ViewModel.PrintRequested += OnPrintRequestedAsync;
         SubscribeToDocument(ViewModel.CurrentDocument);
 
         if (ViewModel.TryConsumePendingNotification(out string title, out string message))
@@ -161,10 +195,7 @@ public sealed partial class DocumentView : Page
             ShowTopNotification(title, message);
         }
 
-        if (PropertiesPaneContainer is not null)
-        {
-            PropertiesPaneContainer.Visibility = (ViewModel.IsPropertiesOpen && ViewModel.HasDocument) ? Visibility.Visible : Visibility.Collapsed;
-        }
+        SyncPaneOffsetsImmediate();
 
         if (ViewModel.CurrentDocument is not null)
         {
@@ -200,19 +231,19 @@ public sealed partial class DocumentView : Page
         _presentationHideTimer.Tick -= OnPresentationHideTimerTick;
         _topNotificationTimer.Stop();
         _topNotificationTimer.Tick -= OnTopNotificationTimerTick;
+        _viewportDebounceTimer.Stop();
+        _viewportDebounceTimer.Tick -= OnViewportDebounceTimerTick;
 
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.SearchFocusRequested -= OnSearchFocusRequested;
         ViewModel.NotificationRequested -= OnNotificationRequested;
         ViewModel.DefaultZoomPreferenceChanged -= OnDefaultZoomPreferenceChanged;
+        ViewModel.PrintRequested -= OnPrintRequestedAsync;
         _transitionStoryboard?.Stop();
         _searchBarStoryboard?.Stop();
-        _propertiesPaneStoryboard?.Stop();
+        _horizontalPushStoryboard?.Stop();
+        _isHorizontalPushAnimating = false;
         UnsubscribeFromDocument();
-
-        _zoomDebounceCts?.Cancel();
-        _zoomDebounceCts?.Dispose();
-        _zoomDebounceCts = null;
     }
 
     private void OnCanvasLoaded(PdfPageCanvas canvas)
@@ -326,6 +357,7 @@ public sealed partial class DocumentView : Page
             SubscribeToDocument(ViewModel.CurrentDocument);
             if (ViewModel.CurrentDocument is not null)
             {
+                SyncPaneOffsetsImmediate();
                 ScrollToPage(ViewModel.CurrentDocument.CurrentPageIndex, allowUnclampedOffset: true);
                 PlayDocumentOpenTransitionAnimation();
                 DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
@@ -363,10 +395,6 @@ public sealed partial class DocumentView : Page
             {
                 ReturnFocusToViewer();
             }
-        }
-        else if (e.PropertyName == nameof(ShellViewModel.IsPropertiesOpen))
-        {
-            AnimatePropertiesPane(ViewModel.IsPropertiesOpen && ViewModel.HasDocument);
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsNightMode))
         {
@@ -681,16 +709,20 @@ public sealed partial class DocumentView : Page
 
     private void OnScrollViewerViewChanging(object? sender, ScrollViewerViewChangingEventArgs e)
     {
-        _zoomDebounceCts?.Cancel();
+        _viewportDebounceTimer.Stop();
         if (_isSwitchingMode || _isRestoringFromPresentation || _isApplyingFitZoom)
         {
             return;
         }
 
-        if (ViewModel.CurrentDocument is { IsContinuous: true } && Math.Abs(e.NextView.ZoomFactor - ContinuousScrollViewer.ZoomFactor) < 0.001)
+        if (!_isHorizontalPushAnimating && PagesRepeaterPushTransform is not null && e.NextView.ZoomFactor > 0.05)
         {
-            UpdateCurrentPageIndexFromViewport();
-            ViewModel.CurrentDocument.FractionalPageIndex = CalculateFractionalPageIndex();
+            PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip() / e.NextView.ZoomFactor;
+        }
+
+        if (!_isProgrammaticPageScroll && ViewModel.CurrentDocument is { IsContinuous: true } && Math.Abs(e.NextView.ZoomFactor - ContinuousScrollViewer.ZoomFactor) < 0.001)
+        {
+            UpdatePageProgressFromScroll();
         }
     }
 
@@ -708,6 +740,11 @@ public sealed partial class DocumentView : Page
             ViewModel.CurrentDocument.LastVerticalOffset = ContinuousScrollViewer.VerticalOffset;
 
             double activeZoom = ContinuousScrollViewer.ZoomFactor;
+            if (!_isHorizontalPushAnimating && PagesRepeaterPushTransform is not null && activeZoom > 0.05)
+            {
+                PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip() / activeZoom;
+            }
+
             if (_isApplyingFitZoom)
             {
                 if (Math.Abs(activeZoom - ViewModel.CurrentDocument.ZoomFactor) < 0.01)
@@ -729,14 +766,16 @@ public sealed partial class DocumentView : Page
                 }
             }
 
-            if (!_isApplyingFitZoom && !_isApplyingZoom)
+            if (!_isApplyingFitZoom && !_isApplyingZoom && !e.IsIntermediate)
             {
-                UpdateCurrentPageIndexFromViewport();
-                ViewModel.CurrentDocument.FractionalPageIndex = CalculateFractionalPageIndex();
+                UpdatePageProgressFromScroll();
             }
         }
 
-        ScheduleViewportUpdate();
+        if (!e.IsIntermediate)
+        {
+            ScheduleViewportUpdate();
+        }
     }
 
     private void OnScrollViewerSizeChanged(object sender, SizeChangedEventArgs e)
@@ -763,7 +802,7 @@ public sealed partial class DocumentView : Page
 
         if (ViewModel?.IsPresentationMode == true || (_isFittedVertically && ViewModel?.CurrentDocument is { IsContinuous: false }))
         {
-            DispatcherQueue.TryEnqueue(() => ExecuteFitVertical(e.NewSize.Width, e.NewSize.Height, force: true));
+            DispatcherQueue.TryEnqueue(() => ExecuteFitVertical(GetAvailableDocumentWidthDip(e.NewSize.Width), e.NewSize.Height, force: true));
         }
         else if (ViewModel?.CurrentDocument is { ZoomFactor: > 1.01 })
         {
@@ -773,59 +812,100 @@ public sealed partial class DocumentView : Page
 
     private void ScheduleViewportUpdate()
     {
-        _zoomDebounceCts?.Cancel();
-        _zoomDebounceCts?.Dispose();
-        var cts = new CancellationTokenSource();
-        _zoomDebounceCts = cts;
+        _viewportDebounceTimer.Stop();
+        _viewportDebounceTimer.Start();
+    }
 
-        _ = Task.Run(async () =>
+    private void OnViewportDebounceTimerTick(object? sender, object e)
+    {
+        _viewportDebounceTimer.Stop();
+        if (ViewModel.CurrentDocument is null)
         {
+            return;
+        }
+
+        double activeZoom = ContinuousScrollViewer.ZoomFactor;
+        if (activeZoom <= 0.05)
+        {
+            activeZoom = ViewModel.CurrentDocument.ZoomFactor;
+        }
+
+        if (!_isApplyingZoom && !_isApplyingFitZoom && Math.Abs(ViewModel.CurrentDocument.ZoomFactor - activeZoom) > 0.01)
+        {
+            _isUpdatingZoomFromScrollViewer = true;
             try
             {
-                await Task.Delay(100).ConfigureAwait(false);
-                if (cts.IsCancellationRequested)
-                {
-                    return;
-                }
-
-                DispatcherQueue.TryEnqueue(() =>
-                {
-                    if (cts.IsCancellationRequested || ViewModel.CurrentDocument is null)
-                    {
-                        return;
-                    }
-
-                    double activeZoom = ContinuousScrollViewer.ZoomFactor;
-                    if (activeZoom <= 0.05)
-                    {
-                        activeZoom = ViewModel.CurrentDocument.ZoomFactor;
-                    }
-
-                    if (!_isApplyingZoom && !_isApplyingFitZoom && Math.Abs(ViewModel.CurrentDocument.ZoomFactor - activeZoom) > 0.01)
-                    {
-                        _isUpdatingZoomFromScrollViewer = true;
-                        try
-                        {
-                            ViewModel.CurrentDocument.ZoomFactor = activeZoom;
-                        }
-                        finally
-                        {
-                            _isUpdatingZoomFromScrollViewer = false;
-                        }
-                    }
-
-                    UpdateViewportPages(activeZoom);
-                });
+                ViewModel.CurrentDocument.ZoomFactor = activeZoom;
             }
-            catch (OperationCanceledException)
+            finally
             {
+                _isUpdatingZoomFromScrollViewer = false;
             }
-        });
+        }
+
+        UpdateViewportPages(activeZoom);
+    }
+
+    private void UpdatePageProgressFromScroll()
+    {
+        if (_isProgrammaticPageScroll || ViewModel.CurrentDocument is not { IsContinuous: true, Pages.Count: > 0 } doc || ContinuousScrollViewer.ViewportHeight <= 0)
+        {
+            return;
+        }
+
+        double vOffset = ContinuousScrollViewer.VerticalOffset;
+        double zoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor);
+        double centerY = (vOffset + (ContinuousScrollViewer.ViewportHeight / 2.0)) / zoom;
+
+        double currentY = 24.0;
+        var pages = doc.Pages;
+        int step = doc.IsDoublePage ? 2 : 1;
+        int targetIndex = pages.Count - 1;
+        double fractionalIndex = pages.Count - 1;
+
+        for (int i = 0; i < pages.Count; i += step)
+        {
+            double pageHeight = pages[i].DisplayHeightDip;
+            if (centerY < currentY)
+            {
+                targetIndex = i;
+                fractionalIndex = i;
+                break;
+            }
+
+            if (centerY <= currentY + pageHeight + 8.0)
+            {
+                targetIndex = i;
+                double fraction = Math.Clamp((centerY - currentY) / Math.Max(1.0, pageHeight), 0.0, 1.0);
+                fractionalIndex = i + (fraction * step);
+                break;
+            }
+
+            currentY += pageHeight + 16.0;
+        }
+
+        if (doc.CurrentPageIndex != targetIndex)
+        {
+            _isUpdatingPageFromScroll = true;
+            try
+            {
+                doc.CurrentPageIndex = targetIndex;
+            }
+            finally
+            {
+                _isUpdatingPageFromScroll = false;
+            }
+        }
+
+        if (Math.Abs(doc.FractionalPageIndex - fractionalIndex) > 0.004)
+        {
+            doc.FractionalPageIndex = fractionalIndex;
+        }
     }
 
     private void UpdateCurrentPageIndexFromViewport()
     {
-        if (ViewModel.CurrentDocument is null || !ViewModel.CurrentDocument.IsContinuous || ContinuousScrollViewer.ViewportHeight <= 0)
+        if (_isProgrammaticPageScroll || ViewModel.CurrentDocument is null || !ViewModel.CurrentDocument.IsContinuous || ContinuousScrollViewer.ViewportHeight <= 0)
         {
             return;
         }
@@ -927,6 +1007,8 @@ public sealed partial class DocumentView : Page
             return;
         }
 
+        _isProgrammaticPageScroll = true;
+
         if (ContinuousScrollViewer.VerticalScrollMode != ScrollMode.Enabled)
         {
             ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Enabled;
@@ -950,7 +1032,7 @@ public sealed partial class DocumentView : Page
                 : Math.Clamp(rawOffset, 0.0, ContinuousScrollViewer.ScrollableHeight);
             ContinuousScrollViewer.ChangeView(null, verticalOffset, null, disableAnimation: true);
             doc.LastVerticalOffset = verticalOffset;
-            doc.FractionalPageIndex = CalculateFractionalPageIndex(verticalOffset);
+            doc.FractionalPageIndex = pageIndex;
         }
         else
         {
@@ -964,6 +1046,11 @@ public sealed partial class DocumentView : Page
         }
 
         ScheduleViewportUpdate();
+
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            _isProgrammaticPageScroll = false;
+        });
     }
 
     private void ApplyZoomAroundCenter(float newZoom)
@@ -977,11 +1064,18 @@ public sealed partial class DocumentView : Page
         try
         {
             double oldZoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor);
-            double viewportCenterX = (ContinuousScrollViewer.HorizontalOffset + ContinuousScrollViewer.ViewportWidth / 2.0) / oldZoom;
+            double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
+            double docCenterDip = (ContinuousScrollViewer.ViewportWidth + leftW) / 2.0;
+            double viewportCenterX = (ContinuousScrollViewer.HorizontalOffset + docCenterDip) / oldZoom;
             double viewportCenterY = (ContinuousScrollViewer.VerticalOffset + ContinuousScrollViewer.ViewportHeight / 2.0) / oldZoom;
 
-            double newOffsetX = Math.Max(0, viewportCenterX * newZoom - ContinuousScrollViewer.ViewportWidth / 2.0);
+            double newOffsetX = Math.Max(0, viewportCenterX * newZoom - docCenterDip);
             double newOffsetY = Math.Max(0, viewportCenterY * newZoom - ContinuousScrollViewer.ViewportHeight / 2.0);
+
+            if (!_isHorizontalPushAnimating && PagesRepeaterPushTransform is not null && newZoom > 0.05f)
+            {
+                PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip() / newZoom;
+            }
 
             ContinuousScrollViewer.ChangeView(newOffsetX, newOffsetY, newZoom, disableAnimation: true);
 
@@ -1024,11 +1118,13 @@ public sealed partial class DocumentView : Page
             double marginW = isPres ? 0.0 : (!doc.IsContinuous ? 32.0 : 64.0);
             double marginH = isPres ? 0.0 : (!doc.IsContinuous ? 32.0 : 48.0);
 
+            double rawWidth = ContinuousScrollViewer.ActualWidth > 0
+                ? ContinuousScrollViewer.ActualWidth
+                : (_lastHandledScrollViewerSize.Width > 0 ? _lastHandledScrollViewerSize.Width : ContinuousScrollViewer.ViewportWidth);
+
             double vWidth = (viewportW.HasValue && viewportW.Value > 0)
                 ? viewportW.Value
-                : (ContinuousScrollViewer.ActualWidth > 0
-                    ? ContinuousScrollViewer.ActualWidth
-                    : (_lastHandledScrollViewerSize.Width > 0 ? _lastHandledScrollViewerSize.Width : ContinuousScrollViewer.ViewportWidth));
+                : GetAvailableDocumentWidthDip(rawWidth);
 
             double vHeight = (viewportH.HasValue && viewportH.Value > 0)
                 ? viewportH.Value
@@ -1063,6 +1159,11 @@ public sealed partial class DocumentView : Page
             else
             {
                 ContinuousScrollViewer.ChangeView(0, 0, (float)targetZoom, disableAnimation: true);
+            }
+
+            if (!_isHorizontalPushAnimating && PagesRepeaterPushTransform is not null && targetZoom > 0.05)
+            {
+                PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip() / targetZoom;
             }
 
             _isFittedVertically = true;
@@ -1142,11 +1243,13 @@ public sealed partial class DocumentView : Page
             // Extra safety margin (at least 32 DIPs total: 16 on each side) to guarantee ExtentWidth < ViewportWidth
             double safetyPadding = 32.0;
 
+            double rawWidth = ContinuousScrollViewer.ActualWidth > 0
+                ? ContinuousScrollViewer.ActualWidth
+                : (_lastHandledScrollViewerSize.Width > 0 ? _lastHandledScrollViewerSize.Width : ContinuousScrollViewer.ViewportWidth);
+
             double vWidth = (viewportW.HasValue && viewportW.Value > 0)
                 ? viewportW.Value
-                : (ContinuousScrollViewer.ActualWidth > 0
-                    ? ContinuousScrollViewer.ActualWidth
-                    : (_lastHandledScrollViewerSize.Width > 0 ? _lastHandledScrollViewerSize.Width : ContinuousScrollViewer.ViewportWidth));
+                : GetAvailableDocumentWidthDip(rawWidth);
 
             double availW = Math.Max(100.0, vWidth - safetyPadding);
             double targetZoom = Math.Clamp(availW / targetW, DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
@@ -1166,6 +1269,11 @@ public sealed partial class DocumentView : Page
             else
             {
                 targetVOffset = 0;
+            }
+
+            if (!_isHorizontalPushAnimating && PagesRepeaterPushTransform is not null && targetZoom > 0.05)
+            {
+                PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip() / targetZoom;
             }
 
             _isFittedVertically = false;
@@ -1490,13 +1598,7 @@ public sealed partial class DocumentView : Page
 
     private void OnEscapeAcceleratorInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
-        if (ViewModel.IsPropertiesOpen)
-        {
-            args.Handled = true;
-            ViewModel.CloseProperties();
-            ReturnFocusToViewer();
-        }
-        else if (ViewModel.IsSearchOpen)
+        if (ViewModel.IsSearchOpen)
         {
             args.Handled = true;
             ViewModel.CloseSearch();
@@ -1547,7 +1649,7 @@ public sealed partial class DocumentView : Page
             if (ViewModel.HasDocument)
             {
                 e.Handled = true;
-                ViewModel.ToggleProperties();
+                _ = ViewModel.TogglePropertiesCommand.ExecuteAsync(null);
                 return;
             }
         }
@@ -1617,14 +1719,6 @@ public sealed partial class DocumentView : Page
 
         if (!isCtrl && !isAlt && e.Key == Windows.System.VirtualKey.Escape)
         {
-            if (ViewModel.IsPropertiesOpen)
-            {
-                e.Handled = true;
-                ViewModel.CloseProperties();
-                ReturnFocusToViewer();
-                return;
-            }
-
             if (ViewModel.IsSearchOpen)
             {
                 e.Handled = true;
@@ -2198,135 +2292,538 @@ public sealed partial class DocumentView : Page
         sb.Begin();
     }
 
-    private void AnimatePropertiesPane(bool opening)
+    private double GetAvailableDocumentWidthDip(double rawViewerWidth)
     {
-        if (PropertiesPaneContainer is null || PropertiesPaneTransform is null || PagesRepeaterPushTransform is null)
+        if (ViewModel.IsPresentationMode)
+        {
+            return Math.Max(100.0, rawViewerWidth);
+        }
+
+        double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen) ? _currentSidebarWidthDip : 0.0;
+        return Math.Max(120.0, rawViewerWidth - leftW);
+    }
+
+    private double GetTargetDocumentOffsetDip(double? explicitZoom = null)
+    {
+        if (!ViewModel.HasDocument || ViewModel.IsPresentationMode)
+        {
+            return 0.0;
+        }
+
+        double leftW = (ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
+        return leftW / 2.0;
+    }
+
+    /// <summary>
+    /// Synchronizes all pane-dependent transforms immediately without animation (used on startup, document switch, or splitter drag).
+    /// </summary>
+    /// <param name="sidebarOpen">Whether the left sidebar is open.</param>
+    /// <param name="sidebarWidth">Current width of the left sidebar in DIPs.</param>
+    public void SetSidebarStateImmediate(bool sidebarOpen, double sidebarWidth)
+    {
+        if (sidebarWidth > 0)
+        {
+            _currentSidebarWidthDip = sidebarWidth;
+        }
+
+        SyncPaneOffsetsImmediate();
+    }
+
+    private void SyncPaneOffsetsImmediate()
+    {
+        _horizontalPushStoryboard?.Stop();
+        _isHorizontalPushAnimating = false;
+
+        double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
+        double targetDocOffsetDip = leftW / 2.0;
+        double zoom = ContinuousScrollViewer?.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
+
+        if (PagesRepeaterPushTransform is not null)
+        {
+            PagesRepeaterPushTransform.TranslateX = targetDocOffsetDip / Math.Max(0.05, zoom);
+        }
+
+        if (FloatingTopTransform is not null)
+        {
+            FloatingTopTransform.TranslateX = targetDocOffsetDip;
+        }
+
+        if (StatusBarBackdropTransform is not null)
+        {
+            StatusBarBackdropTransform.TranslateX = leftW;
+        }
+
+        if (StatusBarLeftTransform is not null)
+        {
+            StatusBarLeftTransform.TranslateX = leftW;
+        }
+
+        if (PrevPageZoneTransform is not null)
+        {
+            PrevPageZoneTransform.TranslateX = leftW;
+        }
+
+        if (NextPageZoneTransform is not null)
+        {
+            NextPageZoneTransform.TranslateX = 0.0;
+        }
+    }
+
+    /// <summary>
+    /// Smoothly animates the document, status bar, and navigation zones when the left sidebar opens or closes,
+    /// using pure forward GPU transforms with zero layout width mutation on the ScrollViewer (zero 1-frame jump).
+    /// </summary>
+    /// <param name="sidebarOpen">Whether the left sidebar is opening.</param>
+    /// <param name="sidebarWidth">Width of the left sidebar in DIPs.</param>
+    public void AnimateSidebarTransition(bool sidebarOpen, double sidebarWidth)
+    {
+        if (sidebarWidth > 0)
+        {
+            _currentSidebarWidthDip = sidebarWidth;
+        }
+
+        AnimateDocumentAndChromeToTargetOffsets();
+    }
+
+    private void AnimateDocumentAndChromeToTargetOffsets()
+    {
+        if (PagesRepeaterPushTransform is null)
         {
             return;
         }
 
-        const double PaneTotalWidth = 308.0;
-        const double HalfPushOffset = PaneTotalWidth / 2.0;
+        _horizontalPushStoryboard?.Stop();
+        _isHorizontalPushAnimating = true;
 
-        _propertiesPaneStoryboard?.Stop();
+        double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
+        double targetDocOffsetDip = leftW / 2.0;
+        double zoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
+        double targetRepeaterX = targetDocOffsetDip / Math.Max(0.05, zoom);
 
         var sb = new Storyboard();
         var ease = new ExponentialEase { Exponent = 4.5, EasingMode = EasingMode.EaseOut };
-        var duration = new Duration(TimeSpan.FromMilliseconds(230));
+        var duration = new Duration(TimeSpan.FromMilliseconds(250));
 
-        if (opening)
+        var docPush = new DoubleAnimation
         {
-            PropertiesPaneContainer.Margin = new Thickness(0);
-            PropertiesPaneContainer.Visibility = Visibility.Visible;
-            PropertiesPaneContainer.Opacity = 0.0;
-            PropertiesPaneTransform.TranslateX = PaneTotalWidth;
-            PagesRepeaterPushTransform.TranslateX = HalfPushOffset;
+            To = targetRepeaterX,
+            Duration = duration,
+            EasingFunction = ease
+        };
+        Storyboard.SetTarget(docPush, PagesRepeaterPushTransform);
+        Storyboard.SetTargetProperty(docPush, "TranslateX");
+        sb.Children.Add(docPush);
 
-            var paneTranslate = new DoubleAnimation
+        if (FloatingTopTransform is not null)
+        {
+            var topAnim = new DoubleAnimation
             {
-                From = PaneTotalWidth,
+                To = targetDocOffsetDip,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(topAnim, FloatingTopTransform);
+            Storyboard.SetTargetProperty(topAnim, "TranslateX");
+            sb.Children.Add(topAnim);
+        }
+
+        if (StatusBarBackdropTransform is not null)
+        {
+            var sbBackdropAnim = new DoubleAnimation
+            {
+                To = leftW,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(sbBackdropAnim, StatusBarBackdropTransform);
+            Storyboard.SetTargetProperty(sbBackdropAnim, "TranslateX");
+            sb.Children.Add(sbBackdropAnim);
+        }
+
+        if (StatusBarLeftTransform is not null)
+        {
+            var sbLeftAnim = new DoubleAnimation
+            {
+                To = leftW,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(sbLeftAnim, StatusBarLeftTransform);
+            Storyboard.SetTargetProperty(sbLeftAnim, "TranslateX");
+            sb.Children.Add(sbLeftAnim);
+        }
+
+        if (PrevPageZoneTransform is not null)
+        {
+            var prevAnim = new DoubleAnimation
+            {
+                To = leftW,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(prevAnim, PrevPageZoneTransform);
+            Storyboard.SetTargetProperty(prevAnim, "TranslateX");
+            sb.Children.Add(prevAnim);
+        }
+
+        if (NextPageZoneTransform is not null)
+        {
+            var nextAnim = new DoubleAnimation
+            {
                 To = 0.0,
                 Duration = duration,
                 EasingFunction = ease
             };
-            Storyboard.SetTarget(paneTranslate, PropertiesPaneTransform);
-            Storyboard.SetTargetProperty(paneTranslate, "TranslateX");
-            sb.Children.Add(paneTranslate);
+            Storyboard.SetTarget(nextAnim, NextPageZoneTransform);
+            Storyboard.SetTargetProperty(nextAnim, "TranslateX");
+            sb.Children.Add(nextAnim);
+        }
 
-            var paneOpacity = new DoubleAnimation
-            {
-                From = 0.0,
-                To = 1.0,
-                Duration = new Duration(TimeSpan.FromMilliseconds(170)),
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-            };
-            Storyboard.SetTarget(paneOpacity, PropertiesPaneContainer);
-            Storyboard.SetTargetProperty(paneOpacity, "Opacity");
-            sb.Children.Add(paneOpacity);
+        sb.Completed += (_, _) =>
+        {
+            _isHorizontalPushAnimating = false;
+            double currentZoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
+            double finalDocOffset = GetTargetDocumentOffsetDip();
+            PagesRepeaterPushTransform.TranslateX = finalDocOffset / Math.Max(0.05, currentZoom);
+        };
 
-            var docPush = new DoubleAnimation
-            {
-                From = HalfPushOffset,
-                To = 0.0,
-                Duration = duration,
-                EasingFunction = ease
-            };
-            Storyboard.SetTarget(docPush, PagesRepeaterPushTransform);
-            Storyboard.SetTargetProperty(docPush, "TranslateX");
-            sb.Children.Add(docPush);
+        _horizontalPushStoryboard = sb;
+        sb.Begin();
+    }
 
-            sb.Completed += (_, _) =>
+    // =========================================================================
+    // Native Windows 11 Print Preview & High-DPI Printing (PrintManagerInterop)
+    // =========================================================================
+
+    private async Task OnPrintRequestedAsync()
+    {
+        if (ViewModel.CurrentDocument is not { PageCount: > 0 } doc)
+        {
+            return;
+        }
+
+        nint hwnd = _windowContext.WindowHandle;
+        if (hwnd == nint.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            PreparePrintDocumentForWindow(hwnd, doc);
+            await PrintManagerInterop.ShowPrintUIForWindowAsync(hwnd);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"ShowPrintUIForWindowAsync failed: {ex.Message}");
+        }
+    }
+
+    private void PreparePrintDocumentForWindow(nint hwnd, DocumentViewModel doc)
+    {
+        _activePrintDocumentVm = doc;
+
+        if (_registeredPrintManager is null || _registeredPrintHwnd != hwnd)
+        {
+            if (_registeredPrintManager is not null)
             {
-                if (ViewModel.IsPropertiesOpen && ViewModel.HasDocument)
+                _registeredPrintManager.PrintTaskRequested -= OnPrintTaskRequested;
+            }
+
+            _registeredPrintManager = PrintManagerInterop.GetForWindow(hwnd);
+            _registeredPrintHwnd = hwnd;
+            _registeredPrintManager.PrintTaskRequested += OnPrintTaskRequested;
+        }
+
+        CleanupPrintDocumentInstance();
+
+        _printDocument = new PrintDocument();
+        _printDocumentSource = _printDocument.DocumentSource;
+        _printDocument.Paginate += OnPrintDocumentPaginate;
+        _printDocument.GetPreviewPage += OnPrintDocumentGetPreviewPage;
+        _printDocument.AddPages += OnPrintDocumentAddPages;
+    }
+
+    private void CleanupPrintDocumentInstance()
+    {
+        if (_printDocument is not null)
+        {
+            _printDocument.Paginate -= OnPrintDocumentPaginate;
+            _printDocument.GetPreviewPage -= OnPrintDocumentGetPreviewPage;
+            _printDocument.AddPages -= OnPrintDocumentAddPages;
+            _printDocument = null;
+        }
+
+        _printDocumentSource = null;
+        _currentPrintTaskOptions = null;
+        PrintStagingCanvas?.Children.Clear();
+    }
+
+    private void OnPrintTaskRequested(PrintManager sender, PrintTaskRequestedEventArgs args)
+    {
+        DocumentViewModel? doc = _activePrintDocumentVm ?? ViewModel.CurrentDocument;
+        IPrintDocumentSource? source = _printDocumentSource;
+        if (doc is null || source is null)
+        {
+            return;
+        }
+
+        string title = string.IsNullOrWhiteSpace(doc.FileName) ? "WinPDF Document" : doc.FileName;
+
+        PrintTask printTask = args.Request.CreatePrintTask(title, sourceRequestedArgs =>
+        {
+            PrintTaskSourceRequestedDeferral deferral = sourceRequestedArgs.GetDeferral();
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                try
                 {
-                    PropertiesPaneContainer.Opacity = 1.0;
-                    PropertiesPaneTransform.TranslateX = 0.0;
-                    PagesRepeaterPushTransform.TranslateX = 0.0;
+                    sourceRequestedArgs.SetSource(source);
                 }
+                finally
+                {
+                    deferral.Complete();
+                }
+            });
+        });
+
+        try
+        {
+            PrintPageRangeOptions rangeOptions = printTask.Options.PageRangeOptions;
+            rangeOptions.AllowAllPages = true;
+            rangeOptions.AllowCurrentPage = true;
+            rangeOptions.AllowCustomSetOfPages = true;
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            if (doc.Pages.Count > 0)
+            {
+                int curIdx = Math.Clamp(doc.CurrentPageIndex, 0, doc.Pages.Count - 1);
+                double aspect = DocumentViewModel.GetPageDisplayAspectRatio(doc.Pages[curIdx], doc.Rotation);
+                printTask.Options.Orientation = aspect > 1.05
+                    ? PrintOrientation.Landscape
+                    : PrintOrientation.Portrait;
+            }
+        }
+        catch
+        {
+        }
+
+        printTask.Completed += OnPrintTaskCompleted;
+    }
+
+    private void OnPrintTaskCompleted(PrintTask sender, PrintTaskCompletedEventArgs args)
+    {
+        sender.Completed -= OnPrintTaskCompleted;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            PrintStagingCanvas?.Children.Clear();
+            System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(2, GCCollectionMode.Forced, blocking: false, compacting: true);
+        });
+    }
+
+    private void OnPrintDocumentPaginate(object sender, PaginateEventArgs e)
+    {
+        DocumentViewModel? doc = _activePrintDocumentVm ?? ViewModel.CurrentDocument;
+        if (_printDocument is null || doc is null)
+        {
+            return;
+        }
+
+        _currentPrintTaskOptions = e.PrintTaskOptions;
+        _printDocument.SetPreviewPageCount(doc.PageCount, PreviewPageCountType.Final);
+    }
+
+    private void OnPrintDocumentGetPreviewPage(object sender, GetPreviewPageEventArgs e)
+    {
+        DocumentViewModel? doc = _activePrintDocumentVm ?? ViewModel.CurrentDocument;
+        if (_printDocument is null || doc is null || e.PageNumber < 1 || e.PageNumber > doc.PageCount)
+        {
+            return;
+        }
+
+        try
+        {
+            UIElement pageVisual = BuildPrintPageElement(doc, e.PageNumber - 1, _currentPrintTaskOptions, targetDpi: 150.0);
+            _printDocument.SetPreviewPage(e.PageNumber, pageVisual);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"GetPreviewPage failed for page {e.PageNumber}: {ex.Message}");
+        }
+    }
+
+    private void OnPrintDocumentAddPages(object sender, AddPagesEventArgs e)
+    {
+        DocumentViewModel? doc = _activePrintDocumentVm ?? ViewModel.CurrentDocument;
+        if (_printDocument is null || doc is null)
+        {
+            _printDocument?.AddPagesComplete();
+            return;
+        }
+
+        try
+        {
+            PrintTaskOptions options = e.PrintTaskOptions ?? _currentPrintTaskOptions!;
+            double targetDpi = doc.PageCount <= 30 ? 220.0 : 160.0;
+            for (int i = 0; i < doc.PageCount; i++)
+            {
+                UIElement pageVisual = BuildPrintPageElement(doc, i, options, targetDpi);
+                _printDocument.AddPage(pageVisual);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"AddPages failed: {ex.Message}");
+        }
+        finally
+        {
+            _printDocument.AddPagesComplete();
+        }
+    }
+
+    private UIElement BuildPrintPageElement(
+        DocumentViewModel doc,
+        int pageIndex,
+        PrintTaskOptions? printOptions,
+        double targetDpi)
+    {
+        PdfPageInfo pageInfo = doc.Pages[pageIndex];
+        int effectiveRot = PageCoordinateTransform.NormalizeRotation(pageInfo.Rotation + doc.Rotation);
+        bool swap = effectiveRot is 90 or 270;
+        double pageWidthPt = Math.Max(1.0, swap ? pageInfo.HeightPt : pageInfo.WidthPt);
+        double pageHeightPt = Math.Max(1.0, swap ? pageInfo.WidthPt : pageInfo.HeightPt);
+
+        double paperWidthDip = pageWidthPt * (96.0 / 72.0);
+        double paperHeightDip = pageHeightPt * (96.0 / 72.0);
+        Rect imageableRect = new(0, 0, paperWidthDip, paperHeightDip);
+
+        if (printOptions is not null)
+        {
+            try
+            {
+                PrintPageDescription desc = printOptions.GetPageDescription((uint)(pageIndex + 1));
+                if (desc.PageSize.Width > 0 && desc.PageSize.Height > 0)
+                {
+                    paperWidthDip = desc.PageSize.Width;
+                    paperHeightDip = desc.PageSize.Height;
+                    imageableRect = (desc.ImageableRect.Width > 0 && desc.ImageableRect.Height > 0)
+                        ? desc.ImageableRect
+                        : new Rect(0, 0, paperWidthDip, paperHeightDip);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        double fitScaleDip = Math.Min(imageableRect.Width / pageWidthPt, imageableRect.Height / pageHeightPt);
+        double drawWidthDip = Math.Max(1.0, pageWidthPt * fitScaleDip);
+        double drawHeightDip = Math.Max(1.0, pageHeightPt * fitScaleDip);
+        double offsetLeftDip = imageableRect.X + ((imageableRect.Width - drawWidthDip) / 2.0);
+        double offsetTopDip = imageableRect.Y + ((imageableRect.Height - drawHeightDip) / 2.0);
+
+        double dpiScale = Math.Max(1.0, targetDpi / 96.0);
+        int renderWidthPx = Math.Max(1, (int)Math.Round(drawWidthDip * dpiScale));
+        int renderHeightPx = Math.Max(1, (int)Math.Round(drawHeightDip * dpiScale));
+
+        const int MaxPrintDimensionPx = 2800;
+        if (renderWidthPx > MaxPrintDimensionPx || renderHeightPx > MaxPrintDimensionPx)
+        {
+            double clamp = Math.Min((double)MaxPrintDimensionPx / renderWidthPx, (double)MaxPrintDimensionPx / renderHeightPx);
+            renderWidthPx = Math.Max(1, (int)Math.Round(renderWidthPx * clamp));
+            renderHeightPx = Math.Max(1, (int)Math.Round(renderHeightPx * clamp));
+        }
+
+        int userRot = PageCoordinateTransform.NormalizeRotation(doc.Rotation);
+        PdfRenderRequest request = new(
+            doc.DocumentId,
+            pageIndex,
+            renderWidthPx,
+            renderHeightPx,
+            renderWidthPx,
+            renderHeightPx,
+            0,
+            0,
+            userRot,
+            PdfRenderFlags.Annotations | PdfRenderFlags.Printing | PdfRenderFlags.LimitedImageCache);
+
+        using PdfBitmapLease lease = _pdfService.RenderAsync(request, PdfJobPriority.Critical).GetAwaiter().GetResult();
+        WriteableBitmap? bitmap = CreatePrintWriteableBitmap(lease);
+
+        Canvas pageCanvas = new()
+        {
+            Width = paperWidthDip,
+            Height = paperHeightDip,
+            Background = new SolidColorBrush(Microsoft.UI.Colors.White)
+        };
+
+        if (bitmap is not null)
+        {
+            Image pageImage = new()
+            {
+                Width = drawWidthDip,
+                Height = drawHeightDip,
+                Stretch = Stretch.Fill,
+                Source = bitmap
             };
+            Canvas.SetLeft(pageImage, offsetLeftDip);
+            Canvas.SetTop(pageImage, offsetTopDip);
+            pageCanvas.Children.Add(pageImage);
+        }
+
+        if (PrintStagingCanvas is not null)
+        {
+            PrintStagingCanvas.Children.Add(pageCanvas);
+            pageCanvas.Measure(new Size(paperWidthDip, paperHeightDip));
+            pageCanvas.Arrange(new Rect(0, 0, paperWidthDip, paperHeightDip));
+            pageCanvas.UpdateLayout();
+            PrintStagingCanvas.Children.Remove(pageCanvas);
         }
         else
         {
-            if (PropertiesPaneContainer.Visibility == Visibility.Collapsed)
-            {
-                return;
-            }
-
-            // Reclaim layout width immediately at t=0 while counter-translating the document by -HalfPushOffset,
-            // so both the document and the closing card glide smoothly to the right in unison with 1 layout pass!
-            PropertiesPaneContainer.Margin = new Thickness(-PaneTotalWidth, 0, 0, 0);
-            PropertiesPaneContainer.Opacity = 1.0;
-            PropertiesPaneTransform.TranslateX = 0.0;
-            PagesRepeaterPushTransform.TranslateX = -HalfPushOffset;
-
-            var paneTranslate = new DoubleAnimation
-            {
-                From = 0.0,
-                To = PaneTotalWidth,
-                Duration = duration,
-                EasingFunction = ease
-            };
-            Storyboard.SetTarget(paneTranslate, PropertiesPaneTransform);
-            Storyboard.SetTargetProperty(paneTranslate, "TranslateX");
-            sb.Children.Add(paneTranslate);
-
-            var paneOpacity = new DoubleAnimation
-            {
-                From = 1.0,
-                To = 0.0,
-                Duration = new Duration(TimeSpan.FromMilliseconds(160)),
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-            };
-            Storyboard.SetTarget(paneOpacity, PropertiesPaneContainer);
-            Storyboard.SetTargetProperty(paneOpacity, "Opacity");
-            sb.Children.Add(paneOpacity);
-
-            var docPush = new DoubleAnimation
-            {
-                From = -HalfPushOffset,
-                To = 0.0,
-                Duration = duration,
-                EasingFunction = ease
-            };
-            Storyboard.SetTarget(docPush, PagesRepeaterPushTransform);
-            Storyboard.SetTargetProperty(docPush, "TranslateX");
-            sb.Children.Add(docPush);
-
-            sb.Completed += (_, _) =>
-            {
-                if (!ViewModel.IsPropertiesOpen || !ViewModel.HasDocument)
-                {
-                    PropertiesPaneContainer.Visibility = Visibility.Collapsed;
-                    PropertiesPaneContainer.Margin = new Thickness(0);
-                    PropertiesPaneContainer.Opacity = 0.0;
-                    PropertiesPaneTransform.TranslateX = 0.0;
-                    PagesRepeaterPushTransform.TranslateX = 0.0;
-                }
-            };
+            pageCanvas.Measure(new Size(paperWidthDip, paperHeightDip));
+            pageCanvas.Arrange(new Rect(0, 0, paperWidthDip, paperHeightDip));
+            pageCanvas.UpdateLayout();
         }
 
-        _propertiesPaneStoryboard = sb;
-        sb.Begin();
+        return pageCanvas;
+    }
+
+    private static unsafe WriteableBitmap? CreatePrintWriteableBitmap(PdfBitmapLease lease)
+    {
+        if (lease.IsDisposed || lease.Width <= 0 || lease.Height <= 0 || lease.SizeInBytes <= 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            WriteableBitmap bitmap = new(lease.Width, lease.Height);
+            if (bitmap.PixelBuffer is IPrintBufferByteAccess byteAccess)
+            {
+                byte* dest = byteAccess.Buffer;
+                byte* src = (byte*)lease.Scan0;
+                long bytesToCopy = Math.Min(lease.SizeInBytes, (long)lease.Stride * lease.Height);
+                Buffer.MemoryCopy(src, dest, bytesToCopy, bytesToCopy);
+            }
+            else
+            {
+                using Stream stream = bitmap.PixelBuffer.AsStream();
+                stream.Write(lease.AsSpan());
+            }
+
+            bitmap.Invalidate();
+            return bitmap;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private void PlaySearchBarOpenAnimation()

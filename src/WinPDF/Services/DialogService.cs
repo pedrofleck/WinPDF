@@ -90,4 +90,36 @@ public sealed class DialogService : IDialogService
 
         return tcs.Task;
     }
+
+    /// <inheritdoc/>
+    public Task ShowDocumentPropertiesAsync(ViewModels.DocumentViewModel document, CancellationToken cancellationToken = default)
+    {
+        TaskCompletionSource tcs = new();
+
+        _windowContext.DispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                if (_windowContext.XamlRoot is null)
+                {
+                    tcs.TrySetResult();
+                    return;
+                }
+
+                Views.DocumentPropertiesDialog dialog = new(document)
+                {
+                    XamlRoot = _windowContext.XamlRoot
+                };
+
+                await dialog.ShowAsync();
+                tcs.TrySetResult();
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        });
+
+        return tcs.Task;
+    }
 }

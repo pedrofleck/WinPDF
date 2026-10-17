@@ -4,60 +4,23 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Navigation;
 using WinPDF.ViewModels;
 
 namespace WinPDF.Views.Sidebar;
 
 /// <summary>
-/// Sidebar tab page presenting document page thumbnails with dynamic responsive card sizing and smooth easing synchronization.
+/// Sidebar tab page presenting document page thumbnails with dynamic responsive card sizing,
+/// fluid critically-damped spring synchronization, and uninterrupted touch manipulation.
 /// </summary>
 public sealed partial class ThumbnailsTabPage : Page
 {
     private const double TwoColumnThresholdDip = 300.0;
 
-    /// <summary>
-    /// Identifies the <see cref="CurrentAnimatedScrollY"/> dependency property used for storyboard vertical offset animations.
-    /// </summary>
-    public static readonly DependencyProperty CurrentAnimatedScrollYProperty =
-        DependencyProperty.Register(
-            nameof(CurrentAnimatedScrollY),
-            typeof(double),
-            typeof(ThumbnailsTabPage),
-            new PropertyMetadata(0.0, OnCurrentAnimatedScrollYChanged));
-
-    /// <summary>
-    /// Gets or sets the animated vertical scroll offset of the thumbnails scroll viewer.
-    /// </summary>
-    public double CurrentAnimatedScrollY
-    {
-        get => (double)GetValue(CurrentAnimatedScrollYProperty);
-        set => SetValue(CurrentAnimatedScrollYProperty, value);
-    }
-
-    private static void OnCurrentAnimatedScrollYChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
-    {
-        if (d is ThumbnailsTabPage page && page.ThumbnailsScrollViewer is not null)
-        {
-            try
-            {
-                page.ThumbnailsScrollViewer.ChangeView(null, (double)e.NewValue, null, disableAnimation: true);
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"ChangeView safely caught in animation: {ex.Message}");
-            }
-        }
-    }
-
-    private readonly DispatcherTimer _userScrollDebounceTimer = new() { Interval = TimeSpan.FromSeconds(1.0) };
+    private readonly DispatcherTimer _userScrollDebounceTimer = new() { Interval = TimeSpan.FromMilliseconds(700) };
     private DocumentViewModel? _observedDocument;
-    private Storyboard? _storyboard;
-    private bool _isUserScrollingSidebar;
-    private bool _isPointerOverSidebar;
+    private bool _isUserInteractingWithSidebar;
     private bool _isRenderingHooked;
-    private bool _isStoryboardRunning;
     private double _targetThumbScrollY;
     private double _currentRowHeight = 182.0;
     private double _lastHandledWidth;
@@ -80,6 +43,13 @@ public sealed partial class ThumbnailsTabPage : Page
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         _userScrollDebounceTimer.Tick += OnUserScrollDebounceTimerTick;
+
+        // Register pointer handlers with handledEventsToo: true so that DirectManipulation touch interactions
+        // immediately set _isUserInteractingWithSidebar and prevent any interference from document scroll inertia.
+        ThumbnailsScrollViewer.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnThumbnailsPointerPressed), handledEventsToo: true);
+        ThumbnailsScrollViewer.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(OnThumbnailsPointerReleased), handledEventsToo: true);
+        ThumbnailsScrollViewer.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler(OnThumbnailsPointerCanceled), handledEventsToo: true);
+        ThumbnailsScrollViewer.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(OnThumbnailsPointerCaptureLost), handledEventsToo: true);
     }
 
     /// <inheritdoc/>
@@ -114,7 +84,7 @@ public sealed partial class ThumbnailsTabPage : Page
 
         double width = ThumbnailsScrollViewer.ActualWidth > 0 ? ThumbnailsScrollViewer.ActualWidth : 260.0;
         UpdateThumbnailSizes(width, force: true);
-        UpdateTargetScrollPosition(allowAnimation: false);
+        UpdateTargetScrollPosition(allowAnimation: false, useCurrentPageIndex: true);
 
         if (ViewModel.CurrentDocument is { } doc && ViewModel.IsSidebarOpen && !ViewModel.IsSettingsOpen && ViewModel.SidebarTab == Models.SidebarTab.Thumbnails)
         {
@@ -135,8 +105,6 @@ public sealed partial class ThumbnailsTabPage : Page
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         UnsubscribeFromDocument();
         StopSmoothScrollLoop();
-        _storyboard?.Stop();
-        _isStoryboardRunning = false;
         _userScrollDebounceTimer.Stop();
     }
 
@@ -145,7 +113,7 @@ public sealed partial class ThumbnailsTabPage : Page
         if (e.PropertyName == nameof(ShellViewModel.CurrentDocument))
         {
             SubscribeToDocument(ViewModel.CurrentDocument);
-            _isUserScrollingSidebar = false;
+            _isUserInteractingWithSidebar = false;
             _userScrollDebounceTimer.Stop();
             _lastSizedDocumentId = -1;
             _lastSizedRotation = -1;
@@ -203,14 +171,24 @@ public sealed partial class ThumbnailsTabPage : Page
         {
             double width = ThumbnailsScrollViewer.ActualWidth > 0 ? ThumbnailsScrollViewer.ActualWidth : 260.0;
             UpdateThumbnailSizes(width, force: true);
-            UpdateTargetScrollPosition(allowAnimation: false);
+            UpdateTargetScrollPosition(allowAnimation: false, useCurrentPageIndex: true);
         }
-        else if (e.PropertyName is nameof(DocumentViewModel.FractionalPageIndex) or nameof(DocumentViewModel.CurrentPageIndex))
+        else if (e.PropertyName == nameof(DocumentViewModel.CurrentPageIndex))
         {
-            // Scrolling the document resets any user scroll lock on sidebar and snaps into synchronization.
-            _isUserScrollingSidebar = false;
+            // Selected page changed. Clear any interaction lock and smoothly center on the chosen page.
+            _isUserInteractingWithSidebar = false;
             _userScrollDebounceTimer.Stop();
-            UpdateTargetScrollPosition(allowAnimation: true);
+            UpdateTargetScrollPosition(allowAnimation: true, useCurrentPageIndex: true);
+        }
+        else if (e.PropertyName == nameof(DocumentViewModel.FractionalPageIndex))
+        {
+            // If the user is actively touching or scrolling the sidebar, do not interrupt or fight their gesture!
+            if (_isUserInteractingWithSidebar)
+            {
+                return;
+            }
+
+            UpdateTargetScrollPosition(allowAnimation: true, useCurrentPageIndex: false);
         }
     }
 
@@ -221,7 +199,7 @@ public sealed partial class ThumbnailsTabPage : Page
             UpdateThumbnailSizes(e.NewSize.Width, force: false);
             DispatcherQueue.TryEnqueue(() =>
             {
-                UpdateTargetScrollPosition(allowAnimation: false);
+                UpdateTargetScrollPosition(allowAnimation: false, useCurrentPageIndex: true);
             });
         }
     }
@@ -233,36 +211,36 @@ public sealed partial class ThumbnailsTabPage : Page
             return;
         }
 
-    bool sameDocAndRot = (_lastSizedDocumentId == doc.DocumentId) && (_lastSizedRotation == doc.Rotation);
-    if (!force && sameDocAndRot && Math.Abs(_lastHandledWidth - scrollViewerWidth) < 0.5)
-    {
-        return;
-    }
+        bool sameDocAndRot = (_lastSizedDocumentId == doc.DocumentId) && (_lastSizedRotation == doc.Rotation);
+        if (!force && sameDocAndRot && Math.Abs(_lastHandledWidth - scrollViewerWidth) < 0.5)
+        {
+            return;
+        }
 
-    _lastHandledWidth = scrollViewerWidth;
-    _lastSizedDocumentId = doc.DocumentId;
-    _lastSizedRotation = doc.Rotation;
+        _lastHandledWidth = scrollViewerWidth;
+        _lastSizedDocumentId = doc.DocumentId;
+        _lastSizedRotation = doc.Rotation;
 
-    double horizontalPadding = ThumbnailsScrollViewer.Padding.Left + ThumbnailsScrollViewer.Padding.Right;
-    double availableW = Math.Max(80.0, scrollViewerWidth - horizontalPadding - 14.0);
+        double horizontalPadding = ThumbnailsScrollViewer.Padding.Left + ThumbnailsScrollViewer.Padding.Right;
+        double availableW = Math.Max(80.0, scrollViewerWidth - horizontalPadding - 14.0);
 
-    int numCols = scrollViewerWidth >= TwoColumnThresholdDip ? 2 : 1;
+        int numCols = scrollViewerWidth >= TwoColumnThresholdDip ? 2 : 1;
 
-    if (ThumbnailsLayout.MaximumRowsOrColumns != numCols)
-    {
-        ThumbnailsLayout.MaximumRowsOrColumns = numCols;
-    }
+        if (ThumbnailsLayout.MaximumRowsOrColumns != numCols)
+        {
+            ThumbnailsLayout.MaximumRowsOrColumns = numCols;
+        }
 
-    double colSpacing = ThumbnailsLayout.MinColumnSpacing;
-    double colWidth = (numCols == 1)
-        ? availableW
-        : Math.Floor((availableW - colSpacing) / 2.0);
+        double colSpacing = ThumbnailsLayout.MinColumnSpacing;
+        double colWidth = (numCols == 1)
+            ? availableW
+            : Math.Floor((availableW - colSpacing) / 2.0);
 
-    double maxCardW = (numCols == 1)
-        ? Math.Clamp(colWidth - 12.0, 48.0, 190.0)
-        : Math.Clamp(colWidth - 8.0, 44.0, 180.0);  
+        double maxCardW = (numCols == 1)
+            ? Math.Clamp(colWidth - 12.0, 48.0, 190.0)
+            : Math.Clamp(colWidth - 8.0, 44.0, 180.0);
 
-        // Allow portrait pages (like A4 1:1.414 or taller) to maintain their full aspect ratio without clipping.
+        // Allow portrait pages to maintain their full aspect ratio without clipping.
         double maxCardH = Math.Round(maxCardW * 1.48);
 
         double maxCalculatedH = 0.0;
@@ -297,9 +275,9 @@ public sealed partial class ThumbnailsTabPage : Page
         ThumbnailsLayout.UpdateRowMetrics(doc.Thumbnails);
     }
 
-    private void UpdateTargetScrollPosition(bool allowAnimation = false)
+    private void UpdateTargetScrollPosition(bool allowAnimation = false, bool useCurrentPageIndex = false)
     {
-        if (_isUserScrollingSidebar ||
+        if (_isUserInteractingWithSidebar ||
             !ViewModel.IsSidebarOpen ||
             ViewModel.SidebarTab != Models.SidebarTab.Thumbnails ||
             ViewModel.CurrentDocument is not { PageCount: > 0 } doc ||
@@ -309,26 +287,31 @@ public sealed partial class ThumbnailsTabPage : Page
             return;
         }
 
+        double pageProgress = useCurrentPageIndex ? doc.CurrentPageIndex : doc.FractionalPageIndex;
+
         ThumbnailsLayout.GetRowVerticalBounds(
-            doc.FractionalPageIndex,
+            pageProgress,
             _currentRowHeight,
             out double rowCenterY,
-            out double rowTop,
-            out double rowHeight);
+            out double _,
+            out double _);
 
+        // 8.0 DIPs is the top padding of ThumbnailsScrollViewer (Padding="16,8,16,8")
         double targetCenterY = 8.0 + rowCenterY;
-        double targetScrollY = Math.Clamp(targetCenterY - (ThumbnailsScrollViewer.ViewportHeight / 2.0), 0, Math.Max(0, ThumbnailsScrollViewer.ScrollableHeight));
+        double totalH = ThumbnailsLayout.TotalContentHeight;
+        double maxScrollY = Math.Max(0.0, totalH > 0
+            ? (totalH + 16.0 - ThumbnailsScrollViewer.ViewportHeight)
+            : (ThumbnailsScrollViewer.ExtentHeight > 0
+                ? (ThumbnailsScrollViewer.ExtentHeight - ThumbnailsScrollViewer.ViewportHeight)
+                : ThumbnailsScrollViewer.ScrollableHeight));
+
+        double targetScrollY = Math.Clamp(targetCenterY - (ThumbnailsScrollViewer.ViewportHeight / 2.0), 0, maxScrollY);
 
         _targetThumbScrollY = targetScrollY;
-
-        double curY = ThumbnailsScrollViewer.VerticalOffset;
-        double viewportH = ThumbnailsScrollViewer.ViewportHeight;
 
         if (!allowAnimation)
         {
             StopSmoothScrollLoop();
-            _storyboard?.Stop();
-            _isStoryboardRunning = false;
             try
             {
                 ThumbnailsScrollViewer.ChangeView(null, targetScrollY, null, disableAnimation: true);
@@ -337,78 +320,7 @@ public sealed partial class ThumbnailsTabPage : Page
             return;
         }
 
-        // Check if the target page is currently visible in the sidebar viewport:
-        double cardTop = 8.0 + rowTop;
-        double cardBottom = cardTop + rowHeight;
-        bool isCardVisible = (cardBottom >= curY && cardTop <= curY + viewportH);
-
-        if (!isCardVisible)
-        {
-            // Target is not visible: rapid animation with ExponentialEase!
-            StopSmoothScrollLoop();
-            AnimateWithExponentialEase(curY, targetScrollY);
-        }
-        else
-        {
-            // Target is visible: use continuous smooth follower
-            if (!_isStoryboardRunning)
-            {
-                StartSmoothScrollLoop();
-            }
-        }
-    }
-
-    private void AnimateWithExponentialEase(double fromY, double toY)
-    {
-        if (Math.Abs(fromY - toY) < 1.0)
-        {
-            try
-            {
-                ThumbnailsScrollViewer.ChangeView(null, toY, null, disableAnimation: true);
-            }
-            catch { }
-            return;
-        }
-
-        try
-        {
-            _storyboard?.Stop();
-
-            CurrentAnimatedScrollY = fromY;
-
-            DoubleAnimation anim = new()
-            {
-                From = fromY,
-                To = toY,
-                Duration = new Duration(TimeSpan.FromMilliseconds(280)),
-                EnableDependentAnimation = true,
-                EasingFunction = new ExponentialEase { Exponent = 4.5, EasingMode = EasingMode.EaseOut }
-            };
-
-            Storyboard.SetTarget(anim, this);
-            Storyboard.SetTargetProperty(anim, nameof(CurrentAnimatedScrollY));
-
-            Storyboard sb = new();
-            sb.Children.Add(anim);
-            _storyboard = sb;
-            _isStoryboardRunning = true;
-            sb.Completed += (_, _) =>
-            {
-                _isStoryboardRunning = false;
-                _storyboard = null;
-            };
-            sb.Begin();
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"AnimateWithExponentialEase error: {ex.Message}");
-            _isStoryboardRunning = false;
-            try
-            {
-                ThumbnailsScrollViewer.ChangeView(null, toY, null, disableAnimation: true);
-            }
-            catch { }
-        }
+        StartSmoothScrollLoop();
     }
 
     private void StartSmoothScrollLoop()
@@ -432,8 +344,7 @@ public sealed partial class ThumbnailsTabPage : Page
     private void OnCompositionTargetRendering(object? sender, object e)
     {
         if (ThumbnailsScrollViewer is null ||
-            _isStoryboardRunning ||
-            _isUserScrollingSidebar ||
+            _isUserInteractingWithSidebar ||
             !ViewModel.IsSidebarOpen ||
             ViewModel.SidebarTab != Models.SidebarTab.Thumbnails)
         {
@@ -444,7 +355,8 @@ public sealed partial class ThumbnailsTabPage : Page
         double curY = ThumbnailsScrollViewer.VerticalOffset;
         double diff = _targetThumbScrollY - curY;
 
-        if (Math.Abs(diff) < 0.5)
+        // When within snapping threshold, place at target and unhook rendering to guarantee 0.0% idle CPU and PSR
+        if (Math.Abs(diff) < 0.75)
         {
             try
             {
@@ -452,36 +364,72 @@ public sealed partial class ThumbnailsTabPage : Page
             }
             catch { }
             StopSmoothScrollLoop();
+            return;
         }
-        else
+
+        // Critically damped spring follower with minimum speed threshold to eliminate tail sluggishness
+        double step = diff * 0.22;
+        if (Math.Abs(step) < 1.5)
         {
-            double nextY = curY + (diff * 0.30);
-            try
-            {
-                ThumbnailsScrollViewer.ChangeView(null, nextY, null, disableAnimation: true);
-            }
-            catch
-            {
-                StopSmoothScrollLoop();
-            }
+            step = Math.Sign(diff) * Math.Min(Math.Abs(diff), 1.5);
+        }
+
+        double nextY = curY + step;
+        try
+        {
+            ThumbnailsScrollViewer.ChangeView(null, nextY, null, disableAnimation: true);
+        }
+        catch
+        {
+            StopSmoothScrollLoop();
         }
     }
 
     private void OnThumbnailsPointerEntered(object sender, PointerRoutedEventArgs e)
     {
-        _isPointerOverSidebar = true;
     }
 
     private void OnThumbnailsPointerExited(object sender, PointerRoutedEventArgs e)
     {
-        _isPointerOverSidebar = false;
+    }
+
+    private void OnThumbnailsPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        _isUserInteractingWithSidebar = true;
+        _userScrollDebounceTimer.Stop();
+        StopSmoothScrollLoop();
+    }
+
+    private void OnThumbnailsPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isUserInteractingWithSidebar)
+        {
+            _userScrollDebounceTimer.Stop();
+            _userScrollDebounceTimer.Start();
+        }
+    }
+
+    private void OnThumbnailsPointerCanceled(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isUserInteractingWithSidebar)
+        {
+            _userScrollDebounceTimer.Stop();
+            _userScrollDebounceTimer.Start();
+        }
+    }
+
+    private void OnThumbnailsPointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isUserInteractingWithSidebar)
+        {
+            _userScrollDebounceTimer.Stop();
+            _userScrollDebounceTimer.Start();
+        }
     }
 
     private void OnThumbnailsPointerWheelChanged(object sender, PointerRoutedEventArgs e)
     {
-        _isUserScrollingSidebar = true;
-        _storyboard?.Stop();
-        _isStoryboardRunning = false;
+        _isUserInteractingWithSidebar = true;
         StopSmoothScrollLoop();
         _userScrollDebounceTimer.Stop();
         _userScrollDebounceTimer.Start();
@@ -489,18 +437,36 @@ public sealed partial class ThumbnailsTabPage : Page
 
     private void OnThumbnailsScrollViewerViewChanging(object? sender, ScrollViewerViewChangingEventArgs e)
     {
-        if (!_isRenderingHooked && !_isStoryboardRunning && _isPointerOverSidebar)
+        if (!_isRenderingHooked)
         {
-            _isUserScrollingSidebar = true;
+            _isUserInteractingWithSidebar = true;
             _userScrollDebounceTimer.Stop();
             _userScrollDebounceTimer.Start();
+        }
+    }
+
+    private void OnThumbnailsScrollViewerViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
+    {
+        if (!_isRenderingHooked)
+        {
+            if (e.IsIntermediate)
+            {
+                _isUserInteractingWithSidebar = true;
+                _userScrollDebounceTimer.Stop();
+                _userScrollDebounceTimer.Start();
+            }
+            else
+            {
+                _userScrollDebounceTimer.Stop();
+                _userScrollDebounceTimer.Start();
+            }
         }
     }
 
     private void OnUserScrollDebounceTimerTick(object? sender, object e)
     {
         _userScrollDebounceTimer.Stop();
-        _isUserScrollingSidebar = false;
+        _isUserInteractingWithSidebar = false;
     }
 
     private void OnThumbnailTapped(object sender, TappedRoutedEventArgs e)
@@ -527,9 +493,10 @@ public sealed partial class ThumbnailsTabPage : Page
 
         if (targetItem is not null)
         {
-            _isUserScrollingSidebar = false;
+            _isUserInteractingWithSidebar = false;
             _userScrollDebounceTimer.Stop();
             ViewModel.CurrentDocument.GoToPage(targetItem.PageIndex);
+            UpdateTargetScrollPosition(allowAnimation: true, useCurrentPageIndex: true);
         }
     }
 

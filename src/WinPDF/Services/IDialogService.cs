@@ -25,4 +25,12 @@ public interface IDialogService
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     /// <returns><c>true</c> if the primary button was clicked; otherwise, <c>false</c>.</returns>
     Task<bool> ShowConfirmationAsync(string title, string content, string primaryButtonText, string secondaryButtonText, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Displays the modal properties dialog for the specified document.
+    /// </summary>
+    /// <param name="document">The document view model whose properties should be displayed.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    Task ShowDocumentPropertiesAsync(ViewModels.DocumentViewModel document, CancellationToken cancellationToken = default);
 }
