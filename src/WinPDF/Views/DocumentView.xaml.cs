@@ -1525,6 +1525,16 @@ public sealed partial class DocumentView : Page
             || IsKeyDown(Windows.System.VirtualKey.RightMenu);
 
         // Global shortcuts that work even when the search box or page box is focused:
+        if (isAlt && !isCtrl && e.Key == Windows.System.VirtualKey.Enter)
+        {
+            if (ViewModel.HasDocument)
+            {
+                e.Handled = true;
+                ViewModel.ToggleProperties();
+                return;
+            }
+        }
+
         if (isCtrl && !isAlt)
         {
             if (e.Key == Windows.System.VirtualKey.W || e.Key == Windows.System.VirtualKey.F4)
@@ -1590,6 +1600,14 @@ public sealed partial class DocumentView : Page
 
         if (!isCtrl && !isAlt && e.Key == Windows.System.VirtualKey.Escape)
         {
+            if (ViewModel.IsPropertiesOpen)
+            {
+                e.Handled = true;
+                ViewModel.CloseProperties();
+                ReturnFocusToViewer();
+                return;
+            }
+
             if (ViewModel.IsSearchOpen)
             {
                 e.Handled = true;

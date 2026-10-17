@@ -43,6 +43,14 @@ public interface IPdfService : IDisposable
     Task<IReadOnlyList<string>> GetAttachmentNamesAsync(long documentId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Reads document metadata properties (Title, Author, Subject, Creator, Producer, Dates, etc.).
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The metadata record extracted from the PDF.</returns>
+    Task<PdfMetadata> GetDocumentMetadataAsync(long documentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Rasterizes an entire page at the specified pixel size.
     /// </summary>
     /// <param name="documentId">Document identifier.</param>

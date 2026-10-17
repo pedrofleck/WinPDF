@@ -138,6 +138,58 @@ internal sealed unsafe class PdfiumEngine : IDisposable
         return names;
     }
 
+    /// <summary>Reads document metadata properties via FPDF_GetMetaText and FPDF_GetFileVersion.</summary>
+    internal PdfMetadata ReadDocumentMetadata(long documentId, CancellationToken cancellationToken)
+    {
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        string? title = ReadMetaText(document, "Title");
+        string? author = ReadMetaText(document, "Author");
+        string? subject = ReadMetaText(document, "Subject");
+        string? keywords = ReadMetaText(document, "Keywords");
+        string? creator = ReadMetaText(document, "Creator");
+        string? producer = ReadMetaText(document, "Producer");
+        string? creationDate = ReadMetaText(document, "CreationDate");
+        string? modDate = ReadMetaText(document, "ModDate");
+
+        string? pdfVersion = null;
+        if (PdfiumNative.FPDF_GetFileVersion(document, out int fileVersion) != 0 && fileVersion > 0)
+        {
+            pdfVersion = $"PDF {fileVersion / 10}.{fileVersion % 10}";
+        }
+
+        return new PdfMetadata(
+            title,
+            author,
+            subject,
+            keywords,
+            creator,
+            producer,
+            creationDate,
+            modDate,
+            pdfVersion);
+    }
+
+    private static string? ReadMetaText(PdfiumDocumentHandle document, string tag)
+    {
+        uint required = PdfiumNative.FPDF_GetMetaText(document, tag, null, 0);
+        if (required <= sizeof(char))
+        {
+            return null;
+        }
+
+        int capacity = (int)Math.Min(required, MaxWideStringBytes);
+        byte* buffer = stackalloc byte[MaxWideStringBytes];
+        uint written = PdfiumNative.FPDF_GetMetaText(document, tag, buffer, (uint)capacity);
+        int byteCount = (int)Math.Min(written, (uint)capacity) & ~1;
+
+        ReadOnlySpan<char> chars = MemoryMarshal.Cast<byte, char>(new ReadOnlySpan<byte>(buffer, byteCount));
+        int end = chars.IndexOf('\0');
+        string result = new(end >= 0 ? chars[..end] : chars);
+        return string.IsNullOrWhiteSpace(result) ? null : result.Trim();
+    }
+
     private IReadOnlyList<OutlineItem> ReadBookmarkSiblings(
         PdfiumDocumentHandle document,
         nint parent,

@@ -86,6 +86,15 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
             highPriority: true);
 
     /// <inheritdoc/>
+    public Task<PdfMetadata> GetDocumentMetadataAsync(long documentId, CancellationToken cancellationToken = default)
+        => Enqueue<PdfMetadata>(
+            new PdfiumJob<PdfMetadata>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.ReadDocumentMetadata(documentId, token),
+                cancellationToken),
+            highPriority: true);
+
+    /// <inheritdoc/>
     public Task<PdfBitmapLease> RenderPageAsync(
         long documentId,
         int pageIndex,

@@ -95,6 +95,163 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Gets or sets the document metadata (title, author, producer, etc.).
+    /// </summary>
+    [ObservableProperty]
+    public partial PdfMetadata? Metadata { get; set; }
+
+    /// <summary>
+    /// Gets the full directory path where the document file resides.
+    /// </summary>
+    public string DirectoryPath =>
+        string.IsNullOrEmpty(FilePath) ? string.Empty : (System.IO.Path.GetDirectoryName(FilePath) ?? string.Empty);
+
+    /// <summary>
+    /// Gets the parent directory folder name for concise location display.
+    /// </summary>
+    public string FolderName
+    {
+        get
+        {
+            if (string.IsNullOrEmpty(FilePath))
+            {
+                return string.Empty;
+            }
+
+            string? dir = System.IO.Path.GetDirectoryName(FilePath);
+            return string.IsNullOrEmpty(dir) ? string.Empty : (System.IO.Path.GetFileName(dir) ?? dir);
+        }
+    }
+
+    /// <summary>
+    /// Gets the creation date and time formatted in standard display format.
+    /// </summary>
+    public string FileCreationDateFormatted
+    {
+        get
+        {
+            if (System.IO.File.Exists(FilePath))
+            {
+                try
+                {
+                    return System.IO.File.GetCreationTime(FilePath).ToString("g");
+                }
+                catch
+                {
+                    // Fallback to metadata
+                }
+            }
+
+            return Metadata?.CreationDate ?? string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Gets the modification date and time formatted in standard display format.
+    /// </summary>
+    public string FileModificationDateFormatted
+    {
+        get
+        {
+            if (System.IO.File.Exists(FilePath))
+            {
+                try
+                {
+                    return System.IO.File.GetLastWriteTime(FilePath).ToString("g");
+                }
+                catch
+                {
+                    // Fallback to metadata
+                }
+            }
+
+            return Metadata?.ModificationDate ?? string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Gets a detailed file size string including byte count (e.g. "3.3 MB (3,456,789 bytes)").
+    /// </summary>
+    public string FileSizeDetailed =>
+        FileSizeBytes > 0 ? $"{FormattedFileSize} ({FileSizeBytes:N0} bytes)" : FormattedFileSize;
+
+    /// <summary>
+    /// Gets the dimensions of the currently active page in points and millimeters with standard paper size detection.
+    /// </summary>
+    public string ActivePageDimensionsFormatted
+    {
+        get
+        {
+            if (Pages.Count == 0 || CurrentPageIndex < 0 || CurrentPageIndex >= Pages.Count)
+            {
+                return string.Empty;
+            }
+
+            PdfPageInfo page = Pages[CurrentPageIndex];
+            int effectiveRotation = PageCoordinateTransform.NormalizeRotation(page.Rotation + Rotation);
+            bool swap = effectiveRotation is 90 or 270;
+            double widthPt = swap ? page.HeightPt : page.WidthPt;
+            double heightPt = swap ? page.WidthPt : page.HeightPt;
+
+            double widthMm = widthPt * 25.4 / 72.0;
+            double heightMm = heightPt * 25.4 / 72.0;
+
+            string standardName = DetectPaperSize(widthMm, heightMm);
+            if (!string.IsNullOrEmpty(standardName))
+            {
+                return $"{standardName} ({widthMm:F0} × {heightMm:F0} mm) • {widthPt:F0} × {heightPt:F0} pt";
+            }
+
+            return $"{widthMm:F0} × {heightMm:F0} mm • {widthPt:F0} × {heightPt:F0} pt";
+        }
+    }
+
+    private static string DetectPaperSize(double wMm, double hMm)
+    {
+        double min = Math.Min(wMm, hMm);
+        double max = Math.Max(wMm, hMm);
+
+        const double tol = 3.5;
+
+        if (Math.Abs(min - 210) <= tol && Math.Abs(max - 297) <= tol)
+        {
+            return "A4";
+        }
+
+        if (Math.Abs(min - 297) <= tol && Math.Abs(max - 420) <= tol)
+        {
+            return "A3";
+        }
+
+        if (Math.Abs(min - 148) <= tol && Math.Abs(max - 210) <= tol)
+        {
+            return "A5";
+        }
+
+        if (Math.Abs(min - 215.9) <= tol && Math.Abs(max - 279.4) <= tol)
+        {
+            return "Letter";
+        }
+
+        if (Math.Abs(min - 215.9) <= tol && Math.Abs(max - 355.6) <= tol)
+        {
+            return "Legal";
+        }
+
+        if (Math.Abs(min - 279.4) <= tol && Math.Abs(max - 431.8) <= tol)
+        {
+            return "Tabloid";
+        }
+
+        if (Math.Abs(min - 184.1) <= tol && Math.Abs(max - 266.7) <= tol)
+        {
+            return "Executive";
+        }
+
+        return string.Empty;
+    }
+
+    /// <summary>
     /// Gets or sets a value indicating whether two-page / dual-page display mode is active.
     /// </summary>
     [ObservableProperty]
@@ -217,6 +374,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     {
         UpdateDisplayedRows();
         RefreshThumbnailsForRotation();
+        OnPropertyChanged(nameof(ActivePageDimensionsFormatted));
         ModeChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -235,6 +393,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     partial void OnFileSizeBytesChanged(long value)
     {
         OnPropertyChanged(nameof(FormattedFileSize));
+        OnPropertyChanged(nameof(FileSizeDetailed));
     }
 
     /// <summary>
@@ -286,15 +445,18 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     /// <param name="info">Description of the opened document (id, path and page geometry).</param>
     /// <param name="outline">Real table of contents read from the document.</param>
     /// <param name="attachmentNames">Names of the embedded file attachments.</param>
+    /// <param name="metadata">Document metadata extracted from the PDF, if available.</param>
     public DocumentViewModel(
         IPdfService pdfService,
         TileCache tileCache,
         PdfDocumentInfo info,
         IReadOnlyList<OutlineItem> outline,
-        IReadOnlyList<string> attachmentNames)
+        IReadOnlyList<string> attachmentNames,
+        PdfMetadata? metadata = null)
     {
         _pdfService = pdfService;
         _tileCache = tileCache;
+        Metadata = metadata ?? PdfMetadata.Empty;
 
         DocumentId = info.DocumentId;
         Pages = info.Pages;
@@ -469,6 +631,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     partial void OnCurrentPageIndexChanged(int value)
     {
         OnPropertyChanged(nameof(CurrentPageNumber));
+        OnPropertyChanged(nameof(ActivePageDimensionsFormatted));
 
         if (!IsContinuous)
         {

@@ -192,4 +192,37 @@ public static class UiHelpers
         isCurrent
             ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["AccentTextFillColorPrimaryBrush"]
             : (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
+
+    /// <summary>
+    /// Checks if the properties sidebar pane should be open, requiring both an open document and properties requested.
+    /// </summary>
+    public static bool IsPropertiesOpenWithDoc(bool hasDoc, bool isPropertiesOpen) => hasDoc && isPropertiesOpen;
+
+    /// <summary>
+    /// Returns <see cref="Visibility.Visible"/> if the string is not null or whitespace; otherwise, <see cref="Visibility.Collapsed"/>.
+    /// </summary>
+    public static Visibility VisibleIfNotNullOrEmpty(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? Visibility.Collapsed : Visibility.Visible;
+
+    /// <summary>
+    /// Returns <see cref="Visibility.Visible"/> if the metadata object contains at least one non-empty field; otherwise, <see cref="Visibility.Collapsed"/>.
+    /// </summary>
+    public static Visibility VisibleIfHasMetadata(PdfMetadata? meta)
+    {
+        if (meta is null)
+        {
+            return Visibility.Collapsed;
+        }
+
+        bool has = !string.IsNullOrWhiteSpace(meta.Title)
+            || !string.IsNullOrWhiteSpace(meta.Author)
+            || !string.IsNullOrWhiteSpace(meta.Subject)
+            || !string.IsNullOrWhiteSpace(meta.Keywords)
+            || !string.IsNullOrWhiteSpace(meta.Creator)
+            || !string.IsNullOrWhiteSpace(meta.Producer)
+            || !string.IsNullOrWhiteSpace(meta.PdfVersion);
+
+        return has ? Visibility.Visible : Visibility.Collapsed;
+    }
 }
+

@@ -651,11 +651,27 @@
                     CornerRadius="{x:Bind converters:UiHelpers.MainContainerCornerRadius(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}"
                     Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}" />
 
-                <!-- Frame de Conteúdo Principal (DocumentView Sempre Preservado na Árvore Visual) -->
-                <Frame
-                    x:Name="MainContentFrame"
+                <!-- Barra Lateral de Informações / Propriedades à Direita (SplitView Inline com Animação Nativa) -->
+                <SplitView
+                    x:Name="PropertiesSplitView"
+                    DisplayMode="Inline"
+                    PanePlacement="Right"
+                    OpenPaneLength="340"
+                    IsPaneOpen="{x:Bind converters:UiHelpers.IsPropertiesOpenWithDoc(ViewModel.HasDocument, ViewModel.IsPropertiesOpen), Mode=OneWay}"
                     Background="Transparent"
-                    IsNavigationStackEnabled="False" />
+                    PaneBackground="Transparent">
+                    <SplitView.Pane>
+                        <views:DocumentPropertiesView
+                            x:Name="DocumentPropertiesSidebar"
+                            DataContext="{x:Bind ViewModel, Mode=OneWay}" />
+                    </SplitView.Pane>
+
+                    <!-- Frame de Conteúdo Principal (DocumentView Sempre Preservado na Árvore Visual) -->
+                    <Frame
+                        x:Name="MainContentFrame"
+                        Background="Transparent"
+                        IsNavigationStackEnabled="False" />
+                </SplitView>
             </Grid>
         </SplitView>
 

@@ -59,9 +59,12 @@ Checklist de melhorias de usabilidade, ergonomia visual (Fluent 2) e recursos es
 ## 📦 Pacote QoL 5: Persistência em Disco, Reabrir Último Documento, Metadados e Arquivos
 - [x] **Persistência de Configurações em Disco (`%LOCALAPPDATA%\WinPDF\settings.json`).**
 - [x] **Opção "Reabrir último documento ao iniciar" nas Configurações.**
-- [ ] **Propriedades do Documento Reais (`Alt+Enter` e Clique na Barra Inferior via `FPDF_GetMetaText`).**
+- [x] **Propriedades do Documento Reais (`Alt+Enter` e Clique na Barra Inferior via `FPDF_GetMetaText`).**
 - [ ] **Ações de Arquivo (`Ctrl+S` Salvar Como e `Ctrl+Shift+N` Abrir uma Cópia).**
 - [ ] **Impressão**: abrir a janela de impressão traz a janela nativa do Windows para impressão de arquivo
+
+## Etapa de seleção e pesquisa de arquivos
+Todo
 
 ## Etapa de implementação de abas
 Todo

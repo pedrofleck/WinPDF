@@ -281,6 +281,13 @@ public sealed partial class MainWindow : Window
             return;
         }
 
+        if (ViewModel.IsPropertiesOpen && e.Key == Windows.System.VirtualKey.Escape)
+        {
+            e.Handled = true;
+            ViewModel.CloseProperties();
+            return;
+        }
+
         if (MainContentFrame.Content is DocumentView docView)
         {
             docView.HandleWindowPreviewKeyDown(e);

@@ -236,4 +236,27 @@
   <data name="Settings_Viewing_ReopenDescription.Text" xml:space="preserve"><value>Restaurar automaticamente o último arquivo PDF aberto ao iniciar o aplicativo</value></data>
   <data name="MissingLastDocInfoBar_Title" xml:space="preserve"><value>Documento não encontrado</value></data>
   <data name="MissingLastDocInfoBar_MessageFormat" xml:space="preserve"><value>Não foi possível reabrir “{0}” porque o arquivo foi movido ou excluído.</value></data>
+  <!-- ===================== QoL 5: Document Properties Sidebar ===================== -->
+  <data name="Properties_Title.Text" xml:space="preserve"><value>Informação</value></data>
+  <data name="Properties_CloseButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Fechar informações (Esc)</value></data>
+  <data name="Properties_CloseButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Fechar</value></data>
+  <data name="Properties_CopyPathButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Copiar caminho completo para a área de transferência</value></data>
+  <data name="Properties_CopyPathButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Copiar caminho</value></data>
+  <data name="Properties_CopyPathLabel.Text" xml:space="preserve"><value>Copiar Caminho</value></data>
+  <data name="Properties_OpenFileLocationButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Abrir pasta no Gerenciador de Arquivos</value></data>
+  <data name="Properties_OpenFileLocationButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Abrir local do arquivo</value></data>
+  <data name="Properties_OpenFileLocationLabel.Text" xml:space="preserve"><value>Abrir Local</value></data>
+  <data name="Properties_FileNameHeading.Text" xml:space="preserve"><value>Nome do arquivo</value></data>
+  <data name="Properties_DateTimeHeading.Text" xml:space="preserve"><value>Data e hora</value></data>
+  <data name="Properties_SizeHeading.Text" xml:space="preserve"><value>Informações de tamanho</value></data>
+  <data name="Properties_PagesCountLabel.Text" xml:space="preserve"><value>páginas</value></data>
+  <data name="Properties_FolderLocationHeading.Text" xml:space="preserve"><value>Origem e local da pasta</value></data>
+  <data name="Properties_AdditionalInfoHeading.Text" xml:space="preserve"><value>Informações adicionais</value></data>
+  <data name="Properties_PdfVersionLabel.Text" xml:space="preserve"><value>Versão do PDF</value></data>
+  <data name="Properties_DocTitleLabel.Text" xml:space="preserve"><value>Título</value></data>
+  <data name="Properties_DocAuthorLabel.Text" xml:space="preserve"><value>Autor</value></data>
+  <data name="Properties_DocSubjectLabel.Text" xml:space="preserve"><value>Assunto</value></data>
+  <data name="Properties_DocKeywordsLabel.Text" xml:space="preserve"><value>Palavras-chave</value></data>
+  <data name="Properties_DocCreatorLabel.Text" xml:space="preserve"><value>Aplicativo de criação</value></data>
+  <data name="Properties_DocProducerLabel.Text" xml:space="preserve"><value>Produtor do PDF</value></data>
 </root>

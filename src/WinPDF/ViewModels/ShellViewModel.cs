@@ -51,6 +51,12 @@ public sealed partial class ShellViewModel : ObservableObject
     public partial bool IsSidebarOpen { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets a value indicating whether the right-hand document properties sidebar is open.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsPropertiesOpen { get; set; }
+
+    /// <summary>
     /// Gets or sets the active tab displayed in the sidebar (Thumbnails, Outline, Annotations, Bookmarks, Attachments).
     /// </summary>
     [ObservableProperty]
@@ -533,8 +539,9 @@ public sealed partial class ShellViewModel : ObservableObject
             PdfDocumentInfo docInfo = await _pdfService.OpenDocumentAsync(filePath, null, cancellationToken);
             var outline = await _pdfService.GetOutlineAsync(docInfo.DocumentId, cancellationToken);
             var attachments = await _pdfService.GetAttachmentNamesAsync(docInfo.DocumentId, cancellationToken);
+            var metadata = await _pdfService.GetDocumentMetadataAsync(docInfo.DocumentId, cancellationToken);
 
-            DocumentViewModel doc = new(_pdfService, _tileCache, docInfo, outline, attachments);
+            DocumentViewModel doc = new(_pdfService, _tileCache, docInfo, outline, attachments, metadata);
             if (initialPageIndex > 0 && initialPageIndex < doc.PageCount)
             {
                 doc.GoToPage(initialPageIndex);
@@ -719,6 +726,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
         int preservedPage = CurrentDocument.CurrentPageIndex;
         IsSidebarOpen = false;
+        IsPropertiesOpen = false;
         IsSearchOpen = false;
         IsAnnotationToolbarOpen = false;
         IsPresentationMode = true;
@@ -875,6 +883,7 @@ public sealed partial class ShellViewModel : ObservableObject
             return;
         }
 
+        IsPropertiesOpen = false;
         IsSearchOpen = false;
         IsAnnotationToolbarOpen = false;
         if (IsPresentationMode)
@@ -1054,24 +1063,103 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Displays the document properties dialog.
+    /// Toggles the document properties sidebar between open and closed.
     /// </summary>
     [RelayCommand]
-    public async Task ShowPropertiesAsync()
+    public void ToggleProperties()
     {
         if (CurrentDocument is null)
+        {
+            IsPropertiesOpen = false;
+            return;
+        }
+
+        IsPropertiesOpen = !IsPropertiesOpen;
+    }
+
+    /// <summary>
+    /// Closes the document properties sidebar.
+    /// </summary>
+    [RelayCommand]
+    public void CloseProperties()
+    {
+        if (IsPropertiesOpen)
+        {
+            IsPropertiesOpen = false;
+        }
+    }
+
+    /// <summary>
+    /// Opens the folder containing the current document in File Explorer with the file selected.
+    /// </summary>
+    [RelayCommand]
+    public void OpenFileLocation()
+    {
+        if (CurrentDocument is null || string.IsNullOrWhiteSpace(CurrentDocument.FilePath))
         {
             return;
         }
 
-        string title = ResourceStrings.Get(ResourceKeys.DocPropsTitle);
-        string close = ResourceStrings.Get(ResourceKeys.DialogClose);
-        string body = $"{ResourceStrings.Get(ResourceKeys.DocPropsFileName)} {CurrentDocument.FileName}\n" +
-                      $"{ResourceStrings.Get(ResourceKeys.DocPropsFilePath)} {CurrentDocument.FilePath}\n" +
-                      $"{ResourceStrings.Get(ResourceKeys.DocPropsPageCount)} {CurrentDocument.PageCount}\n" +
-                      $"{ResourceStrings.Get(ResourceKeys.DocPropsFileSize)} {CurrentDocument.FileSizeBytes / 1024:N0} KB";
+        try
+        {
+            if (System.IO.File.Exists(CurrentDocument.FilePath))
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"/select,\"{CurrentDocument.FilePath}\"",
+                    UseShellExecute = true
+                });
+                return;
+            }
 
-        await _dialogService.ShowMessageAsync(title, body, close);
+            string? dir = System.IO.Path.GetDirectoryName(CurrentDocument.FilePath);
+            if (!string.IsNullOrEmpty(dir) && System.IO.Directory.Exists(dir))
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = dir,
+                    UseShellExecute = true
+                });
+            }
+        }
+        catch
+        {
+            // Ignore explorer launch failures
+        }
+    }
+
+    /// <summary>
+    /// Copies the full file path of the current document to the system clipboard.
+    /// </summary>
+    [RelayCommand]
+    public void CopyFilePath()
+    {
+        if (CurrentDocument is null || string.IsNullOrWhiteSpace(CurrentDocument.FilePath))
+        {
+            return;
+        }
+
+        try
+        {
+            var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage();
+            dataPackage.SetText(CurrentDocument.FilePath);
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+        }
+        catch
+        {
+            // Ignore clipboard errors
+        }
+    }
+
+    /// <summary>
+    /// Displays or toggles the document properties sidebar.
+    /// </summary>
+    [RelayCommand]
+    public Task ShowPropertiesAsync()
+    {
+        ToggleProperties();
+        return Task.CompletedTask;
     }
 
     /// <summary>

@@ -52,6 +52,14 @@ internal static unsafe partial class PdfiumNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial int FPDF_GetPageSizeByIndexF(PdfiumDocumentHandle document, int pageIndex, FsSizeF* size);
 
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint FPDF_GetMetaText(PdfiumDocumentHandle document, string tag, void* buffer, uint buflen);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDF_GetFileVersion(PdfiumDocumentHandle document, out int fileVersion);
+
     // ------------------------------------------------------------------------------------------
     // Pages and geometry
     // ------------------------------------------------------------------------------------------
