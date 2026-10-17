@@ -9,6 +9,7 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Foundation;
 using Windows.Graphics;
 using Windows.Storage;
 using WinPDF.Helpers;
@@ -121,6 +122,8 @@ public sealed partial class MainWindow : Window
 
         _savedSidebarWidth = Math.Clamp(ViewModel.SettingsService.Settings.SidebarWidth, MinSidebarWidth, MaxSidebarWidth);
         SidebarPaneContainer.Width = _savedSidebarWidth;
+        SidebarContentFrame.SizeChanged += OnSidebarContentFrameSizeChanged;
+        SidebarContentGrid.SizeChanged += OnSidebarContentGridSizeChanged;
         Closed += OnMainWindowClosed;
 
         SelectSidebarTab(ViewModel.SidebarTab);
@@ -197,8 +200,35 @@ public sealed partial class MainWindow : Window
 
     private Windows.Foundation.Size _lastWindowSize;
 
+    private void OnSidebarContentFrameSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (e.NewSize.Width > 0 && e.NewSize.Height > 0)
+        {
+            SidebarContentFrame.Clip = new RectangleGeometry
+            {
+                Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height)
+            };
+        }
+    }
+
+    private void OnSidebarContentGridSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (e.NewSize.Width > 0 && e.NewSize.Height > 0)
+        {
+            SidebarContentGrid.Clip = new RectangleGeometry
+            {
+                Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height)
+            };
+        }
+    }
+
     private void OnMainWindowSizeChanged(object sender, WindowSizeChangedEventArgs args)
     {
+        if (!_hasSetInitialBounds || args.Size.Width <= 0 || args.Size.Height <= 0)
+        {
+            return;
+        }
+
         if (args.Size.Width == _lastWindowSize.Width && args.Size.Height == _lastWindowSize.Height)
         {
             return;
@@ -220,7 +250,7 @@ public sealed partial class MainWindow : Window
                 _isInternalSidebarToggle = true;
                 try
                 {
-                    ViewModel.IsSidebarOpen = false;
+                    ViewModel.SetSidebarOpenInternal(false);
                 }
                 finally
                 {
@@ -236,7 +266,7 @@ public sealed partial class MainWindow : Window
                 _isInternalSidebarToggle = true;
                 try
                 {
-                    ViewModel.IsSidebarOpen = true;
+                    ViewModel.SetSidebarOpenInternal(true);
                 }
                 finally
                 {
@@ -587,8 +617,13 @@ public sealed partial class MainWindow : Window
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)
     {
+        bool effectiveSidebarOpen = _wasSidebarClosedByNarrowWindow
+            ? true
+            : (ViewModel.IsFullScreen ? _sidebarOpenBeforeFullScreen : ViewModel.IsSidebarOpen);
+
         ViewModel.SettingsService.Update(s =>
         {
+            s.IsSidebarOpen = effectiveSidebarOpen;
             s.SidebarWidth = _savedSidebarWidth;
             if (ViewModel.CurrentDocument is { } doc && !string.IsNullOrWhiteSpace(doc.FilePath))
             {
@@ -1141,7 +1176,7 @@ public sealed partial class MainWindow : Window
                     _isInternalSidebarToggle = true;
                     try
                     {
-                        ViewModel.IsSidebarOpen = false;
+                        ViewModel.SetSidebarOpenInternal(false);
                     }
                     finally
                     {
@@ -1166,7 +1201,7 @@ public sealed partial class MainWindow : Window
                 _isInternalSidebarToggle = true;
                 try
                 {
-                    ViewModel.IsSidebarOpen = true;
+                    ViewModel.SetSidebarOpenInternal(true);
                 }
                 finally
                 {

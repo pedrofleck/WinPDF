@@ -17,6 +17,7 @@ namespace WinPDF.Helpers;
 public sealed class TouchScrollBarHelper
 {
     private const double VisualScrollBarThicknessDip = 14.0;
+    private const double TouchVisualScrollBarThicknessDip = 24.0;
     private const double ArrowButtonLengthDip = 16.0;
     private const double ThumbTouchHaloDip = 42.0;
 
@@ -26,6 +27,7 @@ public sealed class TouchScrollBarHelper
 
     private ScrollBar? _verticalScrollBar;
     private ScrollBar? _horizontalScrollBar;
+    private bool _isTouchModeActive;
 
     private uint? _vTouchPointerId;
     private double _vDragStartY;
@@ -45,6 +47,8 @@ public sealed class TouchScrollBarHelper
 
         _scrollViewer.Loaded += OnScrollViewerLoaded;
         _scrollViewer.SizeChanged += OnScrollViewerSizeChanged;
+        _scrollViewer.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnScrollViewerPointerPressed), handledEventsToo: true);
+        _scrollViewer.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(OnScrollViewerPointerMoved), handledEventsToo: true);
         TryHookScrollBars();
     }
 
@@ -128,23 +132,70 @@ public sealed class TouchScrollBarHelper
         ApplyVerticalScrollBarTemplateMetrics(bar);
     }
 
+    private void OnScrollViewerPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerDeviceType != PointerDeviceType.Mouse)
+        {
+            SetTouchMode(true);
+        }
+    }
+
+    private void OnScrollViewerPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerDeviceType == PointerDeviceType.Mouse)
+        {
+            if (_isTouchModeActive && _vTouchPointerId is null && _hTouchPointerId is null)
+            {
+                SetTouchMode(false);
+            }
+        }
+        else
+        {
+            if (!_isTouchModeActive)
+            {
+                SetTouchMode(true);
+            }
+        }
+    }
+
+    private void SetTouchMode(bool isTouch)
+    {
+        if (_isTouchModeActive == isTouch)
+        {
+            return;
+        }
+
+        _isTouchModeActive = isTouch;
+        if (_verticalScrollBar is not null)
+        {
+            ApplyVerticalScrollBarTemplateMetrics(_verticalScrollBar);
+        }
+
+        if (_horizontalScrollBar is not null)
+        {
+            ApplyHorizontalScrollBarTemplateMetrics(_horizontalScrollBar);
+        }
+    }
+
     private void ApplyVerticalScrollBarTemplateMetrics(ScrollBar bar)
     {
         bar.ApplyTemplate();
         bar.IndicatorMode = ScrollingIndicatorMode.MouseIndicator;
-        bar.Width = _touchHitThicknessDip;
-        bar.MinWidth = _touchHitThicknessDip;
+        double visualThickness = _isTouchModeActive ? TouchVisualScrollBarThicknessDip : VisualScrollBarThicknessDip;
+        double hitThickness = Math.Max(_touchHitThicknessDip, visualThickness);
+        bar.Width = hitThickness;
+        bar.MinWidth = hitThickness;
 
         if (FindDescendant<Grid>(bar, "Root") is { } rootGrid)
         {
             rootGrid.Background = new SolidColorBrush(Colors.Transparent);
-            rootGrid.Width = _touchHitThicknessDip;
+            rootGrid.Width = hitThickness;
             rootGrid.HorizontalAlignment = HorizontalAlignment.Stretch;
         }
 
         if (FindDescendant<FrameworkElement>(bar, "VerticalRoot") is { } verticalRoot)
         {
-            verticalRoot.Width = VisualScrollBarThicknessDip;
+            verticalRoot.Width = visualThickness;
             verticalRoot.HorizontalAlignment = HorizontalAlignment.Right;
         }
     }
@@ -177,25 +228,32 @@ public sealed class TouchScrollBarHelper
     {
         bar.ApplyTemplate();
         bar.IndicatorMode = ScrollingIndicatorMode.MouseIndicator;
-        bar.Height = _touchHitThicknessDip;
-        bar.MinHeight = _touchHitThicknessDip;
+        double visualThickness = _isTouchModeActive ? TouchVisualScrollBarThicknessDip : VisualScrollBarThicknessDip;
+        double hitThickness = Math.Max(_touchHitThicknessDip, visualThickness);
+        bar.Height = hitThickness;
+        bar.MinHeight = hitThickness;
 
         if (FindDescendant<Grid>(bar, "Root") is { } rootGrid)
         {
             rootGrid.Background = new SolidColorBrush(Colors.Transparent);
-            rootGrid.Height = _touchHitThicknessDip;
+            rootGrid.Height = hitThickness;
             rootGrid.VerticalAlignment = VerticalAlignment.Stretch;
         }
 
         if (FindDescendant<FrameworkElement>(bar, "HorizontalRoot") is { } horizontalRoot)
         {
-            horizontalRoot.Height = VisualScrollBarThicknessDip;
+            horizontalRoot.Height = visualThickness;
             horizontalRoot.VerticalAlignment = VerticalAlignment.Bottom;
         }
     }
 
     private void OnVerticalBarPointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        if (e.Pointer.PointerDeviceType != PointerDeviceType.Mouse)
+        {
+            SetTouchMode(true);
+        }
+
         if (e.Pointer.PointerDeviceType == PointerDeviceType.Mouse ||
             _verticalScrollBar is null ||
             _scrollViewer.ScrollableHeight <= 0.5)
@@ -278,6 +336,11 @@ public sealed class TouchScrollBarHelper
 
     private void OnHorizontalBarPointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        if (e.Pointer.PointerDeviceType != PointerDeviceType.Mouse)
+        {
+            SetTouchMode(true);
+        }
+
         if (e.Pointer.PointerDeviceType == PointerDeviceType.Mouse ||
             _horizontalScrollBar is null ||
             _scrollViewer.ScrollableWidth <= 0.5)

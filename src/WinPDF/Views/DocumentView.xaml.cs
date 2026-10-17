@@ -8,6 +8,7 @@ using Windows.Foundation;
 using Windows.Graphics.Printing;
 using Windows.Storage;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -76,6 +77,14 @@ public sealed partial class DocumentView : Page
     private IPrintDocumentSource? _printDocumentSource;
     private DocumentViewModel? _activePrintDocumentVm;
     private PrintTaskOptions? _currentPrintTaskOptions;
+    private uint? _touchSwipePointerId;
+    private Point _touchSwipeStartPoint;
+    private DateTime _touchSwipeStartTime;
+    private bool _touchSwipeTriggered;
+    private long _lastSlideWheelNavTimestamp;
+    private int _wheelDeltaAccumulator;
+    private const int WheelSlideNavThreshold = 120;
+    private const long WheelSlideCooldownMs = 260;
 
     /// <summary>Gets the localized page prefix text.</summary>
     public string PagePrefixText => ResourceStrings.Get(ResourceKeys.StatusBarPagePrefix);
@@ -147,6 +156,7 @@ public sealed partial class DocumentView : Page
         ExitPresentationTopZone.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         ContinuousScrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         ContinuousScrollViewer.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnDocumentScrollViewerPointerPressed), handledEventsToo: true);
+        ContinuousScrollViewer.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(OnDocumentScrollViewerPointerMoved), handledEventsToo: true);
         ContinuousScrollViewer.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(OnDocumentScrollViewerPointerReleased), handledEventsToo: true);
         ContinuousScrollViewer.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler(OnDocumentScrollViewerPointerReleased), handledEventsToo: true);
         ContinuousScrollViewer.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(OnDocumentScrollViewerPointerReleased), handledEventsToo: true);
@@ -723,11 +733,86 @@ public sealed partial class DocumentView : Page
     {
         _isPointerDownOnDocument = true;
         ViewModel.CurrentDocument?.NotifyUserDocumentScrollInitiated();
+
+        if (e.Pointer.PointerDeviceType == PointerDeviceType.Touch)
+        {
+            _touchSwipePointerId = e.Pointer.PointerId;
+            _touchSwipeStartPoint = e.GetCurrentPoint(ContinuousScrollViewer).Position;
+            _touchSwipeStartTime = DateTime.UtcNow;
+            _touchSwipeTriggered = false;
+        }
+    }
+
+    private void OnDocumentScrollViewerPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (_touchSwipePointerId != e.Pointer.PointerId || _touchSwipeTriggered || ViewModel.CurrentDocument is not { } doc)
+        {
+            return;
+        }
+
+        if (ViewModel.IsPresentationMode || !doc.IsContinuous)
+        {
+            Point current = e.GetCurrentPoint(ContinuousScrollViewer).Position;
+            double dx = current.X - _touchSwipeStartPoint.X;
+            double dy = current.Y - _touchSwipeStartPoint.Y;
+
+            // Trigger swipe when horizontal distance exceeds 45 DIPs and dominates vertical motion
+            if (Math.Abs(dx) >= 45.0 && Math.Abs(dx) > Math.Abs(dy) * 1.2)
+            {
+                _touchSwipeTriggered = true;
+                if (dx < 0)
+                {
+                    doc.NextPage();
+                }
+                else
+                {
+                    doc.PreviousPage();
+                }
+
+                if (_isFittedVertically || ViewModel.IsPresentationMode)
+                {
+                    DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
+                }
+            }
+        }
     }
 
     private void OnDocumentScrollViewerPointerReleased(object sender, PointerRoutedEventArgs e)
     {
         _isPointerDownOnDocument = false;
+
+        if (_touchSwipePointerId == e.Pointer.PointerId)
+        {
+            if (!_touchSwipeTriggered && (ViewModel.IsPresentationMode || ViewModel.CurrentDocument is { IsContinuous: false }))
+            {
+                Point current = e.GetCurrentPoint(ContinuousScrollViewer).Position;
+                double dx = current.X - _touchSwipeStartPoint.X;
+                double dy = current.Y - _touchSwipeStartPoint.Y;
+                double elapsedMs = (DateTime.UtcNow - _touchSwipeStartTime).TotalMilliseconds;
+
+                // Quick flick gesture: less than 350ms and distance >= 30 DIPs
+                if (elapsedMs < 350.0 && Math.Abs(dx) >= 30.0 && Math.Abs(dx) > Math.Abs(dy))
+                {
+                    _touchSwipeTriggered = true;
+                    if (dx < 0)
+                    {
+                        ViewModel.CurrentDocument?.NextPage();
+                    }
+                    else
+                    {
+                        ViewModel.CurrentDocument?.PreviousPage();
+                    }
+
+                    if (_isFittedVertically || ViewModel.IsPresentationMode)
+                    {
+                        DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
+                    }
+                }
+            }
+
+            _touchSwipePointerId = null;
+            _touchSwipeTriggered = false;
+        }
     }
 
     /// <summary>
@@ -1438,7 +1523,7 @@ public sealed partial class DocumentView : Page
                     ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Disabled;
                 }
 
-                if (ContinuousScrollViewer.ScrollableWidth > 1.0)
+                if (ContinuousScrollViewer.ScrollableWidth > 1.0 && doc.IsContinuous)
                 {
                     double scrollDelta = delta > 0 ? -120.0 : 120.0;
                     double newOffset = Math.Clamp(
@@ -1448,16 +1533,9 @@ public sealed partial class DocumentView : Page
 
                     ContinuousScrollViewer.ChangeView(newOffset, lockedVerticalOffset, null, disableAnimation: true);
                 }
-                else if (!doc.IsContinuous)
+                else if (ViewModel.IsPresentationMode || !doc.IsContinuous)
                 {
-                    if (delta > 0)
-                    {
-                        doc.PreviousPage();
-                    }
-                    else
-                    {
-                        doc.NextPage();
-                    }
+                    HandleSlideWheelNavigation(delta);
                 }
                 else
                 {
@@ -1475,32 +1553,57 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        if (!doc.IsContinuous)
+        if (ViewModel.IsPresentationMode || !doc.IsContinuous)
         {
             int delta = props.MouseWheelDelta;
             if (delta != 0)
             {
-                bool canScrollVertically = ContinuousScrollViewer.ScrollableHeight > 4.0 && !_isFittedVertically;
+                bool isZoomedIn = ContinuousScrollViewer.ZoomFactor > 1.15 && ContinuousScrollViewer.ScrollableHeight > 30.0 && !_isFittedVertically;
                 bool atTop = ContinuousScrollViewer.VerticalOffset <= 4.0;
                 bool atBottom = ContinuousScrollViewer.VerticalOffset >= ContinuousScrollViewer.ScrollableHeight - 4.0;
 
-                if (!canScrollVertically || (delta > 0 && atTop) || (delta < 0 && atBottom))
+                if (!isZoomedIn || (delta > 0 && atTop) || (delta < 0 && atBottom))
                 {
                     e.Handled = true;
-                    if (delta > 0)
-                    {
-                        doc.PreviousPage();
-                    }
-                    else
-                    {
-                        doc.NextPage();
-                    }
-
-                    if (_isFittedVertically)
-                    {
-                        DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
-                    }
+                    HandleSlideWheelNavigation(delta);
                 }
+            }
+            return;
+        }
+    }
+
+    private void HandleSlideWheelNavigation(int delta)
+    {
+        if (ViewModel.CurrentDocument is not { } doc)
+        {
+            return;
+        }
+
+        long now = Environment.TickCount64;
+        if (now - _lastSlideWheelNavTimestamp < WheelSlideCooldownMs)
+        {
+            return;
+        }
+
+        _wheelDeltaAccumulator += delta;
+        if (Math.Abs(_wheelDeltaAccumulator) >= WheelSlideNavThreshold)
+        {
+            _lastSlideWheelNavTimestamp = now;
+            int direction = _wheelDeltaAccumulator > 0 ? -1 : 1;
+            _wheelDeltaAccumulator = 0;
+
+            if (direction < 0)
+            {
+                doc.PreviousPage();
+            }
+            else
+            {
+                doc.NextPage();
+            }
+
+            if (_isFittedVertically || ViewModel.IsPresentationMode)
+            {
+                DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
             }
         }
     }

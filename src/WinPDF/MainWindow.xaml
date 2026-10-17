@@ -445,7 +445,11 @@
                     </Grid.ColumnDefinitions>
 
                     <!-- Sidebar Content (Content Frame + Footer) -->
-                    <Grid Grid.Column="0" Background="Transparent" RowDefinitions="*,Auto">
+                    <Grid
+                        x:Name="SidebarContentGrid"
+                        Grid.Column="0"
+                        Background="Transparent"
+                        RowDefinitions="*,Auto">
                         <!-- Sidebar Tabs Content Frame (Directional Navigation) -->
                         <Frame
                             x:Name="SidebarContentFrame"
