@@ -257,14 +257,7 @@
                     ViewChanging="OnScrollViewerViewChanging"
                     ViewChanged="OnScrollViewerViewChanged"
                     ZoomMode="Enabled">
-                    <Grid
-                        x:Name="SlideContentContainer"
-                        HorizontalAlignment="Center"
-                        VerticalAlignment="Center">
-                        <Grid.RenderTransform>
-                            <CompositeTransform x:Name="SlideContentTransform" />
-                        </Grid.RenderTransform>
-                        <ItemsRepeater
+                    <ItemsRepeater
                         x:Name="ContinuousPagesRepeater"
                         Margin="{x:Bind converters:UiHelpers.RepeaterMargin(ViewModel.IsPresentationMode, ViewModel.CurrentDocument.IsContinuous), Mode=OneWay}"
                         HorizontalAlignment="Center"
@@ -321,7 +314,6 @@
                             </DataTemplate>
                         </ItemsRepeater.ItemTemplate>
                     </ItemsRepeater>
-                    </Grid>
                 </ScrollViewer>
 
                 <!-- 80 DIPs navigation side strips 'Photos' style -->

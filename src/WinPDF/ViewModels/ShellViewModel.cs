@@ -58,35 +58,10 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty]
     public partial SidebarTab SidebarTab { get; set; } = SidebarTab.Thumbnails;
 
-    private bool _suppressSidebarSettingsUpdate;
-
-    /// <summary>
-    /// Updates <see cref="IsSidebarOpen"/> internally (e.g. for temporary presentation mode,
-    /// fullscreen, or narrow window adaptation) without overwriting user settings in storage.
-    /// </summary>
-    /// <param name="isOpen">The internal open state.</param>
-    public void SetSidebarOpenInternal(bool isOpen)
-    {
-        if (IsSidebarOpen == isOpen)
-        {
-            return;
-        }
-
-        _suppressSidebarSettingsUpdate = true;
-        try
-        {
-            IsSidebarOpen = isOpen;
-        }
-        finally
-        {
-            _suppressSidebarSettingsUpdate = false;
-        }
-    }
-
     partial void OnIsSidebarOpenChanged(bool value)
     {
         CurrentDocument?.SetThumbnailsActive(!IsSettingsOpen && value && SidebarTab == SidebarTab.Thumbnails);
-        if (!_isInitializingSettings && !_suppressSidebarSettingsUpdate && !IsPresentationMode && !IsFullScreen)
+        if (!_isInitializingSettings && !IsPresentationMode && !IsFullScreen)
         {
             _settingsService.Update(s => s.IsSidebarOpen = value);
         }
@@ -326,7 +301,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
             if (_sidebarOpenBeforePresentation)
             {
-                SetSidebarOpenInternal(true);
+                IsSidebarOpen = true;
                 _sidebarOpenBeforePresentation = false;
             }
         }
@@ -907,7 +882,7 @@ public sealed partial class ShellViewModel : ObservableObject
         }
 
         int preservedPage = CurrentDocument.CurrentPageIndex;
-        SetSidebarOpenInternal(false);
+        IsSidebarOpen = false;
         IsSearchOpen = false;
         IsAnnotationToolbarOpen = false;
         IsPresentationMode = true;

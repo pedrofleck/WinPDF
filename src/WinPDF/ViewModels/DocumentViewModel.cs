@@ -37,25 +37,6 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     public partial int PageCount { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the active <see cref="CurrentPageIndex"/> update
-    /// is originating from continuous document scroll/inertia rather than an explicit page jump.
-    /// </summary>
-    public bool IsCurrentPageChangeFromScroll { get; set; }
-
-    /// <summary>
-    /// Event raised when the user initiates a new scroll interaction directly on the document viewport.
-    /// </summary>
-    public event Action? UserDocumentScrollInitiated;
-
-    /// <summary>
-    /// Notifies listeners that the user has started a new direct scroll gesture on the document viewport.
-    /// </summary>
-    public void NotifyUserDocumentScrollInitiated()
-    {
-        UserDocumentScrollInitiated?.Invoke();
-    }
-
-    /// <summary>
     /// Gets or sets the zero-based index of the currently viewed page.
     /// </summary>
     [ObservableProperty]

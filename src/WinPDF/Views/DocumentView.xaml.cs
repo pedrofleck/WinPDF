@@ -8,7 +8,6 @@ using Windows.Foundation;
 using Windows.Graphics.Printing;
 using Windows.Storage;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.UI.Input;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -49,9 +48,6 @@ public sealed partial class DocumentView : Page
     private DocumentViewModel? _observedDocument;
     private bool _isProgrammaticPageScroll;
     private bool _isUpdatingPageFromScroll;
-    private bool _isDocumentScrollActive;
-    private bool _isPointerDownOnDocument;
-    private bool _isApplyingMarginSwap;
     private bool _isApplyingZoom;
     private bool _isUpdatingZoomFromScrollViewer;
     private bool _isUpdatingSliderFromZoom;
@@ -77,17 +73,6 @@ public sealed partial class DocumentView : Page
     private IPrintDocumentSource? _printDocumentSource;
     private DocumentViewModel? _activePrintDocumentVm;
     private PrintTaskOptions? _currentPrintTaskOptions;
-    private uint? _touchSwipePointerId;
-    private Point _touchSwipeStartPoint;
-    private DateTime _touchSwipeStartTime;
-    private bool _isTouchSwipeTracking;
-    private bool _hasTouchMovedHorizontally;
-    private Storyboard? _slideTransitionStoryboard;
-    private bool _isSlideAnimating;
-    private long _lastSlideWheelNavTimestamp;
-    private int _wheelDeltaAccumulator;
-    private const int WheelSlideNavThreshold = 120;
-    private const long WheelSlideCooldownMs = 280;
 
     /// <summary>Gets the localized page prefix text.</summary>
     public string PagePrefixText => ResourceStrings.Get(ResourceKeys.StatusBarPagePrefix);
@@ -158,17 +143,7 @@ public sealed partial class DocumentView : Page
         NextPageZone.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         ExitPresentationTopZone.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         ContinuousScrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
-        ContinuousScrollViewer.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnDocumentScrollViewerPointerPressed), handledEventsToo: true);
-        ContinuousScrollViewer.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(OnDocumentScrollViewerPointerMoved), handledEventsToo: true);
-        ContinuousScrollViewer.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(OnDocumentScrollViewerPointerReleased), handledEventsToo: true);
-        ContinuousScrollViewer.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler(OnDocumentScrollViewerPointerReleased), handledEventsToo: true);
-        ContinuousScrollViewer.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(OnDocumentScrollViewerPointerReleased), handledEventsToo: true);
         ContinuousScrollViewer.SizeChanged += OnScrollViewerSizeChanged;
-
-        TouchScrollBarHelper.Attach(
-            ContinuousScrollViewer,
-            touchHitThicknessDip: 28.0,
-            onTouchScrollStarted: () => ViewModel.CurrentDocument?.NotifyUserDocumentScrollInitiated());
 
         _presentationHideTimer.Tick += OnPresentationHideTimerTick;
         _topNotificationTimer.Tick += OnTopNotificationTimerTick;
@@ -268,8 +243,6 @@ public sealed partial class DocumentView : Page
         _searchBarStoryboard?.Stop();
         _horizontalPushStoryboard?.Stop();
         _isHorizontalPushAnimating = false;
-        _slideTransitionStoryboard?.Stop();
-        _isSlideAnimating = false;
         UnsubscribeFromDocument();
     }
 
@@ -702,10 +675,6 @@ public sealed partial class DocumentView : Page
         }
         else if (e.PropertyName is nameof(DocumentViewModel.IsContinuous) or nameof(DocumentViewModel.IsDoublePage))
         {
-            _slideTransitionStoryboard?.Stop();
-            _isSlideAnimating = false;
-            SlideContentTransform.TranslateX = 0;
-            SlideContentContainer.Opacity = 1.0;
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
                 UpdateViewportPages(ViewModel.CurrentDocument?.ZoomFactor ?? ContinuousScrollViewer.ZoomFactor);
@@ -738,151 +707,10 @@ public sealed partial class DocumentView : Page
         }
     }
 
-    private void OnDocumentScrollViewerPointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        _isPointerDownOnDocument = true;
-        ViewModel.CurrentDocument?.NotifyUserDocumentScrollInitiated();
-
-        if (e.Pointer.PointerDeviceType == PointerDeviceType.Touch)
-        {
-            _touchSwipePointerId = e.Pointer.PointerId;
-            _touchSwipeStartPoint = e.GetCurrentPoint(ContinuousScrollViewer).Position;
-            _touchSwipeStartTime = DateTime.UtcNow;
-            _isTouchSwipeTracking = true;
-            _hasTouchMovedHorizontally = false;
-        }
-    }
-
-    private void OnDocumentScrollViewerPointerMoved(object sender, PointerRoutedEventArgs e)
-    {
-        if (_touchSwipePointerId != e.Pointer.PointerId || !_isTouchSwipeTracking || _isSlideAnimating || ViewModel.CurrentDocument is not { } doc)
-        {
-            return;
-        }
-
-        if (ViewModel.IsPresentationMode || !doc.IsContinuous)
-        {
-            // If the user is zoomed into the slide, preserve standard panning across the zoomed page.
-            bool isZoomedIn = ContinuousScrollViewer.ZoomFactor > 1.15 && ContinuousScrollViewer.ScrollableWidth > 30.0 && !_isFittedVertically;
-            if (isZoomedIn)
-            {
-                _isTouchSwipeTracking = false;
-                _hasTouchMovedHorizontally = false;
-                return;
-            }
-
-            Point current = e.GetCurrentPoint(ContinuousScrollViewer).Position;
-            double dx = current.X - _touchSwipeStartPoint.X;
-            double dy = current.Y - _touchSwipeStartPoint.Y;
-
-            if (!_hasTouchMovedHorizontally && Math.Abs(dx) > 12.0 && Math.Abs(dx) > Math.Abs(dy) * 0.9)
-            {
-                _hasTouchMovedHorizontally = true;
-                try
-                {
-                    ContinuousScrollViewer.CapturePointer(e.Pointer);
-                }
-                catch
-                {
-                    // Ignore if pointer capture fails
-                }
-            }
-
-            if (_hasTouchMovedHorizontally)
-            {
-                int pageIdx = doc.CurrentPageIndex;
-                int pageTotal = doc.PageCount;
-                double damping = 1.0;
-                if ((dx > 0 && pageIdx <= 0) || (dx < 0 && pageIdx >= pageTotal - 1))
-                {
-                    damping = 0.35;
-                }
-
-                SlideContentTransform.TranslateX = dx * damping;
-                double maxTravel = Math.Max(100.0, ContinuousScrollViewer.ActualWidth * 0.45);
-                double progress = Math.Clamp(Math.Abs(dx) / maxTravel, 0.0, 1.0);
-                SlideContentContainer.Opacity = 1.0 - (progress * 0.35);
-            }
-        }
-    }
-
-    private void OnDocumentScrollViewerPointerReleased(object sender, PointerRoutedEventArgs e)
-    {
-        _isPointerDownOnDocument = false;
-
-        if (_touchSwipePointerId == e.Pointer.PointerId)
-        {
-            try
-            {
-                ContinuousScrollViewer.ReleasePointerCapture(e.Pointer);
-            }
-            catch
-            {
-                // Ignore if not captured
-            }
-
-            bool wasTracking = _isTouchSwipeTracking;
-            bool wasMoved = _hasTouchMovedHorizontally;
-            _isTouchSwipeTracking = false;
-            _hasTouchMovedHorizontally = false;
-            _touchSwipePointerId = null;
-
-            if (wasTracking && (ViewModel.IsPresentationMode || ViewModel.CurrentDocument is { IsContinuous: false }) && !_isSlideAnimating)
-            {
-                Point current = e.GetCurrentPoint(ContinuousScrollViewer).Position;
-                double dx = current.X - _touchSwipeStartPoint.X;
-                double dy = current.Y - _touchSwipeStartPoint.Y;
-                double elapsedMs = (DateTime.UtcNow - _touchSwipeStartTime).TotalMilliseconds;
-
-                bool isFlick = elapsedMs < 400.0 && Math.Abs(dx) >= 30.0 && Math.Abs(dx) > Math.Abs(dy) * 0.8;
-                double travel = Math.Abs(SlideContentTransform.TranslateX);
-                bool isDragExceeded = travel >= 60.0 || Math.Abs(dx) >= 60.0;
-
-                if (isFlick || isDragExceeded)
-                {
-                    bool forward = dx < 0;
-                    FlipPagedSlideAnimated(forward, fromDragOffset: SlideContentTransform.TranslateX);
-                }
-                else if (wasMoved || Math.Abs(SlideContentTransform.TranslateX) > 0.5)
-                {
-                    SnapSlideBack();
-                }
-            }
-            else
-            {
-                SnapSlideBack();
-            }
-        }
-    }
-
-    /// <summary>
-    /// Immediately halts any active inertial scroll on the document <see cref="ScrollViewer"/> at its exact
-    /// current offset so Windows DirectManipulation releases touchpad/touch capture when the user interacts with the sidebar.
-    /// </summary>
-    public void StopDocumentInertiaIfActive()
-    {
-        if (_isDocumentScrollActive && !_isPointerDownOnDocument && ContinuousScrollViewer is not null)
-        {
-            _isDocumentScrollActive = false;
-            try
-            {
-                ContinuousScrollViewer.ChangeView(
-                    ContinuousScrollViewer.HorizontalOffset,
-                    ContinuousScrollViewer.VerticalOffset,
-                    null,
-                    disableAnimation: true);
-            }
-            catch
-            {
-            }
-        }
-    }
-
     private void OnScrollViewerViewChanging(object? sender, ScrollViewerViewChangingEventArgs e)
     {
-        _isDocumentScrollActive = true;
         _viewportDebounceTimer.Stop();
-        if (_isSwitchingMode || _isRestoringFromPresentation || _isApplyingFitZoom || _isApplyingMarginSwap)
+        if (_isSwitchingMode || _isRestoringFromPresentation || _isApplyingFitZoom)
         {
             return;
         }
@@ -944,8 +772,6 @@ public sealed partial class DocumentView : Page
             }
         }
 
-        _isDocumentScrollActive = e.IsIntermediate;
-
         if (!e.IsIntermediate)
         {
             ScheduleViewportUpdate();
@@ -955,7 +781,7 @@ public sealed partial class DocumentView : Page
     private void OnScrollViewerSizeChanged(object sender, SizeChangedEventArgs e)
     {
         EnsureScrollViewerWheelHook();
-        if (_isApplyingMarginSwap || e.NewSize.Width <= 0 || e.NewSize.Height <= 0)
+        if (e.NewSize.Width <= 0 || e.NewSize.Height <= 0)
         {
             return;
         }
@@ -1061,14 +887,12 @@ public sealed partial class DocumentView : Page
         if (doc.CurrentPageIndex != targetIndex)
         {
             _isUpdatingPageFromScroll = true;
-            doc.IsCurrentPageChangeFromScroll = true;
             try
             {
                 doc.CurrentPageIndex = targetIndex;
             }
             finally
             {
-                doc.IsCurrentPageChangeFromScroll = false;
                 _isUpdatingPageFromScroll = false;
             }
         }
@@ -1095,14 +919,12 @@ public sealed partial class DocumentView : Page
         if (ViewModel.CurrentDocument.CurrentPageIndex != targetIndex)
         {
             _isUpdatingPageFromScroll = true;
-            ViewModel.CurrentDocument.IsCurrentPageChangeFromScroll = true;
             try
             {
                 ViewModel.CurrentDocument.CurrentPageIndex = targetIndex;
             }
             finally
             {
-                ViewModel.CurrentDocument.IsCurrentPageChangeFromScroll = false;
                 _isUpdatingPageFromScroll = false;
             }
         }
@@ -1243,9 +1065,7 @@ public sealed partial class DocumentView : Page
         {
             double oldZoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor);
             double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
-            double appliedMarginLeft = ScrollViewerContentRoot?.Margin.Left ?? 0.0;
-            double unappliedLeftW = Math.Max(0.0, leftW - appliedMarginLeft);
-            double docCenterDip = (ContinuousScrollViewer.ViewportWidth + unappliedLeftW) / 2.0;
+            double docCenterDip = (ContinuousScrollViewer.ViewportWidth + leftW) / 2.0;
             double viewportCenterX = (ContinuousScrollViewer.HorizontalOffset + docCenterDip) / oldZoom;
             double viewportCenterY = (ContinuousScrollViewer.VerticalOffset + ContinuousScrollViewer.ViewportHeight / 2.0) / oldZoom;
 
@@ -1520,8 +1340,6 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        doc.NotifyUserDocumentScrollInitiated();
-
         var props = e.GetCurrentPoint(ContinuousScrollViewer).Properties;
         bool isCtrlPressed = (e.KeyModifiers & Windows.System.VirtualKeyModifiers.Control) != 0
             || IsKeyDown(Windows.System.VirtualKey.Control)
@@ -1563,7 +1381,7 @@ public sealed partial class DocumentView : Page
                     ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Disabled;
                 }
 
-                if (ContinuousScrollViewer.ScrollableWidth > 1.0 && doc.IsContinuous)
+                if (ContinuousScrollViewer.ScrollableWidth > 1.0)
                 {
                     double scrollDelta = delta > 0 ? -120.0 : 120.0;
                     double newOffset = Math.Clamp(
@@ -1573,9 +1391,16 @@ public sealed partial class DocumentView : Page
 
                     ContinuousScrollViewer.ChangeView(newOffset, lockedVerticalOffset, null, disableAnimation: true);
                 }
-                else if (ViewModel.IsPresentationMode || !doc.IsContinuous)
+                else if (!doc.IsContinuous)
                 {
-                    HandleSlideWheelNavigation(delta);
+                    if (delta > 0)
+                    {
+                        doc.PreviousPage();
+                    }
+                    else
+                    {
+                        doc.NextPage();
+                    }
                 }
                 else
                 {
@@ -1593,46 +1418,33 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        if (ViewModel.IsPresentationMode || !doc.IsContinuous)
+        if (!doc.IsContinuous)
         {
             int delta = props.MouseWheelDelta;
             if (delta != 0)
             {
-                bool isZoomedIn = ContinuousScrollViewer.ZoomFactor > 1.15 && ContinuousScrollViewer.ScrollableHeight > 30.0 && !_isFittedVertically;
+                bool canScrollVertically = ContinuousScrollViewer.ScrollableHeight > 4.0 && !_isFittedVertically;
                 bool atTop = ContinuousScrollViewer.VerticalOffset <= 4.0;
                 bool atBottom = ContinuousScrollViewer.VerticalOffset >= ContinuousScrollViewer.ScrollableHeight - 4.0;
 
-                if (!isZoomedIn || (delta > 0 && atTop) || (delta < 0 && atBottom))
+                if (!canScrollVertically || (delta > 0 && atTop) || (delta < 0 && atBottom))
                 {
                     e.Handled = true;
-                    HandleSlideWheelNavigation(delta);
+                    if (delta > 0)
+                    {
+                        doc.PreviousPage();
+                    }
+                    else
+                    {
+                        doc.NextPage();
+                    }
+
+                    if (_isFittedVertically)
+                    {
+                        DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
+                    }
                 }
             }
-            return;
-        }
-    }
-
-    private void HandleSlideWheelNavigation(int delta)
-    {
-        if (ViewModel.CurrentDocument is not { } doc || _isSlideAnimating)
-        {
-            return;
-        }
-
-        long now = Environment.TickCount64;
-        if (now - _lastSlideWheelNavTimestamp < WheelSlideCooldownMs)
-        {
-            return;
-        }
-
-        _wheelDeltaAccumulator += delta;
-        if (Math.Abs(_wheelDeltaAccumulator) >= WheelSlideNavThreshold)
-        {
-            _lastSlideWheelNavTimestamp = now;
-            bool forward = _wheelDeltaAccumulator < 0;
-            _wheelDeltaAccumulator = 0;
-
-            FlipPagedSlideAnimated(forward, fromDragOffset: 0.0);
         }
     }
 
@@ -1648,7 +1460,11 @@ public sealed partial class DocumentView : Page
 
     private void OnPrevZoneTapped(object sender, TappedRoutedEventArgs e)
     {
-        FlipPagedSlide(forward: false);
+        ViewModel.CurrentDocument?.PreviousPage();
+        if (_isFittedVertically)
+        {
+            DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
+        }
     }
 
     private void OnNextZonePointerEntered(object sender, PointerRoutedEventArgs e)
@@ -1663,7 +1479,11 @@ public sealed partial class DocumentView : Page
 
     private void OnNextZoneTapped(object sender, TappedRoutedEventArgs e)
     {
-        FlipPagedSlide(forward: true);
+        ViewModel.CurrentDocument?.NextPage();
+        if (_isFittedVertically)
+        {
+            DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
+        }
     }
 
     private void OnExitPresentationZonePointerEntered(object sender, PointerRoutedEventArgs e)
@@ -2250,12 +2070,6 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        if (ViewModel.IsPresentationMode || !doc.IsContinuous)
-        {
-            FlipPagedSlideAnimated(forward, fromDragOffset: 0.0);
-            return;
-        }
-
         if (forward)
         {
             doc.NextPage();
@@ -2274,189 +2088,6 @@ public sealed partial class DocumentView : Page
             ContinuousScrollViewer.ChangeView(0, 0, null, disableAnimation: true);
             ScheduleViewportUpdate();
         }
-    }
-
-    private void FlipPagedSlideAnimated(bool forward, double fromDragOffset = 0.0)
-    {
-        if (ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
-        {
-            return;
-        }
-
-        // Boundary check: if already at first/last page, cannot advance further; snap back gracefully.
-        bool canNavigate = forward ? (doc.CurrentPageIndex < doc.PageCount - 1) : (doc.CurrentPageIndex > 0);
-        if (!canNavigate)
-        {
-            SnapSlideBack();
-            return;
-        }
-
-        if (SlideContentTransform is null || SlideContentContainer is null)
-        {
-            if (forward)
-            {
-                doc.NextPage();
-            }
-            else
-            {
-                doc.PreviousPage();
-            }
-            return;
-        }
-
-        _slideTransitionStoryboard?.Stop();
-        _isSlideAnimating = true;
-
-        double viewportWidth = ContinuousScrollViewer.ActualWidth > 100.0 ? ContinuousScrollViewer.ActualWidth : 800.0;
-        double travelDistance = Math.Max(240.0, viewportWidth * 0.45);
-        double exitTargetX = forward ? -travelDistance : travelDistance;
-        double entranceStartX = forward ? travelDistance : -travelDistance;
-
-        // Calculate phase 1 (exit) duration based on remaining distance from user's finger drag
-        double currentOffset = fromDragOffset;
-        double remainingExitDistance = Math.Abs(exitTargetX - currentOffset);
-        double exitProgressRatio = Math.Clamp(remainingExitDistance / travelDistance, 0.2, 1.0);
-        int exitDurationMs = Math.Max(50, (int)(110 * exitProgressRatio));
-
-        Storyboard exitSb = new();
-
-        DoubleAnimation exitSlide = new()
-        {
-            From = currentOffset,
-            To = exitTargetX,
-            Duration = TimeSpan.FromMilliseconds(exitDurationMs),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
-        };
-        Storyboard.SetTarget(exitSlide, SlideContentTransform);
-        Storyboard.SetTargetProperty(exitSlide, nameof(CompositeTransform.TranslateX));
-        exitSb.Children.Add(exitSlide);
-
-        DoubleAnimation exitFade = new()
-        {
-            From = SlideContentContainer.Opacity,
-            To = 0.0,
-            Duration = TimeSpan.FromMilliseconds(exitDurationMs),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
-        };
-        Storyboard.SetTarget(exitFade, SlideContentContainer);
-        Storyboard.SetTargetProperty(exitFade, "Opacity");
-        exitSb.Children.Add(exitFade);
-
-        exitSb.Completed += (s, e) =>
-        {
-            // Advance page in document model
-            if (forward)
-            {
-                doc.NextPage();
-            }
-            else
-            {
-                doc.PreviousPage();
-            }
-
-            // Immediately position the new slide off-screen on the entrance side
-            SlideContentTransform.TranslateX = entranceStartX;
-            SlideContentContainer.Opacity = 0.0;
-
-            if (_isFittedVertically || ViewModel.IsPresentationMode)
-            {
-                ExecuteFitVertical(force: true);
-            }
-            else
-            {
-                ContinuousScrollViewer.ChangeView(0, 0, null, disableAnimation: true);
-                ScheduleViewportUpdate();
-            }
-
-            // Phase 2 (entrance): slide smoothly into place
-            Storyboard entranceSb = new();
-
-            DoubleAnimation enterSlide = new()
-            {
-                From = entranceStartX,
-                To = 0.0,
-                Duration = TimeSpan.FromMilliseconds(190),
-                EasingFunction = new ExponentialEase { EasingMode = EasingMode.EaseOut, Exponent = 4 }
-            };
-            Storyboard.SetTarget(enterSlide, SlideContentTransform);
-            Storyboard.SetTargetProperty(enterSlide, nameof(CompositeTransform.TranslateX));
-            entranceSb.Children.Add(enterSlide);
-
-            DoubleAnimation enterFade = new()
-            {
-                From = 0.0,
-                To = 1.0,
-                Duration = TimeSpan.FromMilliseconds(190),
-                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-            };
-            Storyboard.SetTarget(enterFade, SlideContentContainer);
-            Storyboard.SetTargetProperty(enterFade, "Opacity");
-            entranceSb.Children.Add(enterFade);
-
-            entranceSb.Completed += (s2, e2) =>
-            {
-                SlideContentTransform.TranslateX = 0.0;
-                SlideContentContainer.Opacity = 1.0;
-                _isSlideAnimating = false;
-            };
-
-            _slideTransitionStoryboard = entranceSb;
-            entranceSb.Begin();
-        };
-
-        _slideTransitionStoryboard = exitSb;
-        exitSb.Begin();
-    }
-
-    private void SnapSlideBack()
-    {
-        if (SlideContentTransform is null || SlideContentContainer is null)
-        {
-            return;
-        }
-
-        if (Math.Abs(SlideContentTransform.TranslateX) < 0.5 && Math.Abs(SlideContentContainer.Opacity - 1.0) < 0.02)
-        {
-            SlideContentTransform.TranslateX = 0.0;
-            SlideContentContainer.Opacity = 1.0;
-            _isSlideAnimating = false;
-            return;
-        }
-
-        _slideTransitionStoryboard?.Stop();
-        _isSlideAnimating = true;
-
-        Storyboard snapSb = new();
-
-        DoubleAnimation slideBack = new()
-        {
-            To = 0.0,
-            Duration = TimeSpan.FromMilliseconds(180),
-            EasingFunction = new CircleEase { EasingMode = EasingMode.EaseOut }
-        };
-        Storyboard.SetTarget(slideBack, SlideContentTransform);
-        Storyboard.SetTargetProperty(slideBack, nameof(CompositeTransform.TranslateX));
-        snapSb.Children.Add(slideBack);
-
-        DoubleAnimation fadeBack = new()
-        {
-            To = 1.0,
-            Duration = TimeSpan.FromMilliseconds(180),
-            EasingFunction = new CircleEase { EasingMode = EasingMode.EaseOut }
-        };
-        Storyboard.SetTarget(fadeBack, SlideContentContainer);
-        Storyboard.SetTargetProperty(fadeBack, "Opacity");
-        snapSb.Children.Add(fadeBack);
-
-        snapSb.Completed += (s, e) =>
-        {
-            SlideContentTransform.TranslateX = 0.0;
-            SlideContentContainer.Opacity = 1.0;
-            _isSlideAnimating = false;
-        };
-
-        _slideTransitionStoryboard = snapSb;
-        snapSb.Begin();
     }
 
     private void NavigateToDocumentStart()
@@ -2669,9 +2300,7 @@ public sealed partial class DocumentView : Page
         }
 
         double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen) ? _currentSidebarWidthDip : 0.0;
-        double appliedMarginLeft = ScrollViewerContentRoot?.Margin.Left ?? 0.0;
-        double unappliedLeftW = Math.Max(0.0, leftW - appliedMarginLeft);
-        return Math.Max(120.0, rawViewerWidth - unappliedLeftW);
+        return Math.Max(120.0, rawViewerWidth - leftW);
     }
 
     private void OnNightModeMenuItemLoaded(object sender, RoutedEventArgs e)
@@ -2707,29 +2336,17 @@ public sealed partial class DocumentView : Page
         }
 
         double leftW = (ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
-        double appliedMarginLeft = ScrollViewerContentRoot?.Margin.Left ?? 0.0;
-        double unappliedLeftW = Math.Max(0.0, leftW - appliedMarginLeft);
-        if (unappliedLeftW <= 0.5)
-        {
-            return 0.0;
-        }
-
-        return ComputeCompensatingDocumentOffsetDip(unappliedLeftW, explicitZoom);
-    }
-
-    private double ComputeCompensatingDocumentOffsetDip(double leftW, double? explicitZoom = null)
-    {
         double centeredOffset = leftW / 2.0;
 
         if (leftW > 0.0 && ContinuousScrollViewer is not null && ContinuousPagesRepeater is not null)
         {
             double zoom = explicitZoom ?? (ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0));
-            double fullViewerW = (ScrollViewerContentRoot?.ActualWidth > 0 ? ScrollViewerContentRoot.ActualWidth : ContinuousScrollViewer.ActualWidth) + (ScrollViewerContentRoot?.Margin.Left ?? 0.0);
+            double viewerW = ContinuousScrollViewer.ActualWidth > 0 ? ContinuousScrollViewer.ActualWidth : _lastHandledScrollViewerSize.Width;
             double repW = ContinuousPagesRepeater.ActualWidth;
-            if (fullViewerW > 0 && repW > 0)
+            if (viewerW > 0 && repW > 0)
             {
                 double zoomedPageW = repW * zoom;
-                double unshiftedLeft = Math.Max(24.0, (fullViewerW - zoomedPageW) / 2.0);
+                double unshiftedLeft = Math.Max(24.0, (viewerW - zoomedPageW) / 2.0);
                 double minClearanceOffset = (leftW + 24.0) - unshiftedLeft;
                 if (minClearanceOffset > centeredOffset)
                 {
@@ -2742,8 +2359,7 @@ public sealed partial class DocumentView : Page
     }
 
     /// <summary>
-    /// Synchronizes all pane-dependent transforms and viewport margins immediately without animation
-    /// (used on startup, document switch, or splitter drag).
+    /// Synchronizes all pane-dependent transforms immediately without animation (used on startup, document switch, or splitter drag).
     /// </summary>
     /// <param name="sidebarOpen">Whether the left sidebar is open.</param>
     /// <param name="sidebarWidth">Current width of the left sidebar in DIPs.</param>
@@ -2763,28 +2379,17 @@ public sealed partial class DocumentView : Page
         _isHorizontalPushAnimating = false;
 
         double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
-
-        if (ScrollViewerContentRoot is not null && Math.Abs(ScrollViewerContentRoot.Margin.Left - leftW) > 0.5)
-        {
-            _isApplyingMarginSwap = true;
-            try
-            {
-                ScrollViewerContentRoot.Margin = new Thickness(leftW, 0, 0, 0);
-            }
-            finally
-            {
-                _isApplyingMarginSwap = false;
-            }
-        }
+        double zoom = ContinuousScrollViewer?.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
+        double targetDocOffsetDip = GetTargetDocumentOffsetDip(zoom);
 
         if (PagesRepeaterPushTransform is not null)
         {
-            PagesRepeaterPushTransform.TranslateX = 0.0;
+            PagesRepeaterPushTransform.TranslateX = targetDocOffsetDip / Math.Max(0.05, zoom);
         }
 
         if (FloatingTopTransform is not null)
         {
-            FloatingTopTransform.TranslateX = 0.0;
+            FloatingTopTransform.TranslateX = targetDocOffsetDip;
         }
 
         if (StatusBarBackdropTransform is not null)
@@ -2799,7 +2404,7 @@ public sealed partial class DocumentView : Page
 
         if (PrevPageZoneTransform is not null)
         {
-            PrevPageZoneTransform.TranslateX = 0.0;
+            PrevPageZoneTransform.TranslateX = leftW;
         }
 
         if (NextPageZoneTransform is not null)
@@ -2810,8 +2415,7 @@ public sealed partial class DocumentView : Page
 
     /// <summary>
     /// Smoothly animates the document, status bar, and navigation zones when the left sidebar opens or closes,
-    /// using pure forward GPU transforms during the 250ms transition and committing the disjoint Margin at rest
-    /// so DirectManipulation touch inertia on the document never overlaps the sidebar.
+    /// using pure forward GPU transforms with zero layout width mutation on the ScrollViewer (zero 1-frame jump).
     /// </summary>
     /// <param name="sidebarOpen">Whether the left sidebar is opening.</param>
     /// <param name="sidebarWidth">Width of the left sidebar in DIPs.</param>
@@ -2827,7 +2431,7 @@ public sealed partial class DocumentView : Page
 
     private void AnimateDocumentAndChromeToTargetOffsets()
     {
-        if (PagesRepeaterPushTransform is null || ScrollViewerContentRoot is null)
+        if (PagesRepeaterPushTransform is null)
         {
             return;
         }
@@ -2835,55 +2439,10 @@ public sealed partial class DocumentView : Page
         _horizontalPushStoryboard?.Stop();
         _isHorizontalPushAnimating = true;
 
-        bool opening = ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode;
-        double leftW = opening ? _currentSidebarWidthDip : 0.0;
+        double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
         double zoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
-
-        // If closing from steady state (where ScrollViewerContentRoot.Margin.Left == _currentSidebarWidthDip),
-        // swap Margin to 0 and simultaneously apply the exact compensating TranslateX in the same layout pass
-        // so Frame 1 is at the exact same screen pixel (0.0px jump) before animating smoothly to 0.
-        if (!opening && ScrollViewerContentRoot.Margin.Left > 0.5)
-        {
-            double prevLeftW = ScrollViewerContentRoot.Margin.Left;
-            double startOffsetDip = ComputeCompensatingDocumentOffsetDip(prevLeftW, zoom);
-            _isApplyingMarginSwap = true;
-            try
-            {
-                ScrollViewerContentRoot.Margin = new Thickness(0);
-                PagesRepeaterPushTransform.TranslateX = startOffsetDip / Math.Max(0.05, zoom);
-                if (FloatingTopTransform is not null)
-                {
-                    FloatingTopTransform.TranslateX = prevLeftW / 2.0;
-                }
-
-                if (PrevPageZoneTransform is not null)
-                {
-                    PrevPageZoneTransform.TranslateX = prevLeftW;
-                }
-
-                ScrollViewerContentRoot.UpdateLayout();
-            }
-            finally
-            {
-                _isApplyingMarginSwap = false;
-            }
-        }
-        else if (opening && ScrollViewerContentRoot.Margin.Left > 0.5)
-        {
-            _isApplyingMarginSwap = true;
-            try
-            {
-                ScrollViewerContentRoot.Margin = new Thickness(0);
-            }
-            finally
-            {
-                _isApplyingMarginSwap = false;
-            }
-        }
-
-        double targetDocOffsetDip = opening ? ComputeCompensatingDocumentOffsetDip(leftW, zoom) : 0.0;
+        double targetDocOffsetDip = GetTargetDocumentOffsetDip(zoom);
         double targetRepeaterX = targetDocOffsetDip / Math.Max(0.05, zoom);
-        double targetChromeCenterOffset = opening ? (leftW / 2.0) : 0.0;
 
         var sb = new Storyboard();
         var ease = new ExponentialEase { Exponent = 4.5, EasingMode = EasingMode.EaseOut };
@@ -2903,7 +2462,7 @@ public sealed partial class DocumentView : Page
         {
             var topAnim = new DoubleAnimation
             {
-                To = targetChromeCenterOffset,
+                To = targetDocOffsetDip,
                 Duration = duration,
                 EasingFunction = ease
             };
@@ -2967,7 +2526,9 @@ public sealed partial class DocumentView : Page
         sb.Completed += (_, _) =>
         {
             _isHorizontalPushAnimating = false;
-            SyncPaneOffsetsImmediate();
+            double currentZoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
+            double finalDocOffset = GetTargetDocumentOffsetDip();
+            PagesRepeaterPushTransform.TranslateX = finalDocOffset / Math.Max(0.05, currentZoom);
         };
 
         _horizontalPushStoryboard = sb;

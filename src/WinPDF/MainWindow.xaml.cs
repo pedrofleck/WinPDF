@@ -33,11 +33,6 @@ public sealed partial class MainWindow : Window
 
     private readonly Windows.UI.ViewManagement.UISettings _uiSettings = new();
     private double _savedSidebarWidth = DefaultSidebarWidth;
-    private uint? _touchSplitterActivePointerId;
-    private uint? _touchSplitterPendingPointerId;
-    private double _touchSplitterStartX;
-    private double _touchSplitterStartY;
-    private double _touchSplitterInitialWidth;
     private bool _wasSidebarClosedByNarrowWindow;
     private bool _isInternalSidebarToggle;
     private int _previousSidebarIndex = -1;
@@ -118,12 +113,10 @@ public sealed partial class MainWindow : Window
         SizeChanged += OnMainWindowSizeChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         RegisterTitleBarAnimatedIconPointerHandlers();
-        RegisterSidebarTouchAndInertiaHandlers();
 
         _savedSidebarWidth = Math.Clamp(ViewModel.SettingsService.Settings.SidebarWidth, MinSidebarWidth, MaxSidebarWidth);
         SidebarPaneContainer.Width = _savedSidebarWidth;
-        SidebarContentFrame.SizeChanged += OnSidebarContentFrameSizeChanged;
-        SidebarContentGrid.SizeChanged += OnSidebarContentGridSizeChanged;
+        SetupSidebarClipping();
         Closed += OnMainWindowClosed;
 
         SelectSidebarTab(ViewModel.SidebarTab);
@@ -140,6 +133,7 @@ public sealed partial class MainWindow : Window
                 UpdateTitleBarInsets();
                 UpdateTitleBarNonClientRegions();
                 UpdateSidebarLayout();
+                UpdateSidebarClipGeometries();
                 UpdateMainContainerStyle();
 
                 // Initial frame navigation
@@ -198,37 +192,67 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private Windows.Foundation.Size _lastWindowSize;
-
-    private void OnSidebarContentFrameSizeChanged(object sender, SizeChangedEventArgs e)
+    private void SetupSidebarClipping()
     {
-        if (e.NewSize.Width > 0 && e.NewSize.Height > 0)
+        try
+        {
+            var frameVisual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(SidebarContentFrame);
+            frameVisual.Clip = frameVisual.Compositor.CreateInsetClip();
+
+            var paneVisual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(SidebarPaneContainer);
+            paneVisual.Clip = paneVisual.Compositor.CreateInsetClip();
+
+            var gridVisual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(SidebarContentGrid);
+            gridVisual.Clip = gridVisual.Compositor.CreateInsetClip();
+        }
+        catch
+        {
+            // Ignore in environments where composition is unavailable
+        }
+
+        SidebarContentFrame.SizeChanged += (_, _) => UpdateSidebarClipGeometries();
+        SidebarContentGrid.SizeChanged += (_, _) => UpdateSidebarClipGeometries();
+        SidebarPaneContainer.SizeChanged += (_, _) => UpdateSidebarClipGeometries();
+        UpdateSidebarClipGeometries();
+    }
+
+    private void UpdateSidebarClipGeometries()
+    {
+        double paneW = SidebarPaneContainer.ActualWidth > 0 ? SidebarPaneContainer.ActualWidth : SidebarPaneContainer.Width;
+        double paneH = SidebarPaneContainer.ActualHeight;
+        if (paneW > 0 && paneH > 0)
+        {
+            SidebarPaneContainer.Clip = new RectangleGeometry
+            {
+                Rect = new Rect(0, 0, paneW, paneH)
+            };
+        }
+
+        double frameW = SidebarContentFrame.ActualWidth;
+        double frameH = SidebarContentFrame.ActualHeight;
+        if (frameW > 0 && frameH > 0)
         {
             SidebarContentFrame.Clip = new RectangleGeometry
             {
-                Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height)
+                Rect = new Rect(0, 0, frameW, frameH)
             };
         }
-    }
 
-    private void OnSidebarContentGridSizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        if (e.NewSize.Width > 0 && e.NewSize.Height > 0)
+        double gridW = SidebarContentGrid.ActualWidth;
+        double gridH = SidebarContentGrid.ActualHeight;
+        if (gridW > 0 && gridH > 0)
         {
             SidebarContentGrid.Clip = new RectangleGeometry
             {
-                Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height)
+                Rect = new Rect(0, 0, gridW, gridH)
             };
         }
     }
 
+    private Windows.Foundation.Size _lastWindowSize;
+
     private void OnMainWindowSizeChanged(object sender, WindowSizeChangedEventArgs args)
     {
-        if (!_hasSetInitialBounds || args.Size.Width <= 0 || args.Size.Height <= 0)
-        {
-            return;
-        }
-
         if (args.Size.Width == _lastWindowSize.Width && args.Size.Height == _lastWindowSize.Height)
         {
             return;
@@ -250,7 +274,7 @@ public sealed partial class MainWindow : Window
                 _isInternalSidebarToggle = true;
                 try
                 {
-                    ViewModel.SetSidebarOpenInternal(false);
+                    ViewModel.IsSidebarOpen = false;
                 }
                 finally
                 {
@@ -266,7 +290,7 @@ public sealed partial class MainWindow : Window
                 _isInternalSidebarToggle = true;
                 try
                 {
-                    ViewModel.SetSidebarOpenInternal(true);
+                    ViewModel.IsSidebarOpen = true;
                 }
                 finally
                 {
@@ -617,13 +641,8 @@ public sealed partial class MainWindow : Window
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)
     {
-        bool effectiveSidebarOpen = _wasSidebarClosedByNarrowWindow
-            ? true
-            : (ViewModel.IsFullScreen ? _sidebarOpenBeforeFullScreen : ViewModel.IsSidebarOpen);
-
         ViewModel.SettingsService.Update(s =>
         {
-            s.IsSidebarOpen = effectiveSidebarOpen;
             s.SidebarWidth = _savedSidebarWidth;
             if (ViewModel.CurrentDocument is { } doc && !string.IsNullOrWhiteSpace(doc.FilePath))
             {
@@ -658,140 +677,10 @@ public sealed partial class MainWindow : Window
         }
     }
 
-    private void RegisterSidebarTouchAndInertiaHandlers()
-    {
-        // Wide touch-only resize target around the sidebar border (leaves Mouse 100% on the 6 DIP SplitterContainer)
-        MainSplitView.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnMainSplitViewTouchSplitterPointerPressed), handledEventsToo: true);
-        MainSplitView.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(OnMainSplitViewTouchSplitterPointerMoved), handledEventsToo: true);
-        MainSplitView.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(OnMainSplitViewTouchSplitterPointerReleased), handledEventsToo: true);
-        MainSplitView.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler(OnMainSplitViewTouchSplitterPointerReleased), handledEventsToo: true);
-        MainSplitView.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(OnMainSplitViewTouchSplitterPointerReleased), handledEventsToo: true);
-
-        // Release any active touchpad/document scroll inertia when the user interacts with the sidebar
-        SidebarPaneContainer.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(OnSidebarPanePointerEnteredOrInteracted), handledEventsToo: true);
-        SidebarPaneContainer.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnSidebarPanePointerEnteredOrInteracted), handledEventsToo: true);
-        SidebarPaneContainer.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(OnSidebarPanePointerEnteredOrInteracted), handledEventsToo: true);
-    }
-
-    private void OnSidebarPanePointerEnteredOrInteracted(object sender, PointerRoutedEventArgs e)
-    {
-        if (SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage &&
-            (e.Pointer.IsInContact || e.GetCurrentPoint(SidebarPaneContainer).Properties.MouseWheelDelta != 0))
-        {
-            thumbPage.ActivateManualSidebarScrollLock();
-        }
-
-        if (MainContentFrame.Content is DocumentView docView)
-        {
-            docView.StopDocumentInertiaIfActive();
-        }
-    }
-
-    private void OnMainSplitViewTouchSplitterPointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse ||
-            !ViewModel.HasDocument ||
-            !ViewModel.IsSidebarOpen ||
-            ViewModel.IsSettingsOpen ||
-            ViewModel.IsPresentationMode)
-        {
-            return;
-        }
-
-        double currentWidth = SidebarPaneContainer.Width > 0 ? SidebarPaneContainer.Width : _savedSidebarWidth;
-        Windows.Foundation.Point pt = e.GetCurrentPoint(MainSplitView).Position;
-
-        // Zone A: [currentWidth - 8, currentWidth + 20] (28 DIPs straddling the visual border at X = currentWidth) -> immediate resize capture
-        if (pt.X >= currentWidth - 8.0 && pt.X <= currentWidth + 20.0)
-        {
-            _touchSplitterActivePointerId = e.Pointer.PointerId;
-            _touchSplitterPendingPointerId = null;
-            _touchSplitterStartX = pt.X;
-            _touchSplitterStartY = pt.Y;
-            _touchSplitterInitialWidth = currentWidth;
-            MainSplitView.CapturePointer(e.Pointer);
-            e.Handled = true;
-            return;
-        }
-
-        // Zone B: [currentWidth - 20, currentWidth - 8) -> directional disambiguation (promote to resize if dragged horizontally)
-        if (pt.X >= currentWidth - 20.0 && pt.X < currentWidth - 8.0)
-        {
-            _touchSplitterPendingPointerId = e.Pointer.PointerId;
-            _touchSplitterStartX = pt.X;
-            _touchSplitterStartY = pt.Y;
-            _touchSplitterInitialWidth = currentWidth;
-        }
-    }
-
-    private void OnMainSplitViewTouchSplitterPointerMoved(object sender, PointerRoutedEventArgs e)
-    {
-        if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse)
-        {
-            return;
-        }
-
-        uint pointerId = e.Pointer.PointerId;
-        if (_touchSplitterPendingPointerId == pointerId)
-        {
-            Windows.Foundation.Point pendingPt = e.GetCurrentPoint(MainSplitView).Position;
-            double dx = pendingPt.X - _touchSplitterStartX;
-            double dy = pendingPt.Y - _touchSplitterStartY;
-            if (Math.Abs(dx) > 5.0 || Math.Abs(dy) > 5.0)
-            {
-                _touchSplitterPendingPointerId = null;
-                if (Math.Abs(dx) > Math.Abs(dy))
-                {
-                    _touchSplitterActivePointerId = pointerId;
-                    MainSplitView.CapturePointer(e.Pointer);
-                }
-                else
-                {
-                    return;
-                }
-            }
-            else
-            {
-                return;
-            }
-        }
-
-        if (_touchSplitterActivePointerId != pointerId)
-        {
-            return;
-        }
-
-        Windows.Foundation.Point pt = e.GetCurrentPoint(MainSplitView).Position;
-        double targetWidth = Math.Clamp(_touchSplitterInitialWidth + (pt.X - _touchSplitterStartX), MinSidebarWidth, MaxSidebarWidth);
-        ApplySidebarWidthImmediate(targetWidth);
-        e.Handled = true;
-    }
-
-    private void OnMainSplitViewTouchSplitterPointerReleased(object sender, PointerRoutedEventArgs e)
-    {
-        uint pointerId = e.Pointer.PointerId;
-        if (_touchSplitterPendingPointerId == pointerId)
-        {
-            _touchSplitterPendingPointerId = null;
-        }
-
-        if (_touchSplitterActivePointerId == pointerId)
-        {
-            _touchSplitterActivePointerId = null;
-            MainSplitView.ReleasePointerCapture(e.Pointer);
-            e.Handled = true;
-        }
-    }
-
     private void OnSidebarSplitterDragDelta(object sender, DragDeltaEventArgs e)
     {
         double currentWidth = SidebarPaneContainer.Width > 0 ? SidebarPaneContainer.Width : _savedSidebarWidth;
         double newWidth = Math.Clamp(currentWidth + e.HorizontalChange, MinSidebarWidth, MaxSidebarWidth);
-        ApplySidebarWidthImmediate(newWidth);
-    }
-
-    private void ApplySidebarWidthImmediate(double newWidth)
-    {
         _savedSidebarWidth = newWidth;
         SidebarPaneContainer.Width = newWidth;
         ViewModel.SettingsService.Settings.SidebarWidth = newWidth;
@@ -805,6 +694,8 @@ public sealed partial class MainWindow : Window
                 docView.SetSidebarStateImmediate(true, newWidth);
             }
         }
+
+        UpdateSidebarClipGeometries();
     }
 
     private void OnMainContentContainerSizeChanged(object sender, SizeChangedEventArgs e)
@@ -1176,7 +1067,7 @@ public sealed partial class MainWindow : Window
                     _isInternalSidebarToggle = true;
                     try
                     {
-                        ViewModel.SetSidebarOpenInternal(false);
+                        ViewModel.IsSidebarOpen = false;
                     }
                     finally
                     {
@@ -1201,7 +1092,7 @@ public sealed partial class MainWindow : Window
                 _isInternalSidebarToggle = true;
                 try
                 {
-                    ViewModel.SetSidebarOpenInternal(true);
+                    ViewModel.IsSidebarOpen = true;
                 }
                 finally
                 {
