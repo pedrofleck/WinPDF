@@ -8,7 +8,7 @@
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <RootNamespace>WinPDF</RootNamespace>
     <AssemblyName>WinPDF</AssemblyName>
-    <Version>0.4.0-alpha4</Version>
+    <Version>0.4.1-alpha4</Version>
     <Product>WinPDF</Product>
     <AssemblyTitle>WinPDF</AssemblyTitle>
     <Description>Lightweight Fluent 2 PDF Reader</Description>
