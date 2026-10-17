@@ -24,6 +24,7 @@ public sealed partial class DocumentView : Page
 {
     private readonly HashSet<PdfPageCanvas> _activeCanvases = new();
     private readonly DispatcherTimer _presentationHideTimer = new() { Interval = TimeSpan.FromSeconds(3) };
+    private readonly DispatcherTimer _topNotificationTimer = new() { Interval = TimeSpan.FromSeconds(5) };
     private CancellationTokenSource? _zoomDebounceCts;
     private DocumentViewModel? _observedDocument;
     private bool _isUpdatingPageFromScroll;
@@ -113,6 +114,7 @@ public sealed partial class DocumentView : Page
         ContinuousScrollViewer.SizeChanged += OnScrollViewerSizeChanged;
 
         _presentationHideTimer.Tick += OnPresentationHideTimerTick;
+        _topNotificationTimer.Tick += OnTopNotificationTimerTick;
 
         PdfPageCanvas.CanvasLoaded += OnCanvasLoaded;
         PdfPageCanvas.CanvasUnloaded += OnCanvasUnloaded;
@@ -147,10 +149,20 @@ public sealed partial class DocumentView : Page
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         ViewModel.SearchFocusRequested -= OnSearchFocusRequested;
         ViewModel.SearchFocusRequested += OnSearchFocusRequested;
+        ViewModel.NotificationRequested -= OnNotificationRequested;
+        ViewModel.NotificationRequested += OnNotificationRequested;
+        ViewModel.DefaultZoomPreferenceChanged -= OnDefaultZoomPreferenceChanged;
+        ViewModel.DefaultZoomPreferenceChanged += OnDefaultZoomPreferenceChanged;
         SubscribeToDocument(ViewModel.CurrentDocument);
+
+        if (ViewModel.TryConsumePendingNotification(out string title, out string message))
+        {
+            ShowTopNotification(title, message);
+        }
 
         if (ViewModel.CurrentDocument is not null)
         {
+            ApplyInitialZoomForDocument();
             UpdateViewportPages(ViewModel.CurrentDocument.ZoomFactor);
         }
     }
@@ -181,9 +193,13 @@ public sealed partial class DocumentView : Page
     {
         _presentationHideTimer.Stop();
         _presentationHideTimer.Tick -= OnPresentationHideTimerTick;
+        _topNotificationTimer.Stop();
+        _topNotificationTimer.Tick -= OnTopNotificationTimerTick;
 
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.SearchFocusRequested -= OnSearchFocusRequested;
+        ViewModel.NotificationRequested -= OnNotificationRequested;
+        ViewModel.DefaultZoomPreferenceChanged -= OnDefaultZoomPreferenceChanged;
         _transitionStoryboard?.Stop();
         _searchBarStoryboard?.Stop();
         UnsubscribeFromDocument();
@@ -304,9 +320,19 @@ public sealed partial class DocumentView : Page
             SubscribeToDocument(ViewModel.CurrentDocument);
             if (ViewModel.CurrentDocument is not null)
             {
-                ScrollToPage(ViewModel.CurrentDocument.CurrentPageIndex);
+                ApplyInitialZoomForDocument();
+                ScrollToPage(ViewModel.CurrentDocument.CurrentPageIndex, allowUnclampedOffset: true);
                 PlayDocumentOpenTransitionAnimation();
-                DispatcherQueue.TryEnqueue(ReturnFocusToViewer);
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    if (ViewModel.CurrentDocument is not null)
+                    {
+                        ApplyInitialZoomForDocument();
+                        ScrollToPage(ViewModel.CurrentDocument.CurrentPageIndex, allowUnclampedOffset: true);
+                    }
+
+                    ReturnFocusToViewer();
+                });
             }
             else
             {
@@ -1352,6 +1378,85 @@ public sealed partial class DocumentView : Page
 
     private void OnDocumentPointerMoved(object sender, PointerRoutedEventArgs e)
     {
+    }
+
+    private void ApplyInitialZoomForDocument()
+    {
+        if (ViewModel.CurrentDocument is null)
+        {
+            return;
+        }
+
+        ApplyZoomPreferenceByIndex(ViewModel.DefaultZoomIndex);
+    }
+
+    private void OnDefaultZoomPreferenceChanged(int zoomIndex)
+    {
+        if (ViewModel.CurrentDocument is not null && !ViewModel.IsPresentationMode)
+        {
+            ApplyZoomPreferenceByIndex(zoomIndex);
+        }
+    }
+
+    private void ApplyZoomPreferenceByIndex(int zoomIndex)
+    {
+        switch (zoomIndex)
+        {
+            case 0:
+                ExecuteFitHorizontal(force: true);
+                break;
+            case 1:
+                ExecuteFitVertical(force: true);
+                break;
+            default:
+                _isFittedVertically = false;
+                ApplyZoomAroundCenter(1.0f);
+                break;
+        }
+    }
+
+    private void OnNotificationRequested(string title, string message)
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (ViewModel.TryConsumePendingNotification(out string consumedTitle, out string consumedMessage))
+            {
+                ShowTopNotification(consumedTitle, consumedMessage);
+            }
+            else
+            {
+                ShowTopNotification(title, message);
+            }
+        });
+    }
+
+    private void ShowTopNotification(string title, string message)
+    {
+        if (TopNotificationInfoBar is null)
+        {
+            return;
+        }
+
+        _topNotificationTimer.Stop();
+        TopNotificationInfoBar.Title = title;
+        TopNotificationInfoBar.Message = message;
+        TopNotificationInfoBar.IsOpen = true;
+        _topNotificationTimer.Start();
+    }
+
+    private void OnTopNotificationTimerTick(object? sender, object e)
+    {
+        _topNotificationTimer.Stop();
+        if (TopNotificationInfoBar is not null)
+        {
+            TopNotificationInfoBar.IsOpen = false;
+        }
+    }
+
+    private void OnTopNotificationInfoBarCloseButtonClick(InfoBar sender, object args)
+    {
+        _topNotificationTimer.Stop();
+        TopNotificationInfoBar.IsOpen = false;
     }
 
     private void OnPresentationHideTimerTick(object? sender, object e)

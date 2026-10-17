@@ -66,6 +66,18 @@
             </Button>
         </StackPanel>
 
+        <!-- Aviso Padronizado Não Intrusivo no Topo da Tela (Ex.: Último Documento Não Encontrado - 5s) -->
+        <InfoBar
+            x:Name="TopNotificationInfoBar"
+            IsOpen="False"
+            IsIconVisible="False"
+            IsClosable="True"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Top"
+            Margin="0,24,0,0"
+            Canvas.ZIndex="110"
+            CloseButtonClick="OnTopNotificationInfoBarCloseButtonClick" />
+
         <!-- Área de Exibição do Documento -->
         <Grid
             x:Name="DocumentAreaGrid"

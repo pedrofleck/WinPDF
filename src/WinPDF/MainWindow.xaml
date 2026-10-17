@@ -423,7 +423,11 @@
             IsPaneOpen="{x:Bind converters:UiHelpers.IsSidebarOpenWithDoc(ViewModel.HasDocument, ViewModel.IsSidebarOpen), Mode=OneWay}"
             OpenPaneLength="260"
             PaneBackground="Transparent"
-            PanePlacement="Left">
+            PanePlacement="Left"
+            RenderTransformOrigin="0.5,0.5">
+            <SplitView.RenderTransform>
+                <CompositeTransform x:Name="MainSplitViewTransform" />
+            </SplitView.RenderTransform>
             <SplitView.Pane>
                 <Grid Background="Transparent">
                     <Grid.ColumnDefinitions>
@@ -659,6 +663,11 @@
             Grid.Row="1"
             Background="Transparent"
             IsNavigationStackEnabled="False"
-            Visibility="Collapsed" />
+            RenderTransformOrigin="0.5,0.5"
+            Visibility="Collapsed">
+            <Frame.RenderTransform>
+                <CompositeTransform x:Name="SettingsFrameTransform" />
+            </Frame.RenderTransform>
+        </Frame>
     </Grid>
 </Window>

@@ -3,15 +3,18 @@ using System.Runtime.InteropServices;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WinPDF.Models;
+using WinPDF.Services;
 
 namespace WinPDF.ViewModels;
 
 /// <summary>
-/// View model managing the full-page settings categories, preferences, and app information.
+/// View model managing the full-page settings categories, persisted preferences, and app information.
 /// </summary>
 public sealed partial class SettingsViewModel : ObservableObject
 {
     private readonly ShellViewModel _shellViewModel;
+    private readonly ISettingsService _settingsService;
+    private readonly bool _isInitializing;
 
     /// <summary>
     /// Gets the shell view model for root window and document integration.
@@ -74,6 +77,15 @@ public sealed partial class SettingsViewModel : ObservableObject
             if (_defaultViewMode != value)
             {
                 _defaultViewMode = value;
+                if (!_isInitializing)
+                {
+                    _settingsService.Update(s => s.DefaultViewMode = value);
+                    if (!_shellViewModel.IsPresentationMode)
+                    {
+                        _shellViewModel.SetViewMode(value);
+                    }
+                }
+
                 OnPropertyChanged();
                 OnPropertyChanged(nameof(ViewModeIndex));
             }
@@ -107,6 +119,42 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     public partial int DefaultZoomIndex { get; set; }
 
+    partial void OnDefaultZoomIndexChanged(int value)
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        int clamped = Math.Clamp(value, 0, 2);
+        _settingsService.Update(s => s.DefaultZoomIndex = clamped);
+        _shellViewModel.NotifyDefaultZoomPreferenceChanged(clamped);
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the last opened PDF document should be reopened on startup.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool ReopenLastDocument { get; set; }
+
+    partial void OnReopenLastDocumentChanged(bool value)
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        _settingsService.Update(s =>
+        {
+            s.ReopenLastDocument = value;
+            if (value && _shellViewModel.CurrentDocument is { } doc && !string.IsNullOrWhiteSpace(doc.FilePath))
+            {
+                s.LastOpenedFilePath = doc.FilePath;
+                s.LastOpenedPageIndex = doc.CurrentPageIndex;
+            }
+        });
+    }
+
     /// <summary>
     /// Gets or sets a value indicating whether touch drawing is active by default.
     /// </summary>
@@ -129,7 +177,7 @@ public sealed partial class SettingsViewModel : ObservableObject
     public string AppVersion => typeof(SettingsViewModel).Assembly
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
         .InformationalVersion
-        .Split('+')[0] ?? "0.3.0-alpha.3";
+        .Split('+')[0] ?? "0.4.0-alpha4";
 
     /// <summary>
     /// Gets the runtime processor architecture description.
@@ -140,9 +188,18 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// Initializes a new instance of the <see cref="SettingsViewModel"/> class.
     /// </summary>
     /// <param name="shellViewModel">The parent shell view model.</param>
-    public SettingsViewModel(ShellViewModel shellViewModel)
+    /// <param name="settingsService">The disk settings persistence service.</param>
+    public SettingsViewModel(ShellViewModel shellViewModel, ISettingsService settingsService)
     {
         _shellViewModel = shellViewModel;
+        _settingsService = settingsService;
+
+        _isInitializing = true;
+        _defaultViewMode = _settingsService.Settings.DefaultViewMode;
+        DefaultZoomIndex = Math.Clamp(_settingsService.Settings.DefaultZoomIndex, 0, 2);
+        ReopenLastDocument = _settingsService.Settings.ReopenLastDocument;
+        _isInitializing = false;
+
         _shellViewModel.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(ShellViewModel.CurrentTheme))

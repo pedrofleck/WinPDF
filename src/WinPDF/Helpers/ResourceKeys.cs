@@ -186,4 +186,10 @@ public static class ResourceKeys
 
     /// <summary>Floating exit presentation button text.</summary>
     public const string PresentationExitButton = "Presentation_ExitButton";
+
+    /// <summary>Title for the top InfoBar notification when the last document is missing on startup.</summary>
+    public const string MissingLastDocInfoBarTitle = "MissingLastDocInfoBar_Title";
+
+    /// <summary>Message format for the top InfoBar notification when the last document is missing on startup. {0} = file name.</summary>
+    public const string MissingLastDocInfoBarMessageFormat = "MissingLastDocInfoBar_MessageFormat";
 }

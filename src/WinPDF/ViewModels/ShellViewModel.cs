@@ -19,6 +19,30 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly IPdfService _pdfService;
     private readonly TileCache _tileCache;
     private readonly IWindowContext _windowContext;
+    private readonly ISettingsService _settingsService;
+    private readonly bool _isInitializingSettings;
+    private string? _pendingNotificationTitle;
+    private string? _pendingNotificationMessage;
+
+    /// <summary>
+    /// Gets the application settings persistence service.
+    /// </summary>
+    public ISettingsService SettingsService => _settingsService;
+
+    /// <summary>
+    /// Gets the persisted default zoom option index (0: Fit Width, 1: Fit Page, 2: 100%).
+    /// </summary>
+    public int DefaultZoomIndex => _settingsService.Settings.DefaultZoomIndex;
+
+    /// <summary>
+    /// Event raised when a non-intrusive top InfoBar notification should be shown.
+    /// </summary>
+    public event Action<string, string>? NotificationRequested;
+
+    /// <summary>
+    /// Event raised when the user changes the default zoom preference in Settings.
+    /// </summary>
+    public event Action<int>? DefaultZoomPreferenceChanged;
 
     /// <summary>
     /// Gets or sets a value indicating whether the navigation sidebar pane is visible.
@@ -35,6 +59,10 @@ public sealed partial class ShellViewModel : ObservableObject
     partial void OnIsSidebarOpenChanged(bool value)
     {
         CurrentDocument?.SetThumbnailsActive(!IsSettingsOpen && value && SidebarTab == SidebarTab.Thumbnails);
+        if (!_isInitializingSettings && !IsPresentationMode && !IsFullScreen)
+        {
+            _settingsService.Update(s => s.IsSidebarOpen = value);
+        }
     }
 
     partial void OnSidebarTabChanged(SidebarTab value)
@@ -72,6 +100,14 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsTouchDrawingEnabled { get; set; }
 
+    partial void OnIsTouchDrawingEnabledChanged(bool value)
+    {
+        if (!_isInitializingSettings)
+        {
+            _settingsService.Update(s => s.DefaultTouchDrawing = value);
+        }
+    }
+
     /// <summary>
     /// Gets or sets a value indicating whether the floating annotation toolbar is expanded.
     /// </summary>
@@ -94,6 +130,14 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     [ObservableProperty]
     public partial AppThemePreference CurrentTheme { get; set; } = AppThemePreference.System;
+
+    partial void OnCurrentThemeChanged(AppThemePreference value)
+    {
+        if (!_isInitializingSettings)
+        {
+            _settingsService.Update(s => s.Theme = value);
+        }
+    }
 
     /// <summary>
     /// Gets or sets a value indicating whether document night / inverted reading mode is active.
@@ -267,20 +311,75 @@ public sealed partial class ShellViewModel : ObservableObject
     /// <param name="pdfService">PDF rendering and document engine.</param>
     /// <param name="tileCache">Bitmap and tile cache.</param>
     /// <param name="windowContext">Window context providing UI dispatcher queue access.</param>
+    /// <param name="settingsService">Settings persistence service.</param>
     public ShellViewModel(
         IFilePickerService filePickerService,
         IDialogService dialogService,
         IPdfService pdfService,
         TileCache tileCache,
-        IWindowContext windowContext)
+        IWindowContext windowContext,
+        ISettingsService settingsService)
     {
         _filePickerService = filePickerService;
         _dialogService = dialogService;
         _pdfService = pdfService;
         _tileCache = tileCache;
         _windowContext = windowContext;
+        _settingsService = settingsService;
+
+        _isInitializingSettings = true;
+        CurrentTheme = _settingsService.Settings.Theme;
+        ViewMode = _settingsService.Settings.DefaultViewMode;
+        IsTouchDrawingEnabled = _settingsService.Settings.DefaultTouchDrawing;
+        IsSidebarOpen = _settingsService.Settings.IsSidebarOpen;
+        _isInitializingSettings = false;
+
         Title = ResourceStrings.Get(ResourceKeys.AppDisplayName);
         UpdateFormattedStrings();
+    }
+
+    /// <summary>
+    /// Queues and raises a non-intrusive top InfoBar notification when the last opened PDF file is missing on startup.
+    /// </summary>
+    /// <param name="fileName">The missing file name to display in the notification message.</param>
+    public void ShowMissingLastDocumentNotification(string fileName)
+    {
+        string title = ResourceStrings.Get(ResourceKeys.MissingLastDocInfoBarTitle);
+        string message = ResourceStrings.Format(ResourceKeys.MissingLastDocInfoBarMessageFormat, fileName);
+        _pendingNotificationTitle = title;
+        _pendingNotificationMessage = message;
+        NotificationRequested?.Invoke(title, message);
+    }
+
+    /// <summary>
+    /// Attempts to consume any pending startup notification so it is displayed once when the document view loads.
+    /// </summary>
+    /// <param name="title">The notification title.</param>
+    /// <param name="message">The notification body text.</param>
+    /// <returns><c>true</c> if a pending notification was consumed; otherwise, <c>false</c>.</returns>
+    public bool TryConsumePendingNotification(out string title, out string message)
+    {
+        if (!string.IsNullOrEmpty(_pendingNotificationMessage))
+        {
+            title = _pendingNotificationTitle ?? string.Empty;
+            message = _pendingNotificationMessage;
+            _pendingNotificationTitle = null;
+            _pendingNotificationMessage = null;
+            return true;
+        }
+
+        title = string.Empty;
+        message = string.Empty;
+        return false;
+    }
+
+    /// <summary>
+    /// Notifies listeners that the default zoom preference changed in Settings.
+    /// </summary>
+    /// <param name="zoomIndex">The new default zoom index (0: Fit Width, 1: Fit Page, 2: 100%).</param>
+    public void NotifyDefaultZoomPreferenceChanged(int zoomIndex)
+    {
+        DefaultZoomPreferenceChanged?.Invoke(zoomIndex);
     }
 
     partial void OnCurrentDocumentChanged(DocumentViewModel? oldValue, DocumentViewModel? newValue)
@@ -333,6 +432,13 @@ public sealed partial class ShellViewModel : ObservableObject
             if (CurrentDocument is not null)
             {
                 IsDualPage = CurrentDocument.IsDoublePage;
+            }
+        }
+        else if (e.PropertyName == nameof(DocumentViewModel.CurrentPageIndex))
+        {
+            if (CurrentDocument is not null)
+            {
+                _settingsService.Settings.LastOpenedPageIndex = CurrentDocument.CurrentPageIndex;
             }
         }
     }
@@ -388,15 +494,57 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     /// <param name="filePath">Absolute path to the PDF file.</param>
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
-    public async Task OpenFilePathAsync(string filePath, CancellationToken cancellationToken = default)
+    /// <param name="isStartupSessionRestore">Whether this open request is an automatic startup restore of the last document.</param>
+    /// <param name="initialPageIndex">Optional initial zero-based page index to restore.</param>
+    public async Task OpenFilePathAsync(
+        string filePath,
+        CancellationToken cancellationToken = default,
+        bool isStartupSessionRestore = false,
+        int initialPageIndex = 0)
     {
         try
         {
+            if (isStartupSessionRestore && !System.IO.File.Exists(filePath))
+            {
+                string missingName = System.IO.Path.GetFileName(filePath);
+                if (string.IsNullOrWhiteSpace(missingName))
+                {
+                    missingName = filePath;
+                }
+
+                _settingsService.Update(s =>
+                {
+                    s.LastOpenedFilePath = null;
+                    s.LastOpenedPageIndex = 0;
+                });
+
+                if (_windowContext.DispatcherQueue?.HasThreadAccess == true)
+                {
+                    ShowMissingLastDocumentNotification(missingName);
+                }
+                else
+                {
+                    _windowContext.DispatcherQueue?.TryEnqueue(() => ShowMissingLastDocumentNotification(missingName));
+                }
+
+                return;
+            }
+
             PdfDocumentInfo docInfo = await _pdfService.OpenDocumentAsync(filePath, null, cancellationToken);
             var outline = await _pdfService.GetOutlineAsync(docInfo.DocumentId, cancellationToken);
             var attachments = await _pdfService.GetAttachmentNamesAsync(docInfo.DocumentId, cancellationToken);
 
             DocumentViewModel doc = new(_pdfService, _tileCache, docInfo, outline, attachments);
+            if (initialPageIndex > 0 && initialPageIndex < doc.PageCount)
+            {
+                doc.GoToPage(initialPageIndex);
+            }
+
+            _settingsService.Update(s =>
+            {
+                s.LastOpenedFilePath = doc.FilePath;
+                s.LastOpenedPageIndex = doc.CurrentPageIndex;
+            });
 
             if (_windowContext.DispatcherQueue.HasThreadAccess)
             {
@@ -409,6 +557,18 @@ public sealed partial class ShellViewModel : ObservableObject
         }
         catch (PdfiumException ex)
         {
+            if (isStartupSessionRestore && ex.ErrorCode == PdfiumErrorCode.File)
+            {
+                string missingName = System.IO.Path.GetFileName(filePath);
+                _settingsService.Update(s =>
+                {
+                    s.LastOpenedFilePath = null;
+                    s.LastOpenedPageIndex = 0;
+                });
+                ShowMissingLastDocumentNotification(missingName);
+                return;
+            }
+
             string errorReason = ex.ErrorCode switch
             {
                 PdfiumErrorCode.Password => ResourceStrings.Get(ResourceKeys.ErrorInvalidPassword),
@@ -426,6 +586,18 @@ public sealed partial class ShellViewModel : ObservableObject
         }
         catch (Exception ex)
         {
+            if (isStartupSessionRestore)
+            {
+                string missingName = System.IO.Path.GetFileName(filePath);
+                _settingsService.Update(s =>
+                {
+                    s.LastOpenedFilePath = null;
+                    s.LastOpenedPageIndex = 0;
+                });
+                ShowMissingLastDocumentNotification(missingName);
+                return;
+            }
+
             string title = ResourceStrings.Get(ResourceKeys.DialogOpenErrorTitle);
             string content = ResourceStrings.Format(ResourceKeys.DialogOpenErrorContent, System.IO.Path.GetFileName(filePath), ex.Message);
             string close = ResourceStrings.Get(ResourceKeys.DialogClose);
@@ -478,6 +650,11 @@ public sealed partial class ShellViewModel : ObservableObject
             CurrentDocument.FilePath = targetPath;
             CurrentDocument.FileName = System.IO.Path.GetFileName(targetPath);
             CurrentDocument.HasUnsavedChanges = false;
+            _settingsService.Update(s =>
+            {
+                s.LastOpenedFilePath = targetPath;
+                s.LastOpenedPageIndex = CurrentDocument.CurrentPageIndex;
+            });
         }
     }
 

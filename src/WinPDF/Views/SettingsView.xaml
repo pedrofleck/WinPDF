@@ -170,6 +170,38 @@
                             </ComboBox>
                         </Grid>
                     </Border>
+
+                    <!-- Cartão: Reabrir último documento ao iniciar -->
+                    <Border
+                        Padding="16"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
+                            <FontIcon
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                FontSize="20"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Glyph="&#xE81C;" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                                <TextBlock
+                                    x:Uid="Settings_Viewing_ReopenHeader"
+                                    FontWeight="SemiBold"
+                                    Style="{StaticResource BodyTextBlockStyle}" />
+                                <TextBlock
+                                    x:Uid="Settings_Viewing_ReopenDescription"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ToggleSwitch
+                                Grid.Column="2"
+                                VerticalAlignment="Center"
+                                IsOn="{x:Bind ViewModel.ReopenLastDocument, Mode=TwoWay}" />
+                        </Grid>
+                    </Border>
                 </StackPanel>
 
                 <!-- ========================================================= -->

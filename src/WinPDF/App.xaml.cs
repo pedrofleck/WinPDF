@@ -113,7 +113,8 @@ public partial class App : Application
     {
         ServiceCollection services = new();
 
-        // UI & Window Context Services
+        // UI, Configuration & Window Context Services
+        services.AddSingleton<ISettingsService, SettingsService>();
         services.AddSingleton<IWindowContext, WindowContext>();
         services.AddSingleton<IFilePickerService, FilePickerService>();
         services.AddSingleton<IDialogService, DialogService>();
@@ -199,6 +200,40 @@ public partial class App : Application
         {
             shellViewModel.IsInitialDocumentOpening = true;
             _ = shellViewModel.OpenFilePathAsync(startupPdf);
+        }
+        else if (!isAutoTest)
+        {
+            ISettingsService settingsService = _services.GetRequiredService<ISettingsService>();
+            if (settingsService.Settings.ReopenLastDocument &&
+                !string.IsNullOrWhiteSpace(settingsService.Settings.LastOpenedFilePath))
+            {
+                string lastPath = settingsService.Settings.LastOpenedFilePath;
+                if (System.IO.File.Exists(lastPath))
+                {
+                    int lastPage = Math.Max(0, settingsService.Settings.LastOpenedPageIndex);
+                    shellViewModel.IsInitialDocumentOpening = true;
+                    _ = shellViewModel.OpenFilePathAsync(
+                        lastPath,
+                        default,
+                        isStartupSessionRestore: true,
+                        initialPageIndex: lastPage);
+                }
+                else
+                {
+                    string missingFileName = System.IO.Path.GetFileName(lastPath);
+                    if (string.IsNullOrWhiteSpace(missingFileName))
+                    {
+                        missingFileName = lastPath;
+                    }
+
+                    settingsService.Update(s =>
+                    {
+                        s.LastOpenedFilePath = null;
+                        s.LastOpenedPageIndex = 0;
+                    });
+                    shellViewModel.ShowMissingLastDocumentNotification(missingFileName);
+                }
+            }
         }
 
         _mainWindow = new MainWindow();

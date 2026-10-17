@@ -115,19 +115,19 @@ public static class UiHelpers
     /// Computes the corner radius for the main content container creating the curved junction with the sidebar.
     /// </summary>
     public static CornerRadius MainContainerCornerRadius(bool hasDoc, bool isSidebarOpen, bool isSettingsOpen) =>
-        (hasDoc && isSidebarOpen && !isSettingsOpen) ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
+        (hasDoc && isSidebarOpen) ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
 
     /// <summary>
     /// Computes the border thickness for the main content container.
     /// </summary>
     public static Thickness MainContainerBorderThickness(bool hasDoc, bool isSidebarOpen, bool isSettingsOpen) =>
-        (!hasDoc || isSettingsOpen) ? new Thickness(0) : (isSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0));
+        !hasDoc ? new Thickness(0) : (isSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0));
 
     /// <summary>
     /// Returns the background brush for the main content container based on whether a document is loaded and settings state.
     /// </summary>
     public static Microsoft.UI.Xaml.Media.Brush MainContainerBackground(bool hasDoc, bool isSettingsOpen) =>
-        (hasDoc && !isSettingsOpen)
+        hasDoc
             ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["LayerFillColorDefaultBrush"]
             : new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
 
@@ -135,7 +135,7 @@ public static class UiHelpers
     /// Returns the border brush for the main content container based on whether a document is loaded and settings state.
     /// </summary>
     public static Microsoft.UI.Xaml.Media.Brush MainContainerBorderBrush(bool hasDoc, bool isSettingsOpen) =>
-        (hasDoc && !isSettingsOpen)
+        hasDoc
             ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"]
             : new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
 
