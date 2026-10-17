@@ -32,6 +32,11 @@ public sealed partial class MainWindow : Window
 
     private readonly Windows.UI.ViewManagement.UISettings _uiSettings = new();
     private double _savedSidebarWidth = DefaultSidebarWidth;
+    private uint? _touchSplitterActivePointerId;
+    private uint? _touchSplitterPendingPointerId;
+    private double _touchSplitterStartX;
+    private double _touchSplitterStartY;
+    private double _touchSplitterInitialWidth;
     private bool _wasSidebarClosedByNarrowWindow;
     private bool _isInternalSidebarToggle;
     private int _previousSidebarIndex = -1;
@@ -112,6 +117,7 @@ public sealed partial class MainWindow : Window
         SizeChanged += OnMainWindowSizeChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         RegisterTitleBarAnimatedIconPointerHandlers();
+        RegisterSidebarTouchAndInertiaHandlers();
 
         _savedSidebarWidth = Math.Clamp(ViewModel.SettingsService.Settings.SidebarWidth, MinSidebarWidth, MaxSidebarWidth);
         SidebarPaneContainer.Width = _savedSidebarWidth;
@@ -617,10 +623,140 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void RegisterSidebarTouchAndInertiaHandlers()
+    {
+        // Wide touch-only resize target around the sidebar border (leaves Mouse 100% on the 6 DIP SplitterContainer)
+        MainSplitView.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnMainSplitViewTouchSplitterPointerPressed), handledEventsToo: true);
+        MainSplitView.AddHandler(UIElement.PointerMovedEvent, new PointerEventHandler(OnMainSplitViewTouchSplitterPointerMoved), handledEventsToo: true);
+        MainSplitView.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(OnMainSplitViewTouchSplitterPointerReleased), handledEventsToo: true);
+        MainSplitView.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler(OnMainSplitViewTouchSplitterPointerReleased), handledEventsToo: true);
+        MainSplitView.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(OnMainSplitViewTouchSplitterPointerReleased), handledEventsToo: true);
+
+        // Release any active touchpad/document scroll inertia when the user interacts with the sidebar
+        SidebarPaneContainer.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler(OnSidebarPanePointerEnteredOrInteracted), handledEventsToo: true);
+        SidebarPaneContainer.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnSidebarPanePointerEnteredOrInteracted), handledEventsToo: true);
+        SidebarPaneContainer.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(OnSidebarPanePointerEnteredOrInteracted), handledEventsToo: true);
+    }
+
+    private void OnSidebarPanePointerEnteredOrInteracted(object sender, PointerRoutedEventArgs e)
+    {
+        if (SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage &&
+            (e.Pointer.IsInContact || e.GetCurrentPoint(SidebarPaneContainer).Properties.MouseWheelDelta != 0))
+        {
+            thumbPage.ActivateManualSidebarScrollLock();
+        }
+
+        if (MainContentFrame.Content is DocumentView docView)
+        {
+            docView.StopDocumentInertiaIfActive();
+        }
+    }
+
+    private void OnMainSplitViewTouchSplitterPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse ||
+            !ViewModel.HasDocument ||
+            !ViewModel.IsSidebarOpen ||
+            ViewModel.IsSettingsOpen ||
+            ViewModel.IsPresentationMode)
+        {
+            return;
+        }
+
+        double currentWidth = SidebarPaneContainer.Width > 0 ? SidebarPaneContainer.Width : _savedSidebarWidth;
+        Windows.Foundation.Point pt = e.GetCurrentPoint(MainSplitView).Position;
+
+        // Zone A: [currentWidth - 8, currentWidth + 20] (28 DIPs straddling the visual border at X = currentWidth) -> immediate resize capture
+        if (pt.X >= currentWidth - 8.0 && pt.X <= currentWidth + 20.0)
+        {
+            _touchSplitterActivePointerId = e.Pointer.PointerId;
+            _touchSplitterPendingPointerId = null;
+            _touchSplitterStartX = pt.X;
+            _touchSplitterStartY = pt.Y;
+            _touchSplitterInitialWidth = currentWidth;
+            MainSplitView.CapturePointer(e.Pointer);
+            e.Handled = true;
+            return;
+        }
+
+        // Zone B: [currentWidth - 20, currentWidth - 8) -> directional disambiguation (promote to resize if dragged horizontally)
+        if (pt.X >= currentWidth - 20.0 && pt.X < currentWidth - 8.0)
+        {
+            _touchSplitterPendingPointerId = e.Pointer.PointerId;
+            _touchSplitterStartX = pt.X;
+            _touchSplitterStartY = pt.Y;
+            _touchSplitterInitialWidth = currentWidth;
+        }
+    }
+
+    private void OnMainSplitViewTouchSplitterPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse)
+        {
+            return;
+        }
+
+        uint pointerId = e.Pointer.PointerId;
+        if (_touchSplitterPendingPointerId == pointerId)
+        {
+            Windows.Foundation.Point pendingPt = e.GetCurrentPoint(MainSplitView).Position;
+            double dx = pendingPt.X - _touchSplitterStartX;
+            double dy = pendingPt.Y - _touchSplitterStartY;
+            if (Math.Abs(dx) > 5.0 || Math.Abs(dy) > 5.0)
+            {
+                _touchSplitterPendingPointerId = null;
+                if (Math.Abs(dx) > Math.Abs(dy))
+                {
+                    _touchSplitterActivePointerId = pointerId;
+                    MainSplitView.CapturePointer(e.Pointer);
+                }
+                else
+                {
+                    return;
+                }
+            }
+            else
+            {
+                return;
+            }
+        }
+
+        if (_touchSplitterActivePointerId != pointerId)
+        {
+            return;
+        }
+
+        Windows.Foundation.Point pt = e.GetCurrentPoint(MainSplitView).Position;
+        double targetWidth = Math.Clamp(_touchSplitterInitialWidth + (pt.X - _touchSplitterStartX), MinSidebarWidth, MaxSidebarWidth);
+        ApplySidebarWidthImmediate(targetWidth);
+        e.Handled = true;
+    }
+
+    private void OnMainSplitViewTouchSplitterPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        uint pointerId = e.Pointer.PointerId;
+        if (_touchSplitterPendingPointerId == pointerId)
+        {
+            _touchSplitterPendingPointerId = null;
+        }
+
+        if (_touchSplitterActivePointerId == pointerId)
+        {
+            _touchSplitterActivePointerId = null;
+            MainSplitView.ReleasePointerCapture(e.Pointer);
+            e.Handled = true;
+        }
+    }
+
     private void OnSidebarSplitterDragDelta(object sender, DragDeltaEventArgs e)
     {
         double currentWidth = SidebarPaneContainer.Width > 0 ? SidebarPaneContainer.Width : _savedSidebarWidth;
         double newWidth = Math.Clamp(currentWidth + e.HorizontalChange, MinSidebarWidth, MaxSidebarWidth);
+        ApplySidebarWidthImmediate(newWidth);
+    }
+
+    private void ApplySidebarWidthImmediate(double newWidth)
+    {
         _savedSidebarWidth = newWidth;
         SidebarPaneContainer.Width = newWidth;
         ViewModel.SettingsService.Settings.SidebarWidth = newWidth;
