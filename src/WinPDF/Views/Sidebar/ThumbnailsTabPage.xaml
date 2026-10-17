@@ -41,7 +41,6 @@
                 <ItemsRepeater.ItemTemplate>
                     <DataTemplate x:DataType="vm:ThumbnailItemViewModel">
                         <StackPanel
-                            DataContext="{x:Bind}"
                             Spacing="4"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center"

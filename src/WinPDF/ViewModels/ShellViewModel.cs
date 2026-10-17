@@ -34,12 +34,12 @@ public sealed partial class ShellViewModel : ObservableObject
 
     partial void OnIsSidebarOpenChanged(bool value)
     {
-        CurrentDocument?.SetThumbnailsActive(value && SidebarTab == SidebarTab.Thumbnails);
+        CurrentDocument?.SetThumbnailsActive(!IsSettingsOpen && value && SidebarTab == SidebarTab.Thumbnails);
     }
 
     partial void OnSidebarTabChanged(SidebarTab value)
     {
-        CurrentDocument?.SetThumbnailsActive(IsSidebarOpen && value == SidebarTab.Thumbnails);
+        CurrentDocument?.SetThumbnailsActive(!IsSettingsOpen && IsSidebarOpen && value == SidebarTab.Thumbnails);
     }
 
     /// <summary>
@@ -125,6 +125,11 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsSettingsOpen { get; set; }
 
+    partial void OnIsSettingsOpenChanged(bool value)
+    {
+        CurrentDocument?.SetThumbnailsActive(!value && IsSidebarOpen && SidebarTab == SidebarTab.Thumbnails);
+    }
+
 
     /// <summary>
     /// Gets or sets a value indicating whether dual page mode is enabled.
@@ -203,7 +208,16 @@ public sealed partial class ShellViewModel : ObservableObject
         }
     }
 
+    private bool _hasSavedPresentationState;
     private bool _sidebarOpenBeforePresentation;
+    private ViewMode _viewModeBeforePresentation = ViewMode.Continuous;
+    private bool _dualPageBeforePresentation;
+    private double _zoomBeforePresentation = 1.0;
+
+    /// <summary>
+    /// Gets the zoom factor captured right before entering presentation mode.
+    /// </summary>
+    public double ZoomBeforePresentation => _zoomBeforePresentation;
 
     /// <summary>
     /// Gets or sets a value indicating whether slide presentation mode is active (F5).
@@ -218,10 +232,30 @@ public sealed partial class ShellViewModel : ObservableObject
             CurrentDocument.IsPresentationMode = value;
         }
 
-        if (!value && _sidebarOpenBeforePresentation)
+        if (!value && _hasSavedPresentationState)
         {
-            IsSidebarOpen = true;
-            _sidebarOpenBeforePresentation = false;
+            _hasSavedPresentationState = false;
+            int activePage = CurrentDocument?.CurrentPageIndex ?? 0;
+
+            if (CurrentDocument is not null)
+            {
+                IsDualPage = _dualPageBeforePresentation;
+                CurrentDocument.IsDoublePage = _dualPageBeforePresentation;
+                bool restoreContinuous = _viewModeBeforePresentation == ViewMode.Continuous;
+                ViewMode = _viewModeBeforePresentation;
+                CurrentDocument.IsContinuous = restoreContinuous;
+                CurrentDocument.GoToPage(activePage);
+                if (_zoomBeforePresentation > 0.05)
+                {
+                    CurrentDocument.ZoomFactor = _zoomBeforePresentation;
+                }
+            }
+
+            if (_sidebarOpenBeforePresentation)
+            {
+                IsSidebarOpen = true;
+                _sidebarOpenBeforePresentation = false;
+            }
         }
     }
 
@@ -497,15 +531,25 @@ public sealed partial class ShellViewModel : ObservableObject
             return;
         }
 
-        _sidebarOpenBeforePresentation = IsSidebarOpen;
+        if (!IsPresentationMode)
+        {
+            _hasSavedPresentationState = true;
+            _sidebarOpenBeforePresentation = IsSidebarOpen;
+            _viewModeBeforePresentation = ViewMode;
+            _dualPageBeforePresentation = IsDualPage;
+            _zoomBeforePresentation = CurrentDocument.ZoomFactor > 0.05 ? CurrentDocument.ZoomFactor : 1.0;
+        }
+
+        int preservedPage = CurrentDocument.CurrentPageIndex;
         IsSidebarOpen = false;
         IsSearchOpen = false;
         IsAnnotationToolbarOpen = false;
-        CurrentDocument.IsContinuous = false;
-        CurrentDocument.IsDoublePage = false;
-        ViewMode = ViewMode.Paged;
         IsPresentationMode = true;
         IsFullScreen = true;
+        CurrentDocument.IsDoublePage = false;
+        CurrentDocument.IsContinuous = false;
+        ViewMode = ViewMode.Paged;
+        CurrentDocument.GoToPage(preservedPage);
     }
 
     /// <summary>

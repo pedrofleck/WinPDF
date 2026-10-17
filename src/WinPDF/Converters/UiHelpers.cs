@@ -106,6 +106,12 @@ public static class UiHelpers
     public static bool IsSidebarOpenWithDoc(bool hasDoc, bool isSidebarOpen) => hasDoc && isSidebarOpen;
 
     /// <summary>
+    /// Checks if the sidebar pane should be open in the active document view (false when settings is open).
+    /// </summary>
+    public static bool IsSidebarOpenInDocumentView(bool hasDoc, bool isSidebarOpen, bool isSettingsOpen) =>
+        hasDoc && isSidebarOpen && !isSettingsOpen;
+
+    /// <summary>
     /// Computes the corner radius for the main content container creating the curved junction with the sidebar.
     /// </summary>
     public static CornerRadius MainContainerCornerRadius(bool hasDoc, bool isSidebarOpen, bool isSettingsOpen) =>

@@ -120,6 +120,18 @@ public sealed partial class MainWindow : Window
                 MainContentContainer.CornerRadius = new CornerRadius(8, 0, 0, 0);
                 MainContentContainer.BorderThickness = new Thickness(1, 1, 0, 0);
             }
+
+            if (SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage)
+            {
+                DispatcherQueue.TryEnqueue(thumbPage.RefreshAfterVisibilityRestored);
+            }
+        };
+        MainSplitView.PaneOpened += (_, _) =>
+        {
+            if (SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage)
+            {
+                DispatcherQueue.TryEnqueue(thumbPage.RefreshAfterVisibilityRestored);
+            }
         };
         MainSplitView.PaneClosing += (_, _) =>
         {
@@ -397,15 +409,19 @@ public sealed partial class MainWindow : Window
 
     private void UpdateSidebarLayout()
     {
+        bool shouldOpenPane = ViewModel.HasDocument && ViewModel.IsSidebarOpen;
+        if (MainSplitView.IsPaneOpen != shouldOpenPane)
+        {
+            MainSplitView.IsPaneOpen = shouldOpenPane;
+        }
+
         if (!ViewModel.HasDocument || ViewModel.IsSettingsOpen)
         {
-            MainSplitView.IsPaneOpen = false;
             MainContentContainer.CornerRadius = new CornerRadius(0);
             MainContentContainer.BorderThickness = !ViewModel.HasDocument ? new Thickness(0) : new Thickness(0, 1, 0, 0);
         }
         else
         {
-            MainSplitView.IsPaneOpen = ViewModel.IsSidebarOpen;
             MainContentContainer.CornerRadius = ViewModel.IsSidebarOpen ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
             MainContentContainer.BorderThickness = ViewModel.IsSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0);
         }
@@ -545,17 +561,24 @@ public sealed partial class MainWindow : Window
             UpdateMainContainerStyle();
             if (ViewModel.IsSettingsOpen)
             {
-                MainContentFrame.Navigate(typeof(SettingsView), ViewModel, new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromRight });
+                MainSplitView.Opacity = 0.0;
+                MainSplitView.IsHitTestVisible = false;
+                SettingsContentFrame.Visibility = Visibility.Visible;
+                SettingsContentFrame.Navigate(typeof(SettingsView), ViewModel, new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromRight });
             }
             else
             {
-                if (MainContentFrame.CanGoBack)
+                SettingsContentFrame.Visibility = Visibility.Collapsed;
+                MainSplitView.Opacity = 1.0;
+                MainSplitView.IsHitTestVisible = true;
+                if (MainContentFrame.Content is DocumentView docView)
                 {
-                    MainContentFrame.GoBack(new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromLeft });
+                    docView.OnReturnedFromSettings();
                 }
-                else
+
+                if (SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage)
                 {
-                    MainContentFrame.Navigate(typeof(DocumentView), ViewModel, new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromLeft });
+                    thumbPage.RefreshAfterVisibilityRestored();
                 }
             }
 
@@ -692,7 +715,7 @@ public sealed partial class MainWindow : Window
             ViewModel.SetSidebarTab(targetTab);
         }
 
-        if (_previousSidebarIndex == -1)
+        if (_previousSidebarIndex == -1 || SidebarContentFrame.Content is null)
         {
             SidebarContentFrame.Navigate(pageType, ViewModel);
         }

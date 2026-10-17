@@ -8,11 +8,7 @@ namespace WinPDF.Models;
 public sealed class PdfPageRow : INotifyPropertyChanged
 {
     /// <inheritdoc/>
-    public event PropertyChangedEventHandler? PropertyChanged
-    {
-        add { }
-        remove { }
-    }
+    public event PropertyChangedEventHandler? PropertyChanged;
     /// <summary>
     /// Gets the primary (left) page of this row.
     /// </summary>
@@ -91,15 +87,40 @@ public sealed class PdfPageRow : INotifyPropertyChanged
         }
     }
 
-    /// <summary>
-    /// Gets a value indicating whether presentation mode is active.
-    /// </summary>
-    public bool IsPresentationMode { get; }
+    private bool _isPresentationMode;
+    private bool _isNightMode;
 
     /// <summary>
-    /// Gets a value indicating whether night mode is active for this row.
+    /// Gets or sets a value indicating whether presentation mode is active.
     /// </summary>
-    public bool IsNightMode { get; }
+    public bool IsPresentationMode
+    {
+        get => _isPresentationMode;
+        set
+        {
+            if (_isPresentationMode != value)
+            {
+                _isPresentationMode = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsPresentationMode)));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether night mode is active for this row.
+    /// </summary>
+    public bool IsNightMode
+    {
+        get => _isNightMode;
+        set
+        {
+            if (_isNightMode != value)
+            {
+                _isNightMode = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsNightMode)));
+            }
+        }
+    }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PdfPageRow"/> class.

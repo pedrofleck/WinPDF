@@ -645,12 +645,20 @@
                 BorderThickness="{x:Bind converters:UiHelpers.MainContainerBorderThickness(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}"
                 CornerRadius="{x:Bind converters:UiHelpers.MainContainerCornerRadius(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}">
 
-                <!-- Frame de Conteúdo Principal (DocumentView vs. SettingsView) -->
+                <!-- Frame de Conteúdo Principal (DocumentView Sempre Preservado na Árvore Visual) -->
                 <Frame
                     x:Name="MainContentFrame"
                     Background="Transparent"
-                    IsNavigationStackEnabled="True" />
+                    IsNavigationStackEnabled="False" />
             </Border>
         </SplitView>
+
+        <!-- Frame de Configurações em Página Inteira (Sobreposto sem Descarregar DocumentView ou Barra Lateral) -->
+        <Frame
+            x:Name="SettingsContentFrame"
+            Grid.Row="1"
+            Background="Transparent"
+            IsNavigationStackEnabled="False"
+            Visibility="Collapsed" />
     </Grid>
 </Window>

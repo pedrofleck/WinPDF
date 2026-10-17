@@ -34,6 +34,11 @@ public sealed partial class DocumentView : Page
     private bool _isFittedVertically;
     private Size _lastHandledScrollViewerSize;
     private bool _isApplyingFitZoom;
+    private bool _isSwitchingMode;
+    private bool _isRestoringFromPresentation;
+    private bool _wasInPresentationMode;
+    private bool _prePresentationFittedVertically;
+    private double _prePresentationZoom = 1.0;
     private UIElement? _hookedScrollTemplateRoot;
     private PointerEventHandler? _wheelHandler;
     private Storyboard? _transitionStoryboard;
@@ -245,6 +250,53 @@ public sealed partial class DocumentView : Page
         }
     }
 
+    /// <summary>
+    /// Refreshes active canvases and restores focus when returning from the Settings overlay.
+    /// </summary>
+    public void OnReturnedFromSettings()
+    {
+        EnsureScrollViewerWheelHook();
+        if (ViewModel.CurrentDocument is { } doc)
+        {
+            ApplyNightModeToAllCanvases(doc.IsNightMode);
+            double activeZoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor;
+            UpdateViewportPages(activeZoom);
+            DispatcherQueue.TryEnqueue(ReturnFocusToViewer);
+        }
+    }
+
+    private void ApplyNightModeToAllCanvases(bool isNightMode)
+    {
+        foreach (var canvas in _activeCanvases.ToArray())
+        {
+            canvas.ApplyNightModeImmediate(isNightMode);
+        }
+
+        FindAndApplyNightMode(ContinuousPagesRepeater, isNightMode);
+    }
+
+    private static void FindAndApplyNightMode(DependencyObject? parent, bool isNightMode)
+    {
+        if (parent is null)
+        {
+            return;
+        }
+
+        int count = VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
+            if (child is PdfPageCanvas canvas)
+            {
+                canvas.ApplyNightModeImmediate(isNightMode);
+            }
+            else
+            {
+                FindAndApplyNightMode(child, isNightMode);
+            }
+        }
+    }
+
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(ShellViewModel.CurrentDocument))
@@ -273,17 +325,80 @@ public sealed partial class DocumentView : Page
                 ReturnFocusToViewer();
             }
         }
-        else if (e.PropertyName == nameof(ShellViewModel.IsPresentationMode) || e.PropertyName == nameof(ShellViewModel.IsFullScreen))
+        else if (e.PropertyName == nameof(ShellViewModel.IsNightMode))
         {
-            if (ViewModel.IsPresentationMode || ViewModel.IsFullScreen)
+            ApplyNightModeToAllCanvases(ViewModel.IsNightMode);
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.IsPresentationMode))
+        {
+            if (ViewModel.IsPresentationMode)
+            {
+                if (!_wasInPresentationMode)
+                {
+                    _wasInPresentationMode = true;
+                    _prePresentationFittedVertically = _isFittedVertically;
+                    _prePresentationZoom = ViewModel.ZoomBeforePresentation > 0.05
+                        ? ViewModel.ZoomBeforePresentation
+                        : (ViewModel.CurrentDocument?.ZoomFactor ?? ContinuousScrollViewer.ZoomFactor);
+                }
+
+                _isRestoringFromPresentation = false;
+                FullScreenInfoBar.IsOpen = true;
+                _presentationHideTimer.Stop();
+                _presentationHideTimer.Start();
+
+                ExecuteFitVertical(force: true);
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                {
+                    if (ViewModel.IsPresentationMode)
+                    {
+                        ExecuteFitVertical(force: true);
+                    }
+                });
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(120).ConfigureAwait(false);
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (ViewModel.IsPresentationMode)
+                        {
+                            ExecuteFitVertical(force: true);
+                        }
+                    });
+                });
+            }
+            else if (_wasInPresentationMode)
+            {
+                _wasInPresentationMode = false;
+                _isRestoringFromPresentation = true;
+                _isFittedVertically = _prePresentationFittedVertically;
+
+                if (!ViewModel.IsFullScreen)
+                {
+                    _presentationHideTimer.Stop();
+                    FullScreenInfoBar.IsOpen = false;
+                }
+
+                RestoreAfterPresentationExit();
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RestoreAfterPresentationExit);
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(140).ConfigureAwait(false);
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        RestoreAfterPresentationExit();
+                        _isRestoringFromPresentation = false;
+                    });
+                });
+            }
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.IsFullScreen))
+        {
+            if (ViewModel.IsFullScreen || ViewModel.IsPresentationMode)
             {
                 FullScreenInfoBar.IsOpen = true;
                 _presentationHideTimer.Stop();
                 _presentationHideTimer.Start();
-                if (ViewModel.IsPresentationMode)
-                {
-                    DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
-                }
             }
             else
             {
@@ -329,29 +444,123 @@ public sealed partial class DocumentView : Page
         }
     }
 
-    private void OnDocumentModeChanged(object? sender, EventArgs e)
+    private void RestoreAfterPresentationExit()
     {
-        _isFittedVertically = true;
-        _isApplyingFitZoom = true;
-
-        if (ViewModel.CurrentDocument is { IsContinuous: false } doc)
+        if (ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc || ViewModel.IsPresentationMode)
         {
-            int scrolledIndex = Math.Clamp((int)Math.Round(doc.FractionalPageIndex), 0, doc.PageCount - 1);
-            if (doc.CurrentPageIndex != scrolledIndex)
-            {
-                doc.GoToPage(scrolledIndex);
-            }
-
-            ContinuousScrollViewer.ChangeView(0, 0, null, disableAnimation: true);
+            return;
         }
 
-        ExecuteFitVertical(force: true);
+        int targetPage = Math.Clamp(doc.CurrentPageIndex, 0, doc.Pages.Count - 1);
+        double restoreZoom = Math.Clamp(_prePresentationZoom > 0.05 ? _prePresentationZoom : ViewModel.ZoomBeforePresentation, DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
 
-        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        _isSwitchingMode = true;
+        _isApplyingZoom = true;
+        try
         {
+            ContinuousScrollViewer.UpdateLayout();
+            doc.ZoomFactor = restoreZoom;
+            UpdateZoomSlider(restoreZoom);
+
+            if (doc.IsContinuous)
+            {
+                double targetY = 24.0;
+                int step = doc.IsDoublePage ? 2 : 1;
+                int targetRow = targetPage / step;
+                for (int r = 0; r < targetRow && r * step < doc.Pages.Count; r++)
+                {
+                    targetY += doc.Pages[r * step].DisplayHeightDip + 16.0;
+                }
+
+                double vOffset = targetY * restoreZoom;
+                ContinuousScrollViewer.ChangeView(0, vOffset, (float)restoreZoom, disableAnimation: true);
+                doc.LastVerticalOffset = vOffset;
+                doc.FractionalPageIndex = targetPage;
+            }
+            else
+            {
+                ContinuousScrollViewer.ChangeView(0, 0, (float)restoreZoom, disableAnimation: true);
+                doc.LastVerticalOffset = 0;
+                doc.FractionalPageIndex = targetPage;
+            }
+
+            UpdateViewportPages(restoreZoom);
+            ScheduleViewportUpdate();
+        }
+        finally
+        {
+            _isApplyingZoom = false;
+            _isSwitchingMode = false;
+        }
+    }
+
+    private void OnDocumentModeChanged(object? sender, EventArgs e)
+    {
+        if (_isRestoringFromPresentation || ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return;
+        }
+
+        int targetPage = Math.Clamp(doc.CurrentPageIndex, 0, doc.PageCount - 1);
+        _isSwitchingMode = true;
+
+        if (!doc.IsContinuous)
+        {
+            _isFittedVertically = true;
+            _isApplyingFitZoom = true;
+
+            if (doc.CurrentPageIndex != targetPage)
+            {
+                doc.GoToPage(targetPage);
+            }
+
+            doc.FractionalPageIndex = targetPage;
+            ContinuousScrollViewer.ChangeView(0, 0, null, disableAnimation: true);
             ExecuteFitVertical(force: true);
-            UpdateViewportPages(ViewModel.CurrentDocument?.ZoomFactor ?? ContinuousScrollViewer.ZoomFactor);
-        });
+
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                try
+                {
+                    if (doc.CurrentPageIndex != targetPage)
+                    {
+                        doc.GoToPage(targetPage);
+                    }
+
+                    ExecuteFitVertical(force: true);
+                    UpdateViewportPages(doc.ZoomFactor);
+                }
+                finally
+                {
+                    _isSwitchingMode = false;
+                }
+            });
+        }
+        else
+        {
+            ContinuousScrollViewer.UpdateLayout();
+            ScrollToPage(targetPage, allowUnclampedOffset: true);
+
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                try
+                {
+                    ContinuousScrollViewer.UpdateLayout();
+                    if (doc.CurrentPageIndex != targetPage)
+                    {
+                        doc.GoToPage(targetPage);
+                    }
+
+                    ScrollToPage(targetPage, allowUnclampedOffset: true);
+                    UpdateViewportPages(doc.ZoomFactor);
+                }
+                finally
+                {
+                    _isSwitchingMode = false;
+                    _isApplyingFitZoom = false;
+                }
+            });
+        }
     }
 
     private void OnFitPageRequested()
@@ -384,6 +593,13 @@ public sealed partial class DocumentView : Page
                 {
                     UpdateViewportPages(ViewModel.CurrentDocument?.ZoomFactor ?? ContinuousScrollViewer.ZoomFactor);
                 });
+            }
+        }
+        else if (e.PropertyName == nameof(DocumentViewModel.IsNightMode))
+        {
+            if (_observedDocument is not null)
+            {
+                ApplyNightModeToAllCanvases(_observedDocument.IsNightMode);
             }
         }
         else if (e.PropertyName is nameof(DocumentViewModel.IsContinuous) or nameof(DocumentViewModel.IsDoublePage))
@@ -423,14 +639,26 @@ public sealed partial class DocumentView : Page
     private void OnScrollViewerViewChanging(object? sender, ScrollViewerViewChangingEventArgs e)
     {
         _zoomDebounceCts?.Cancel();
-        if (ViewModel.CurrentDocument is not null && Math.Abs(e.NextView.ZoomFactor - ContinuousScrollViewer.ZoomFactor) < 0.001)
+        if (_isSwitchingMode || _isRestoringFromPresentation || _isApplyingFitZoom)
         {
+            return;
+        }
+
+        if (ViewModel.CurrentDocument is { IsContinuous: true } && Math.Abs(e.NextView.ZoomFactor - ContinuousScrollViewer.ZoomFactor) < 0.001)
+        {
+            UpdateCurrentPageIndexFromViewport();
             ViewModel.CurrentDocument.FractionalPageIndex = CalculateFractionalPageIndex();
         }
     }
 
     private void OnScrollViewerViewChanged(object? sender, ScrollViewerViewChangedEventArgs e)
     {
+        if (_isSwitchingMode || _isRestoringFromPresentation)
+        {
+            ScheduleViewportUpdate();
+            return;
+        }
+
         if (ViewModel.CurrentDocument is not null)
         {
             ViewModel.CurrentDocument.LastHorizontalOffset = ContinuousScrollViewer.HorizontalOffset;
@@ -458,15 +686,11 @@ public sealed partial class DocumentView : Page
                 }
             }
 
-            if (!e.IsIntermediate)
+            if (!_isApplyingFitZoom && !_isApplyingZoom)
             {
+                UpdateCurrentPageIndexFromViewport();
                 ViewModel.CurrentDocument.FractionalPageIndex = CalculateFractionalPageIndex();
             }
-        }
-
-        if (!e.IsIntermediate)
-        {
-            UpdateCurrentPageIndexFromViewport();
         }
 
         ScheduleViewportUpdate();
@@ -488,7 +712,13 @@ public sealed partial class DocumentView : Page
 
         _lastHandledScrollViewerSize = e.NewSize;
 
-        if (ViewModel?.IsPresentationMode == true || ViewModel?.CurrentDocument is { IsContinuous: false })
+        if (_isRestoringFromPresentation)
+        {
+            DispatcherQueue.TryEnqueue(RestoreAfterPresentationExit);
+            return;
+        }
+
+        if (ViewModel?.IsPresentationMode == true || (_isFittedVertically && ViewModel?.CurrentDocument is { IsContinuous: false }))
         {
             DispatcherQueue.TryEnqueue(() => ExecuteFitVertical(e.NewSize.Width, e.NewSize.Height, force: true));
         }
@@ -647,7 +877,7 @@ public sealed partial class DocumentView : Page
         return doc.Pages.Count - 1;
     }
 
-    private void ScrollToPage(int pageIndex)
+    private void ScrollToPage(int pageIndex, bool allowUnclampedOffset = false)
     {
         if (ViewModel.CurrentDocument is not { } doc || pageIndex < 0 || pageIndex >= doc.Pages.Count)
         {
@@ -671,7 +901,10 @@ public sealed partial class DocumentView : Page
                 targetY += pages[r * step].DisplayHeightDip + 16.0;
             }
 
-            double verticalOffset = Math.Clamp(targetY * zoom, 0.0, Math.Max(0.0, ContinuousScrollViewer.ScrollableHeight));
+            double rawOffset = Math.Max(0.0, targetY * zoom);
+            double verticalOffset = (allowUnclampedOffset || ContinuousScrollViewer.ScrollableHeight <= 0.5)
+                ? rawOffset
+                : Math.Clamp(rawOffset, 0.0, ContinuousScrollViewer.ScrollableHeight);
             ContinuousScrollViewer.ChangeView(null, verticalOffset, null, disableAnimation: true);
             doc.LastVerticalOffset = verticalOffset;
             doc.FractionalPageIndex = CalculateFractionalPageIndex(verticalOffset);

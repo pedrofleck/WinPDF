@@ -100,6 +100,11 @@ public sealed class ThumbnailPresenter : Grid
         SubscribeToItem(Item);
         UpdateDimensions();
         UpdateImage();
+        if (Item is { } item && (item.Image is null || item.Image.IsDisposed))
+        {
+            double scale = XamlRoot?.RasterizationScale ?? 1.0;
+            item.NotifyRealized(scale);
+        }
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -113,9 +118,15 @@ public sealed class ThumbnailPresenter : Grid
     {
         if (d is ThumbnailPresenter presenter)
         {
-            presenter.SubscribeToItem(e.NewValue as ThumbnailItemViewModel);
+            var newItem = e.NewValue as ThumbnailItemViewModel;
+            presenter.SubscribeToItem(newItem);
             presenter.UpdateDimensions();
             presenter.UpdateImage();
+            if (presenter.IsLoaded && newItem is not null && (newItem.Image is null || newItem.Image.IsDisposed))
+            {
+                double scale = presenter.XamlRoot?.RasterizationScale ?? 1.0;
+                newItem.NotifyRealized(scale);
+            }
         }
     }
 

@@ -416,7 +416,7 @@
                                     Width="230"
                                     Height="30"
                                     MinHeight="30"
-                                    Padding="8,4,28,4"
+                                    Padding="28,4,8,4"
                                     FontSize="13"
                                     VerticalAlignment="Center"
                                     VerticalContentAlignment="Center"
@@ -429,8 +429,8 @@
                                 <FontIcon
                                     Glyph="&#xE721;"
                                     FontSize="12"
-                                    Margin="0,0,9,0"
-                                    HorizontalAlignment="Right"
+                                    Margin="9,0,0,0"
+                                    HorizontalAlignment="Left"
                                     VerticalAlignment="Center"
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                     IsHitTestVisible="False" />

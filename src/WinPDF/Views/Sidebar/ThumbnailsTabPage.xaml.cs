@@ -94,12 +94,38 @@ public sealed partial class ThumbnailsTabPage : Page
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         SubscribeToDocument(ViewModel.CurrentDocument);
+        RefreshAfterVisibilityRestored();
+    }
+
+    /// <summary>
+    /// Ensures thumbnail active state, layout metrics, and realized item rasterization are synchronized
+    /// when the sidebar pane opens or returns from the settings overlay.
+    /// </summary>
+    public void RefreshAfterVisibilityRestored()
+    {
+        double scale = XamlRoot?.RasterizationScale ?? 1.0;
+        if (ViewModel.CurrentDocument is not null && ViewModel.IsSidebarOpen && !ViewModel.IsSettingsOpen && ViewModel.SidebarTab == Models.SidebarTab.Thumbnails)
+        {
+            ViewModel.CurrentDocument.SetThumbnailsActive(true, scale);
+        }
 
         double width = ThumbnailsScrollViewer.ActualWidth > 0 ? ThumbnailsScrollViewer.ActualWidth : 260.0;
         UpdateThumbnailSizes(width, force: true);
         UpdateTargetScrollPosition(allowAnimation: false);
+
+        if (ViewModel.CurrentDocument is { } doc && ViewModel.IsSidebarOpen && !ViewModel.IsSettingsOpen && ViewModel.SidebarTab == Models.SidebarTab.Thumbnails)
+        {
+            for (int i = 0; i < doc.Thumbnails.Count; i++)
+            {
+                if (ThumbnailsRepeater.TryGetElement(i) is not null)
+                {
+                    doc.Thumbnails[i].NotifyRealized(scale);
+                }
+            }
+        }
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -121,13 +147,11 @@ public sealed partial class ThumbnailsTabPage : Page
             UpdateThumbnailSizes(width, force: true);
             UpdateTargetScrollPosition(allowAnimation: false);
         }
-        else if (e.PropertyName is nameof(ShellViewModel.IsSidebarOpen) or nameof(ShellViewModel.SidebarTab))
+        else if (e.PropertyName is nameof(ShellViewModel.IsSidebarOpen) or nameof(ShellViewModel.SidebarTab) or nameof(ShellViewModel.IsSettingsOpen))
         {
-            if (ViewModel.IsSidebarOpen && ViewModel.SidebarTab == Models.SidebarTab.Thumbnails)
+            if (ViewModel.IsSidebarOpen && !ViewModel.IsSettingsOpen && ViewModel.SidebarTab == Models.SidebarTab.Thumbnails)
             {
-                double width = ThumbnailsScrollViewer.ActualWidth > 0 ? ThumbnailsScrollViewer.ActualWidth : 260.0;
-                UpdateThumbnailSizes(width, force: true);
-                UpdateTargetScrollPosition(allowAnimation: false);
+                RefreshAfterVisibilityRestored();
             }
         }
     }

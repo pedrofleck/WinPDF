@@ -115,7 +115,18 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
     partial void OnIsContinuousChanged(bool value)
     {
+        int preservedPage = Math.Clamp(CurrentPageIndex, 0, Math.Max(0, PageCount - 1));
         UpdateDisplayedRows();
+        if (CurrentPageIndex != preservedPage)
+        {
+            CurrentPageIndex = preservedPage;
+        }
+
+        if (Math.Abs(FractionalPageIndex - preservedPage) > 0.001)
+        {
+            FractionalPageIndex = preservedPage;
+        }
+
         ModeChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -127,6 +138,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
     partial void OnIsPresentationModeChanged(bool value)
     {
+        for (int i = 0; i < DisplayedRows.Count; i++)
+        {
+            DisplayedRows[i].IsPresentationMode = value;
+        }
+
         UpdateDisplayedRows();
     }
 
@@ -182,6 +198,14 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     /// </summary>
     [ObservableProperty]
     public partial bool IsNightMode { get; set; }
+
+    partial void OnIsNightModeChanged(bool value)
+    {
+        for (int i = 0; i < DisplayedRows.Count; i++)
+        {
+            DisplayedRows[i].IsNightMode = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the clockwise rotation angle in degrees (0, 90, 180, 270).
@@ -494,6 +518,24 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Removes a specific bookmark item from the bookmarks collection even when viewing a different page.
+    /// </summary>
+    /// <param name="bookmark">The bookmark item to remove.</param>
+    [RelayCommand]
+    public void RemoveBookmark(BookmarkItemViewModel? bookmark)
+    {
+        if (bookmark is null)
+        {
+            return;
+        }
+
+        if (Bookmarks.Remove(bookmark))
+        {
+            UpdateIsCurrentPageBookmarked();
+        }
+    }
+
+    /// <summary>
     /// Rotates the document view 90 degrees clockwise.
     /// </summary>
     public void RotateClockwise()
@@ -607,13 +649,14 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             {
                 if (DisplayedRows[i].LeftPage.Index != targetRows[i].LeftPage.Index ||
                     DisplayedRows[i].RightPage?.Index != targetRows[i].RightPage?.Index ||
-                    DisplayedRows[i].IsPresentationMode != targetRows[i].IsPresentationMode ||
-                    DisplayedRows[i].Rotation != targetRows[i].Rotation ||
-                    DisplayedRows[i].IsNightMode != targetRows[i].IsNightMode)
+                    DisplayedRows[i].Rotation != targetRows[i].Rotation)
                 {
                     isIdentical = false;
                     break;
                 }
+
+                DisplayedRows[i].IsPresentationMode = targetRows[i].IsPresentationMode;
+                DisplayedRows[i].IsNightMode = targetRows[i].IsNightMode;
             }
         }
 
@@ -763,8 +806,13 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         {
             foreach (ThumbnailItemViewModel item in Thumbnails)
             {
-                if (item.IsRealized && item.Image is null)
+                if (item.IsRealized && (item.Image is null || item.Image.IsDisposed))
                 {
+                    if (item.Image is { IsDisposed: true })
+                    {
+                        item.ClearImage();
+                    }
+
                     RequestThumbnail(item, _thumbnailScale);
                 }
             }
@@ -782,6 +830,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         if (!_thumbnailsActive || _isDisposed)
         {
             return;
+        }
+
+        if (item.Image is { IsDisposed: true })
+        {
+            item.ClearImage();
         }
 
         RequestThumbnail(item, _thumbnailScale);
@@ -802,7 +855,12 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
     private void RequestThumbnail(ThumbnailItemViewModel item, double scale)
     {
-        if (item.Image is not null || item.LoadCancellation is not null || _isDisposed)
+        if (item.Image is { IsDisposed: true })
+        {
+            item.ClearImage();
+        }
+
+        if (item.Image is { IsDisposed: false } || item.LoadCancellation is not null || _isDisposed)
         {
             return;
         }
@@ -822,7 +880,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
         if (_tileCache.TryGet(in key, out TileCacheEntry? cachedEntry))
         {
-            if (cachedEntry is PdfBitmapEntry bitmapEntry)
+            if (cachedEntry is PdfBitmapEntry { IsDisposed: false } bitmapEntry)
             {
                 item.SetImage(bitmapEntry);
                 return;

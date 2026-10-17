@@ -41,4 +41,21 @@ public sealed partial class BookmarksTabPage : Page
             ViewModel.CurrentDocument.GoToPage(bookmark.PageIndex);
         }
     }
+
+    private void OnRemoveBookmarkItemClick(object sender, Microsoft.UI.Xaml.RoutedEventArgs e)
+    {
+        if (ViewModel.CurrentDocument is null)
+        {
+            return;
+        }
+
+        if (sender is Microsoft.UI.Xaml.FrameworkElement { Tag: BookmarkItemViewModel bookmark })
+        {
+            ViewModel.CurrentDocument.RemoveBookmark(bookmark);
+        }
+        else if (sender is Microsoft.UI.Xaml.FrameworkElement { DataContext: BookmarkItemViewModel dcBookmark })
+        {
+            ViewModel.CurrentDocument.RemoveBookmark(dcBookmark);
+        }
+    }
 }
