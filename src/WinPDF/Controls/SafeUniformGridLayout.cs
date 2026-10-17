@@ -212,6 +212,25 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
                     try
                     {
                         UIElement element = context.GetOrCreateElementAt(i);
+                        if (context.GetItemAt(i) is ThumbnailItemViewModel itemVm && element is FrameworkElement fe)
+                        {
+                            if (!ReferenceEquals(fe.DataContext, itemVm))
+                            {
+                                fe.DataContext = itemVm;
+                                Microsoft.UI.Xaml.Markup.XamlBindingHelper.GetDataTemplateComponent(fe)?.ProcessBindings(itemVm, i, 0, out _);
+                            }
+
+                            if (fe is Panel rootPanel &&
+                                rootPanel.Children.Count > 0 &&
+                                rootPanel.Children[0] is Border cardBorder &&
+                                itemVm.WidthDip > 0 &&
+                                itemVm.HeightDip > 0)
+                            {
+                                cardBorder.Width = itemVm.WidthDip;
+                                cardBorder.Height = itemVm.HeightDip;
+                            }
+                        }
+
                         element.Measure(new Size(cellW, double.PositiveInfinity));
                         if (double.IsFinite(element.DesiredSize.Height) && element.DesiredSize.Height > 0)
                         {

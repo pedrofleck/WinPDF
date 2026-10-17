@@ -2,6 +2,7 @@ using System.ComponentModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WinPDF.Helpers;
+using WinPDF.Interop.Printing;
 using WinPDF.Models;
 using WinPDF.Rendering;
 using WinPDF.Services;
@@ -212,6 +213,7 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasDocument))]
+    [NotifyCanExecuteChangedFor(nameof(PrintCommand))]
     public partial DocumentViewModel? CurrentDocument { get; set; }
 
     /// <summary>
@@ -219,6 +221,7 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasDocument))]
+    [NotifyCanExecuteChangedFor(nameof(PrintCommand))]
     public partial bool IsInitialDocumentOpening { get; set; }
 
     /// <summary>
@@ -626,6 +629,13 @@ public sealed partial class ShellViewModel : ObservableObject
         }
     }
 
+    private bool _isPrinting;
+
+    /// <summary>
+    /// Gets the command that opens the native print dialog and spools the current document.
+    /// </summary>
+    public IAsyncRelayCommand PrintDocumentCommand => PrintCommand;
+
     /// <summary>
     /// Saves the current document (including any rotation and future annotation edits) in-place,
     /// or prompts for a target location if the file cannot be overwritten directly.
@@ -739,12 +749,58 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Initiates document printing.
+    /// Opens the native Windows print dialog (<c>PrintDlgExW</c>) and spools vector GDI commands
+    /// for the selected pages on the dedicated PDFium worker thread.
     /// </summary>
-    [RelayCommand]
-    public Task PrintAsync()
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    [RelayCommand(CanExecute = nameof(HasDocument))]
+    public async Task PrintAsync(CancellationToken cancellationToken = default)
     {
-        return Task.CompletedTask;
+        if (_isPrinting || CurrentDocument is null || _windowContext.WindowHandle == nint.Zero)
+        {
+            return;
+        }
+
+        _isPrinting = true;
+        try
+        {
+            DocumentViewModel doc = CurrentDocument;
+            Dictionary<int, int>? pageRotations = null;
+            if (doc.Rotation != 0)
+            {
+                pageRotations = new Dictionary<int, int>(doc.Pages.Count);
+                for (int i = 0; i < doc.Pages.Count; i++)
+                {
+                    pageRotations[i] = doc.Rotation;
+                }
+            }
+
+            PdfPrintJobOptions? jobOptions = Win32PrintInterop.ShowPrintDialog(
+                _windowContext.WindowHandle,
+                doc.FileName,
+                doc.CurrentPageNumber,
+                doc.PageCount,
+                doc.Rotation,
+                pageRotations);
+
+            if (jobOptions is null)
+            {
+                return;
+            }
+
+            await _pdfService.PrintDocumentAsync(doc.DocumentId, jobOptions, cancellationToken);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Print failed: {ex.Message}");
+        }
+        finally
+        {
+            _isPrinting = false;
+        }
     }
 
     /// <summary>

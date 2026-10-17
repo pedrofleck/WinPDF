@@ -147,6 +147,9 @@ public sealed partial class ThumbnailsTabPage : Page
             SubscribeToDocument(ViewModel.CurrentDocument);
             _isUserScrollingSidebar = false;
             _userScrollDebounceTimer.Stop();
+            _lastSizedDocumentId = -1;
+            _lastSizedRotation = -1;
+            _lastHandledWidth = 0;
 
             // Force ItemsRepeater to recycle elements from the previous document and bind fresh items
             ThumbnailsRepeater.ItemsSource = null;
@@ -277,6 +280,12 @@ public sealed partial class ThumbnailsTabPage : Page
 
             thumb.WidthDip = w;
             thumb.HeightDip = h;
+
+            if (ThumbnailsRepeater.TryGetElement(i) is FrameworkElement realizedEl)
+            {
+                realizedEl.DataContext = thumb;
+                BindPresenterInElement(realizedEl, thumb);
+            }
 
             if (h > maxCalculatedH)
             {
@@ -542,6 +551,21 @@ public sealed partial class ThumbnailsTabPage : Page
 
     private static void BindPresenterInElement(DependencyObject parent, ThumbnailItemViewModel thumbnail)
     {
+        if (parent is FrameworkElement rootFe)
+        {
+            Microsoft.UI.Xaml.Markup.XamlBindingHelper.GetDataTemplateComponent(rootFe)?.ProcessBindings(thumbnail, thumbnail.PageIndex, 0, out _);
+            if (rootFe is Panel rootPanel && rootPanel.Children.Count > 0 && rootPanel.Children[0] is Border cardBorder)
+            {
+                cardBorder.Width = thumbnail.WidthDip;
+                cardBorder.Height = thumbnail.HeightDip;
+            }
+        }
+
+        BindPresenterRecursive(parent, thumbnail);
+    }
+
+    private static void BindPresenterRecursive(DependencyObject parent, ThumbnailItemViewModel thumbnail)
+    {
         int count = VisualTreeHelper.GetChildrenCount(parent);
         for (int i = 0; i < count; i++)
         {
@@ -553,10 +577,11 @@ public sealed partial class ThumbnailsTabPage : Page
                     presenter.Item = thumbnail;
                 }
 
+                presenter.SyncCardDimensions();
                 return;
             }
 
-            BindPresenterInElement(child, thumbnail);
+            BindPresenterRecursive(child, thumbnail);
         }
     }
 

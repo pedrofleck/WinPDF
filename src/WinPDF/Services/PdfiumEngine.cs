@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using WinPDF.Interop.Pdfium;
+using WinPDF.Interop.Printing;
 using WinPDF.Models;
 using WinPDF.Rendering;
 
@@ -301,6 +302,165 @@ internal sealed unsafe class PdfiumEngine : IDisposable
         catch
         {
             return 0;
+        }
+    }
+
+    /// <summary>
+    /// Renders the requested pages as vector GDI commands directly into the native printer <c>HDC</c>
+    /// via <c>FPDF_RenderPage</c> and always deletes the <c>HDC</c> upon completion.
+    /// </summary>
+    internal bool PrintDocument(
+        long documentId,
+        PdfPrintJobOptions options,
+        CancellationToken cancellationToken)
+    {
+        nint hdc = options.PrinterDc;
+        nint docNamePtr = nint.Zero;
+        bool docStarted = false;
+
+        try
+        {
+            if (hdc == nint.Zero || options.PageIndices.Count == 0)
+            {
+                return false;
+            }
+
+            PdfiumDocumentHandle document = GetDocument(documentId);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            string title = string.IsNullOrWhiteSpace(options.DocumentTitle) ? "WinPDF Document" : options.DocumentTitle;
+            docNamePtr = Marshal.StringToHGlobalUni(title);
+
+            Win32PrintInterop.DOCINFOW docInfo = new()
+            {
+                cbSize = Marshal.SizeOf<Win32PrintInterop.DOCINFOW>(),
+                lpszDocName = docNamePtr,
+                lpszOutput = nint.Zero,
+                lpszDatatype = nint.Zero,
+                fwType = 0,
+            };
+
+            if (Win32PrintInterop.StartDocW(hdc, in docInfo) <= 0)
+            {
+                return false;
+            }
+
+            docStarted = true;
+
+            int printableW = Math.Max(1, Win32PrintInterop.GetDeviceCaps(hdc, Win32PrintInterop.HORZRES));
+            int printableH = Math.Max(1, Win32PrintInterop.GetDeviceCaps(hdc, Win32PrintInterop.VERTRES));
+            int copies = Math.Max(1, options.Copies);
+            int pageCount = Math.Max(0, PdfiumNative.FPDF_GetPageCount(document));
+
+            for (int copy = 0; copy < copies; copy++)
+            {
+                for (int i = 0; i < options.PageIndices.Count; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    int pageIndex = options.PageIndices[i];
+                    if (pageIndex < 0 || pageIndex >= pageCount)
+                    {
+                        continue;
+                    }
+
+                    using PdfiumPageHandle page = PdfiumNative.FPDF_LoadPage(document, pageIndex);
+                    if (page.IsInvalid)
+                    {
+                        continue;
+                    }
+
+                    double pageW = PdfiumNative.FPDF_GetPageWidthF(page);
+                    double pageH = PdfiumNative.FPDF_GetPageHeightF(page);
+                    if (!double.IsFinite(pageW) || !double.IsFinite(pageH) || pageW <= 0 || pageH <= 0)
+                    {
+                        PdfPageInfo fallbackInfo = ReadPageInfo(document, pageIndex, documentId);
+                        bool intrinsicSwap = fallbackInfo.Rotation is 90 or 270;
+                        pageW = intrinsicSwap ? fallbackInfo.HeightPt : fallbackInfo.WidthPt;
+                        pageH = intrinsicSwap ? fallbackInfo.WidthPt : fallbackInfo.HeightPt;
+                    }
+
+                    int userDegrees = options.UserRotationDegrees;
+                    if (options.PageUserRotations is not null &&
+                        options.PageUserRotations.TryGetValue(pageIndex, out int perPageDegrees))
+                    {
+                        userDegrees = perPageDegrees;
+                    }
+
+                    int userRotationSteps = (PageCoordinateTransform.NormalizeRotation(userDegrees) / 90) % 4;
+                    if (userRotationSteps % 2 != 0)
+                    {
+                        (pageW, pageH) = (pageH, pageW);
+                    }
+
+                    double scale = Math.Min(printableW / Math.Max(1.0, pageW), printableH / Math.Max(1.0, pageH));
+                    int targetW = Math.Max(1, (int)Math.Round(pageW * scale));
+                    int targetH = Math.Max(1, (int)Math.Round(pageH * scale));
+                    int offsetX = (printableW - targetW) / 2;
+                    int offsetY = (printableH - targetH) / 2;
+
+                    if (Win32PrintInterop.StartPage(hdc) <= 0)
+                    {
+                        _ = Win32PrintInterop.AbortDoc(hdc);
+                        docStarted = false;
+                        return false;
+                    }
+
+                    int savedDc = Win32PrintInterop.SaveDC(hdc);
+                    try
+                    {
+                        int flags = (int)(PdfRenderFlags.Annotations | PdfRenderFlags.Printing);
+                        PdfiumNative.FPDF_RenderPage(
+                            hdc,
+                            page,
+                            offsetX,
+                            offsetY,
+                            targetW,
+                            targetH,
+                            userRotationSteps,
+                            flags);
+                    }
+                    finally
+                    {
+                        if (savedDc != 0)
+                        {
+                            _ = Win32PrintInterop.RestoreDC(hdc, savedDc);
+                        }
+                    }
+
+                    if (Win32PrintInterop.EndPage(hdc) <= 0)
+                    {
+                        _ = Win32PrintInterop.AbortDoc(hdc);
+                        docStarted = false;
+                        return false;
+                    }
+                }
+            }
+
+            _ = Win32PrintInterop.EndDoc(hdc);
+            docStarted = false;
+            return true;
+        }
+        catch
+        {
+            if (docStarted && hdc != nint.Zero)
+            {
+                _ = Win32PrintInterop.AbortDoc(hdc);
+            }
+
+            throw;
+        }
+        finally
+        {
+            if (docNamePtr != nint.Zero)
+            {
+                Marshal.FreeHGlobal(docNamePtr);
+            }
+
+            if (hdc != nint.Zero)
+            {
+                _ = Win32PrintInterop.DeleteDC(hdc);
+            }
         }
     }
 

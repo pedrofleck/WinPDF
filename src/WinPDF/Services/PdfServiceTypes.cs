@@ -101,7 +101,27 @@ public enum PdfRenderFlags
 
     /// <summary>Limit the image cache to reduce memory (<c>FPDF_RENDER_LIMITEDIMAGECACHE</c>).</summary>
     LimitedImageCache = 0x200,
+
+    /// <summary>Render for printing (<c>FPDF_PRINTING</c>).</summary>
+    Printing = 0x0800,
 }
+
+/// <summary>
+/// Options describing a native GDI print job executed on the dedicated PDFium worker thread.
+/// </summary>
+/// <param name="PrinterDc">Native printer device context (<c>HDC</c>) returned by <c>PrintDlgExW</c>. Always released via <c>DeleteDC</c> when the job finishes.</param>
+/// <param name="DocumentTitle">Document title shown in the Windows print spooler queue.</param>
+/// <param name="PageIndices">Zero-based page indices to print, in print order.</param>
+/// <param name="Copies">Number of copies to print.</param>
+/// <param name="PageUserRotations">Optional per-page extra user rotation in degrees (0, 90, 180, 270) keyed by zero-based page index.</param>
+/// <param name="UserRotationDegrees">Default extra user rotation in degrees (0, 90, 180, 270) applied to pages.</param>
+public sealed record PdfPrintJobOptions(
+    nint PrinterDc,
+    string DocumentTitle,
+    IReadOnlyList<int> PageIndices,
+    int Copies,
+    IReadOnlyDictionary<int, int>? PageUserRotations = null,
+    int UserRotationDegrees = 0);
 
 /// <summary>
 /// Describes one <c>FPDF_RenderPageBitmap</c> call: the native bitmap to allocate and where the page lands in it.

@@ -170,23 +170,59 @@ public sealed class ThumbnailPresenter : Grid
     {
         if (e.PropertyName == nameof(ThumbnailItemViewModel.Image))
         {
-            DispatcherQueue.TryEnqueue(UpdateImage);
+            if (DispatcherQueue.HasThreadAccess)
+            {
+                UpdateImage();
+            }
+            else
+            {
+                DispatcherQueue.TryEnqueue(UpdateImage);
+            }
         }
         else if (e.PropertyName is nameof(ThumbnailItemViewModel.WidthDip) or nameof(ThumbnailItemViewModel.HeightDip))
         {
-            DispatcherQueue.TryEnqueue(UpdateDimensions);
+            if (DispatcherQueue.HasThreadAccess)
+            {
+                UpdateDimensions();
+            }
+            else
+            {
+                DispatcherQueue.TryEnqueue(UpdateDimensions);
+            }
         }
     }
+
+    /// <summary>
+    /// Synchronizes the presenter and its ancestor card border to the current <see cref="Item"/> aspect-ratio dimensions.
+    /// </summary>
+    public void SyncCardDimensions() => UpdateDimensions();
 
     private void UpdateDimensions()
     {
         if (Item is not null)
         {
-            // Parent Border in ThumbnailsTabPage binds to WidthDip/HeightDip directly; stretch cleanly within it.
-            Width = double.NaN;
-            Height = double.NaN;
-            _image.Width = double.NaN;
-            _image.Height = double.NaN;
+            double w = Item.WidthDip;
+            double h = Item.HeightDip;
+            if (double.IsFinite(w) && double.IsFinite(h) && w > 0 && h > 0)
+            {
+                Width = w;
+                Height = h;
+                _image.Width = w;
+                _image.Height = h;
+
+                if (Parent is FrameworkElement parentGrid && parentGrid.Parent is Border cardBorder)
+                {
+                    cardBorder.Width = w;
+                    cardBorder.Height = h;
+                }
+            }
+            else
+            {
+                Width = double.NaN;
+                Height = double.NaN;
+                _image.Width = double.NaN;
+                _image.Height = double.NaN;
+            }
         }
         else if (PageInfo is not null)
         {

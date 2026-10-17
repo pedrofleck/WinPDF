@@ -74,6 +74,14 @@ internal static unsafe partial class PdfiumNative
 
     [LibraryImport(Lib)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial float FPDF_GetPageWidthF(PdfiumPageHandle page);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial float FPDF_GetPageHeightF(PdfiumPageHandle page);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial int FPDFPage_GetRotation(PdfiumPageHandle page);
 
     [LibraryImport(Lib)]
@@ -124,6 +132,18 @@ internal static unsafe partial class PdfiumNative
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial void FPDF_RenderPageBitmap(
         PdfiumBitmapHandle bitmap,
+        PdfiumPageHandle page,
+        int startX,
+        int startY,
+        int sizeX,
+        int sizeY,
+        int rotate,
+        int flags);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial void FPDF_RenderPage(
+        nint dc,
         PdfiumPageHandle page,
         int startX,
         int startY,

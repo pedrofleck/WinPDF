@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using WinPDF.Interop.Pdfium;
+using WinPDF.Interop.Printing;
 using WinPDF.Models;
 
 namespace WinPDF.Services;
@@ -111,6 +112,18 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
                     return true;
                 },
                 cancellationToken),
+            highPriority: true);
+    }
+
+    /// <inheritdoc/>
+    public Task<bool> PrintDocumentAsync(
+        long documentId,
+        PdfPrintJobOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return Enqueue<bool>(
+            new PrintDocumentJob(documentId, options, cancellationToken),
             highPriority: true);
     }
 
@@ -352,6 +365,47 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
         else
         {
             job.Execute(engine);
+        }
+    }
+
+    private sealed class PrintDocumentJob : PdfiumJob<bool>
+    {
+        private readonly PdfPrintJobOptions _options;
+        private int _dcReleased;
+
+        internal PrintDocumentJob(long documentId, PdfPrintJobOptions options, CancellationToken cancellationToken)
+            : base(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.PrintDocument(documentId, options, token),
+                cancellationToken)
+        {
+            _options = options;
+        }
+
+        public override void Execute(PdfiumEngine engine)
+        {
+            Interlocked.Exchange(ref _dcReleased, 1);
+            base.Execute(engine);
+        }
+
+        public override void Cancel()
+        {
+            ReleaseDcIfNeeded();
+            base.Cancel();
+        }
+
+        public override void Abort(Exception? reason)
+        {
+            ReleaseDcIfNeeded();
+            base.Abort(reason);
+        }
+
+        private void ReleaseDcIfNeeded()
+        {
+            if (Interlocked.Exchange(ref _dcReleased, 1) == 0 && _options.PrinterDc != nint.Zero)
+            {
+                _ = Win32PrintInterop.DeleteDC(_options.PrinterDc);
+            }
         }
     }
 

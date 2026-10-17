@@ -66,6 +66,20 @@ public interface IPdfService : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Prints the specified document pages directly to a native Win32 printer <c>HDC</c> using PDFium's
+    /// vector GDI renderer (<c>FPDF_RenderPage</c>) on the dedicated worker thread.
+    /// Always releases <see cref="PdfPrintJobOptions.PrinterDc"/> via <c>DeleteDC</c> when finished.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="options">Print job parameters including the native printer device context and page indices.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns><c>true</c> if the print job completed and was spooled; otherwise <c>false</c>.</returns>
+    Task<bool> PrintDocumentAsync(
+        long documentId,
+        PdfPrintJobOptions options,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Rasterizes an entire page at the specified pixel size.
     /// </summary>
     /// <param name="documentId">Document identifier.</param>

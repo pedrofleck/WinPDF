@@ -315,7 +315,7 @@
 
                             <MenuFlyoutItem
                                 x:Uid="Menu_Print"
-                                Click="OnPrintClick"
+                                Command="{x:Bind ViewModel.PrintCommand}"
                                 IsEnabled="{x:Bind ViewModel.HasDocument, Mode=OneWay}"
                                 KeyboardAcceleratorTextOverride="Ctrl+P">
                                 <MenuFlyoutItem.Icon>
