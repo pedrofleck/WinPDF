@@ -49,10 +49,10 @@ Checklist de melhorias de usabilidade, ergonomia visual (Fluent 2) e recursos es
 ---
 
 ## 📦 Pacote QoL 4: Teclado, Botão Direito, Modo Noturno e Pesquisa
-- [ ] **Correção de Foco e Controle por Teclas Direcionais (`Up`, `Down`, `Left`, `Right`).**
-- [ ] **Atalhos Clássicos:** `PageDown`/`PageUp`, `Espaço`/`Shift+Espaço`, `Home`/`End`, `Ctrl+Roda do Mouse`, `Ctrl+0`, `F11`, `F5`, `Ctrl+R` / `Ctrl+Shift+R`.
-- [ ] **Menu de Contexto (Botão Direito do Mouse na Página).**
-- [ ] **Botão de Pesquisa no Documento Funcional (Ctrl + F):** Botão de pesquisa abre uma barra no topo da interface, logo abaixo da titlebar e centralizada, com uma barra de busca, botões anterior e próximo e botão para diferenciar maiúscula de minúscula.
+- [x] **Correção de Foco e Controle por Teclas Direcionais (`Up`, `Down`, `Left`, `Right`).**
+- [x] **Atalhos Clássicos:** `PageDown`/`PageUp`, `Espaço`/`Shift+Espaço`, `Home`/`End`, `Ctrl+Roda do Mouse`, `Ctrl+0`, `F11`, `F5`, `Ctrl+R` / `Ctrl+Shift+R`.
+- [x] **Menu de Contexto (Botão Direito do Mouse na Página).**
+- [x] **Botão de Pesquisa no Documento Funcional (Ctrl + F):** Botão de pesquisa abre uma barra no topo da interface, logo abaixo da titlebar e centralizada, com uma barra de busca, botões anterior e próximo e botão para diferenciar maiúscula de minúscula.
 
 ---
 

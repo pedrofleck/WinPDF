@@ -79,6 +79,17 @@ public sealed partial class ShellViewModel : ObservableObject
     public partial bool IsAnnotationToolbarOpen { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the floating document search bar is open.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsSearchOpen { get; set; }
+
+    /// <summary>
+    /// Event raised when the floating search bar should receive keyboard focus and select its query text.
+    /// </summary>
+    public event Action? SearchFocusRequested;
+
+    /// <summary>
     /// Gets or sets the visual theme preference of the application.
     /// </summary>
     [ObservableProperty]
@@ -254,6 +265,11 @@ public sealed partial class ShellViewModel : ObservableObject
             newValue.IsPresentationMode = IsPresentationMode;
             newValue.PropertyChanged += OnDocumentPropertyChanged;
             newValue.SetThumbnailsActive(IsSidebarOpen && SidebarTab == SidebarTab.Thumbnails);
+        }
+        else
+        {
+            IsSearchOpen = false;
+            IsAnnotationToolbarOpen = false;
         }
 
         UpdateTitle();
@@ -483,6 +499,8 @@ public sealed partial class ShellViewModel : ObservableObject
 
         _sidebarOpenBeforePresentation = IsSidebarOpen;
         IsSidebarOpen = false;
+        IsSearchOpen = false;
+        IsAnnotationToolbarOpen = false;
         CurrentDocument.IsContinuous = false;
         CurrentDocument.IsDoublePage = false;
         ViewMode = ViewMode.Paged;
@@ -573,6 +591,83 @@ public sealed partial class ShellViewModel : ObservableObject
     public void ToggleAnnotationToolbar()
     {
         IsAnnotationToolbarOpen = !IsAnnotationToolbarOpen;
+    }
+
+    /// <summary>
+    /// Opens the floating search bar and requests focus on the search input box.
+    /// </summary>
+    [RelayCommand]
+    public void OpenSearch()
+    {
+        if (CurrentDocument is null)
+        {
+            return;
+        }
+
+        if (!IsSearchOpen)
+        {
+            IsSearchOpen = true;
+        }
+
+        SearchFocusRequested?.Invoke();
+    }
+
+    /// <summary>
+    /// Closes the floating search bar.
+    /// </summary>
+    [RelayCommand]
+    public void CloseSearch()
+    {
+        if (IsSearchOpen)
+        {
+            IsSearchOpen = false;
+        }
+    }
+
+    /// <summary>
+    /// Toggles the visibility of the floating search bar.
+    /// </summary>
+    [RelayCommand]
+    public void ToggleSearch()
+    {
+        if (CurrentDocument is null)
+        {
+            IsSearchOpen = false;
+            return;
+        }
+
+        IsSearchOpen = !IsSearchOpen;
+        if (IsSearchOpen)
+        {
+            SearchFocusRequested?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Closes the active PDF document and returns to the initial empty state screen.
+    /// </summary>
+    [RelayCommand]
+    public void CloseDocument()
+    {
+        if (CurrentDocument is null)
+        {
+            return;
+        }
+
+        IsSearchOpen = false;
+        IsAnnotationToolbarOpen = false;
+        if (IsPresentationMode)
+        {
+            IsPresentationMode = false;
+            IsFullScreen = false;
+        }
+
+        if (IsSettingsOpen)
+        {
+            IsSettingsOpen = false;
+        }
+
+        CurrentDocument = null;
     }
 
     /// <summary>

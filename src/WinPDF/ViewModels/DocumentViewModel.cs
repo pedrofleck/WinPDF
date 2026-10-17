@@ -449,6 +449,10 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         if (!IsContinuous)
         {
             UpdateDisplayedRows();
+            if (Math.Abs(FractionalPageIndex - value) > 0.001)
+            {
+                FractionalPageIndex = value;
+            }
         }
 
         for (int i = 0; i < Thumbnails.Count; i++)
@@ -521,6 +525,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             else if (!IsContinuous)
             {
                 UpdateDisplayedRows();
+            }
+
+            if (Math.Abs(FractionalPageIndex - targetIndex) > 0.001)
+            {
+                FractionalPageIndex = targetIndex;
             }
         }
     }

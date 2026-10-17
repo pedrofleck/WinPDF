@@ -248,6 +248,29 @@ public sealed partial class MainWindow : Window
         _wasSidebarClosedByNarrowWindow = false;
     }
 
+    private void OnRootGridPreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Handled)
+        {
+            return;
+        }
+
+        if (ViewModel.IsSettingsOpen)
+        {
+            if (e.Key == Windows.System.VirtualKey.Escape)
+            {
+                e.Handled = true;
+                ViewModel.CloseSettings();
+            }
+            return;
+        }
+
+        if (MainContentFrame.Content is DocumentView docView)
+        {
+            docView.HandleWindowPreviewKeyDown(e);
+        }
+    }
+
     private void RegisterTitleBarAnimatedIconPointerHandlers()
     {
         HookAnimatedIconButton(SidebarToggleButton, SidebarToggleAnimatedIcon);

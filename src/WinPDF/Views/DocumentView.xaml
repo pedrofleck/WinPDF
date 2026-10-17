@@ -25,10 +25,15 @@
         PointerMoved="OnDocumentPointerMoved">
         <!-- Empty State quando nenhum documento está aberto -->
         <StackPanel
+            x:Name="EmptyStatePanel"
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
+            RenderTransformOrigin="0.5,0.5"
             Spacing="12"
             Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.HasDocument), Mode=OneWay}">
+            <StackPanel.RenderTransform>
+                <CompositeTransform x:Name="EmptyStateTransform" />
+            </StackPanel.RenderTransform>
             <FontIcon
                 HorizontalAlignment="Center"
                 FontSize="56"
@@ -63,14 +68,148 @@
 
         <!-- Área de Exibição do Documento -->
         <Grid
+            x:Name="DocumentAreaGrid"
+            RenderTransformOrigin="0.5,0.5"
             Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}"
             RowDefinitions="*,Auto">
+            <Grid.RenderTransform>
+                <CompositeTransform x:Name="DocumentAreaTransform" />
+            </Grid.RenderTransform>
 
             <!-- Row 0: Visualizador Unificado do Documento (Contínuo e Paginado) -->
             <Grid
                 x:Name="ScrollViewerContentRoot"
                 Grid.Row="0"
                 Background="{x:Bind converters:UiHelpers.ViewerBackground(ViewModel.IsPresentationMode), Mode=OneWay}">
+                <Grid.ContextFlyout>
+                    <MenuFlyout>
+                        <MenuFlyoutItem
+                            x:Uid="Context_PrevPage"
+                            Command="{x:Bind ViewModel.PreviousPageCommand}"
+                            KeyboardAcceleratorTextOverride="PgUp">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE76B;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutItem
+                            x:Uid="Context_NextPage"
+                            Command="{x:Bind ViewModel.NextPageCommand}"
+                            KeyboardAcceleratorTextOverride="PgDn">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE76C;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutSeparator />
+
+                        <MenuFlyoutItem
+                            x:Uid="Context_FitPage"
+                            Click="OnFitPageClick"
+                            KeyboardAcceleratorTextOverride="Ctrl+0">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xF616;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutItem
+                            x:Uid="Context_FitWidth"
+                            Click="OnFitWidthClick"
+                            KeyboardAcceleratorTextOverride="Ctrl+2">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xF617;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutItem
+                            x:Uid="Context_RotateClockwise"
+                            Command="{x:Bind ViewModel.RotateClockwiseCommand}"
+                            KeyboardAcceleratorTextOverride="Ctrl+R">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE7AD;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutItem
+                            x:Uid="Context_RotateCounterClockwise"
+                            Command="{x:Bind ViewModel.RotateCounterClockwiseCommand}"
+                            KeyboardAcceleratorTextOverride="Ctrl+Shift+R">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE7A7;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <ToggleMenuFlyoutItem
+                            x:Uid="Context_NightMode"
+                            Command="{x:Bind ViewModel.ToggleNightModeCommand}"
+                            IsChecked="{x:Bind ViewModel.IsNightMode, Mode=OneWay}"
+                            KeyboardAcceleratorTextOverride="Ctrl+I">
+                            <ToggleMenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE708;" />
+                            </ToggleMenuFlyoutItem.Icon>
+                        </ToggleMenuFlyoutItem>
+
+                        <MenuFlyoutSeparator />
+
+                        <MenuFlyoutItem
+                            x:Uid="Context_Presentation"
+                            Command="{x:Bind ViewModel.StartPresentationCommand}"
+                            KeyboardAcceleratorTextOverride="F5">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE786;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutItem
+                            x:Uid="Context_FullScreen"
+                            Command="{x:Bind ViewModel.ToggleFullScreenCommand}"
+                            KeyboardAcceleratorTextOverride="F11">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE740;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutSeparator />
+
+                        <MenuFlyoutItem
+                            x:Uid="Context_SaveAs"
+                            Command="{x:Bind ViewModel.SaveAsCommand}"
+                            KeyboardAcceleratorTextOverride="Ctrl+S">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE74E;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutItem
+                            x:Uid="Context_Print"
+                            Click="OnContextPrintClick"
+                            KeyboardAcceleratorTextOverride="Ctrl+P">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE749;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutItem
+                            x:Uid="Context_Properties"
+                            Command="{x:Bind ViewModel.ShowPropertiesCommand}"
+                            KeyboardAcceleratorTextOverride="Alt+Enter">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE946;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutSeparator />
+
+                        <MenuFlyoutItem
+                            x:Uid="Context_CloseDocument"
+                            Command="{x:Bind ViewModel.CloseDocumentCommand}"
+                            KeyboardAcceleratorTextOverride="Ctrl+W">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE711;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+                    </MenuFlyout>
+                </Grid.ContextFlyout>
 
                 <ScrollViewer
                     x:Name="ContinuousScrollViewer"
@@ -242,58 +381,182 @@
                     </Border>
                 </Grid>
 
-                <!-- Barra Flutuante de Ferramentas de Anotação (Topo Centralizado) -->
-                <Border
+                <!-- Container Superior Centralizado para Busca Flutuante (Acrylic) e Barra de Anotações -->
+                <StackPanel
                     HorizontalAlignment="Center"
                     VerticalAlignment="Top"
-                    Margin="0,12,0,0"
-                    Padding="6,4,6,4"
-                    Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
-                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="1"
-                    CornerRadius="8"
-                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsAnnotationToolbarOpen), Mode=OneWay}">
-                    <StackPanel Orientation="Horizontal" Spacing="4">
-                        <ToggleButton
-                            x:Uid="ToolSelectButton"
-                            Click="OnToolSelectClicked"
-                            IsChecked="{x:Bind converters:UiHelpers.IsSelectTool(ViewModel.ActiveTool), Mode=OneWay}">
-                            <FontIcon FontSize="14" Glyph="&#xEF20;" />
-                        </ToggleButton>
-                        <ToggleButton
-                            x:Uid="ToolPenButton"
-                            Click="OnToolPenClicked"
-                            IsChecked="{x:Bind converters:UiHelpers.IsPenTool(ViewModel.ActiveTool), Mode=OneWay}">
-                            <FontIcon FontSize="14" Glyph="&#xED63;" />
-                        </ToggleButton>
-                        <ToggleButton
-                            x:Uid="ToolHighlighterButton"
-                            Click="OnToolHighlighterClicked"
-                            IsChecked="{x:Bind converters:UiHelpers.IsHighlighterTool(ViewModel.ActiveTool), Mode=OneWay}">
-                            <FontIcon FontSize="14" Glyph="&#xE891;" />
-                        </ToggleButton>
-                        <ToggleButton
-                            x:Uid="ToolEraserButton"
-                            Click="OnToolEraserClicked"
-                            IsChecked="{x:Bind converters:UiHelpers.IsEraserTool(ViewModel.ActiveTool), Mode=OneWay}">
-                            <FontIcon FontSize="14" Glyph="&#xE75C;" />
-                        </ToggleButton>
-                        <ToggleButton
-                            x:Uid="ToolTextNoteButton"
-                            Click="OnToolTextNoteClicked"
-                            IsChecked="{x:Bind converters:UiHelpers.IsTextNoteTool(ViewModel.ActiveTool), Mode=OneWay}">
-                            <FontIcon FontSize="14" Glyph="&#xE70B;" />
-                        </ToggleButton>
+                    Margin="0,10,0,0"
+                    Spacing="8"
+                    Canvas.ZIndex="95">
 
-                        <AppBarSeparator Margin="4,2,4,2" />
+                    <!-- Janela Flutuante de Busca em Acrylic (Estilo Bloco de Notas do Windows 11) -->
+                    <Border
+                        x:Name="FloatingSearchBar"
+                        HorizontalAlignment="Center"
+                        Padding="8,5"
+                        Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+                        BackgroundSizing="InnerBorderEdge"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        RenderTransformOrigin="0.5,0.0"
+                        Translation="0,0,32"
+                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsSearchOpen), Mode=OneWay}">
+                        <Border.Shadow>
+                            <ThemeShadow />
+                        </Border.Shadow>
+                        <Border.RenderTransform>
+                            <CompositeTransform x:Name="FloatingSearchBarTransform" />
+                        </Border.RenderTransform>
+                        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                            <Grid VerticalAlignment="Center">
+                                <TextBox
+                                    x:Name="DocumentSearchBox"
+                                    x:Uid="SearchBox"
+                                    Width="230"
+                                    Height="30"
+                                    MinHeight="30"
+                                    Padding="8,4,28,4"
+                                    FontSize="13"
+                                    VerticalAlignment="Center"
+                                    VerticalContentAlignment="Center"
+                                    CornerRadius="4"
+                                    KeyDown="OnDocumentSearchBoxKeyDown">
+                                    <TextBox.Resources>
+                                        <x:Double x:Key="TextControlThemeMinHeight">30</x:Double>
+                                    </TextBox.Resources>
+                                </TextBox>
+                                <FontIcon
+                                    Glyph="&#xE721;"
+                                    FontSize="12"
+                                    Margin="0,0,9,0"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    IsHitTestVisible="False" />
+                            </Grid>
 
-                        <ToggleButton
-                            x:Uid="TouchDrawingToggle"
-                            IsChecked="{x:Bind ViewModel.IsTouchDrawingEnabled, Mode=TwoWay}">
-                            <FontIcon FontSize="14" Glyph="&#xED5F;" />
-                        </ToggleButton>
-                    </StackPanel>
-                </Border>
+                            <Button
+                                x:Name="SearchPrevButton"
+                                x:Uid="SearchPrevButton"
+                                Width="30"
+                                Height="30"
+                                Padding="0"
+                                CornerRadius="4"
+                                IsTabStop="False"
+                                Click="OnSearchPrevClick"
+                                Style="{StaticResource SubtleButtonStyle}">
+                                <FontIcon FontSize="12" Glyph="&#xE70E;" />
+                            </Button>
+
+                            <Button
+                                x:Name="SearchNextButton"
+                                x:Uid="SearchNextButton"
+                                Width="30"
+                                Height="30"
+                                Padding="0"
+                                CornerRadius="4"
+                                IsTabStop="False"
+                                Click="OnSearchNextClick"
+                                Style="{StaticResource SubtleButtonStyle}">
+                                <FontIcon FontSize="12" Glyph="&#xE70D;" />
+                            </Button>
+
+                            <ToggleButton
+                                x:Name="SearchMatchCaseToggle"
+                                x:Uid="SearchMatchCaseToggle"
+                                Width="32"
+                                Height="30"
+                                MinWidth="32"
+                                MinHeight="30"
+                                Padding="0"
+                                CornerRadius="4"
+                                IsTabStop="False"
+                                Background="Transparent"
+                                BorderThickness="0">
+                                <TextBlock
+                                    Text="Aa"
+                                    FontSize="12"
+                                    FontWeight="SemiBold"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center" />
+                            </ToggleButton>
+
+                            <Border
+                                Width="1"
+                                Height="18"
+                                Margin="2,0"
+                                VerticalAlignment="Center"
+                                Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                            <Button
+                                x:Name="SearchCloseButton"
+                                x:Uid="SearchCloseButton"
+                                Width="30"
+                                Height="30"
+                                Padding="0"
+                                CornerRadius="4"
+                                IsTabStop="False"
+                                Click="OnSearchCloseClick"
+                                Style="{StaticResource SubtleButtonStyle}">
+                                <FontIcon FontSize="11" Glyph="&#xE711;" />
+                            </Button>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Barra Flutuante de Ferramentas de Anotação (Topo Centralizado) -->
+                    <Border
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Padding="6,4,6,4"
+                        Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsAnnotationToolbarOpen), Mode=OneWay}">
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <ToggleButton
+                                x:Uid="ToolSelectButton"
+                                Click="OnToolSelectClicked"
+                                IsChecked="{x:Bind converters:UiHelpers.IsSelectTool(ViewModel.ActiveTool), Mode=OneWay}">
+                                <FontIcon FontSize="14" Glyph="&#xEF20;" />
+                            </ToggleButton>
+                            <ToggleButton
+                                x:Uid="ToolPenButton"
+                                Click="OnToolPenClicked"
+                                IsChecked="{x:Bind converters:UiHelpers.IsPenTool(ViewModel.ActiveTool), Mode=OneWay}">
+                                <FontIcon FontSize="14" Glyph="&#xED63;" />
+                            </ToggleButton>
+                            <ToggleButton
+                                x:Uid="ToolHighlighterButton"
+                                Click="OnToolHighlighterClicked"
+                                IsChecked="{x:Bind converters:UiHelpers.IsHighlighterTool(ViewModel.ActiveTool), Mode=OneWay}">
+                                <FontIcon FontSize="14" Glyph="&#xE891;" />
+                            </ToggleButton>
+                            <ToggleButton
+                                x:Uid="ToolEraserButton"
+                                Click="OnToolEraserClicked"
+                                IsChecked="{x:Bind converters:UiHelpers.IsEraserTool(ViewModel.ActiveTool), Mode=OneWay}">
+                                <FontIcon FontSize="14" Glyph="&#xE75C;" />
+                            </ToggleButton>
+                            <ToggleButton
+                                x:Uid="ToolTextNoteButton"
+                                Click="OnToolTextNoteClicked"
+                                IsChecked="{x:Bind converters:UiHelpers.IsTextNoteTool(ViewModel.ActiveTool), Mode=OneWay}">
+                                <FontIcon FontSize="14" Glyph="&#xE70B;" />
+                            </ToggleButton>
+
+                            <AppBarSeparator Margin="4,2,4,2" />
+
+                            <ToggleButton
+                                x:Uid="TouchDrawingToggle"
+                                IsTabStop="False"
+                                IsChecked="{x:Bind ViewModel.IsTouchDrawingEnabled, Mode=TwoWay}">
+                                <FontIcon FontSize="14" Glyph="&#xED5F;" />
+                            </ToggleButton>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
             </Grid>
 
             <!-- Row 1: Barra de Status Inferior Nativa de 32 DIPs (estilo Paint / Fotos / Notepad) -->
@@ -521,6 +784,7 @@
                             Maximum="500"
                             StepFrequency="5"
                             VerticalAlignment="Center"
+                            IsTabStop="False"
                             IsThumbToolTipEnabled="False"
                             ValueChanged="OnStatusBarZoomSliderValueChanged"
                             ToolTipService.ToolTip="{x:Bind ZoomSliderToolTipText, Mode=OneTime}" />

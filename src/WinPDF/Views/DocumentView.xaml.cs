@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Globalization;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Navigation;
 using WinPDF.Controls;
 using WinPDF.Helpers;
@@ -35,6 +36,8 @@ public sealed partial class DocumentView : Page
     private bool _isApplyingFitZoom;
     private UIElement? _hookedScrollTemplateRoot;
     private PointerEventHandler? _wheelHandler;
+    private Storyboard? _transitionStoryboard;
+    private Storyboard? _searchBarStoryboard;
 
     /// <summary>Gets the localized page prefix text.</summary>
     public string PagePrefixText => ResourceStrings.Get(ResourceKeys.StatusBarPagePrefix);
@@ -135,7 +138,10 @@ public sealed partial class DocumentView : Page
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         EnsureScrollViewerWheelHook();
+        ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        ViewModel.SearchFocusRequested -= OnSearchFocusRequested;
+        ViewModel.SearchFocusRequested += OnSearchFocusRequested;
         SubscribeToDocument(ViewModel.CurrentDocument);
 
         if (ViewModel.CurrentDocument is not null)
@@ -172,6 +178,9 @@ public sealed partial class DocumentView : Page
         _presentationHideTimer.Tick -= OnPresentationHideTimerTick;
 
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
+        ViewModel.SearchFocusRequested -= OnSearchFocusRequested;
+        _transitionStoryboard?.Stop();
+        _searchBarStoryboard?.Stop();
         UnsubscribeFromDocument();
 
         _zoomDebounceCts?.Cancel();
@@ -244,6 +253,24 @@ public sealed partial class DocumentView : Page
             if (ViewModel.CurrentDocument is not null)
             {
                 ScrollToPage(ViewModel.CurrentDocument.CurrentPageIndex);
+                PlayDocumentOpenTransitionAnimation();
+                DispatcherQueue.TryEnqueue(ReturnFocusToViewer);
+            }
+            else
+            {
+                PlayEmptyStateTransitionAnimation();
+            }
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.IsSearchOpen))
+        {
+            if (ViewModel.IsSearchOpen)
+            {
+                PlaySearchBarOpenAnimation();
+                FocusSearchBox();
+            }
+            else
+            {
+                ReturnFocusToViewer();
             }
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsPresentationMode) || e.PropertyName == nameof(ShellViewModel.IsFullScreen))
@@ -550,7 +577,7 @@ public sealed partial class DocumentView : Page
         }
     }
 
-    private int CalculateCurrentPageIndexFromScroll()
+    private int CalculateCurrentPageIndexFromScroll(double? explicitVerticalOffset = null)
     {
         if (ViewModel.CurrentDocument is null || ViewModel.CurrentDocument.Pages.Count == 0)
         {
@@ -562,8 +589,9 @@ public sealed partial class DocumentView : Page
             return ViewModel.CurrentDocument.CurrentPageIndex;
         }
 
+        double vOffset = explicitVerticalOffset ?? ContinuousScrollViewer.VerticalOffset;
         double zoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor);
-        double centerY = (ContinuousScrollViewer.VerticalOffset + (ContinuousScrollViewer.ViewportHeight / 2.0)) / zoom;
+        double centerY = (vOffset + (ContinuousScrollViewer.ViewportHeight / 2.0)) / zoom;
 
         double currentY = 24.0; // Margin.Top
         var pages = ViewModel.CurrentDocument.Pages;
@@ -581,7 +609,7 @@ public sealed partial class DocumentView : Page
         return pages.Count - 1;
     }
 
-    private double CalculateFractionalPageIndex()
+    private double CalculateFractionalPageIndex(double? explicitVerticalOffset = null)
     {
         if (ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
         {
@@ -593,8 +621,9 @@ public sealed partial class DocumentView : Page
             return doc.CurrentPageIndex;
         }
 
+        double vOffset = explicitVerticalOffset ?? ContinuousScrollViewer.VerticalOffset;
         double zoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor);
-        double centerY = (ContinuousScrollViewer.VerticalOffset + (ContinuousScrollViewer.ViewportHeight / 2.0)) / zoom;
+        double centerY = (vOffset + (ContinuousScrollViewer.ViewportHeight / 2.0)) / zoom;
 
         double currentY = 24.0;
         int step = doc.IsDoublePage ? 2 : 1;
@@ -620,29 +649,42 @@ public sealed partial class DocumentView : Page
 
     private void ScrollToPage(int pageIndex)
     {
-        if (ViewModel.CurrentDocument is null || pageIndex < 0 || pageIndex >= ViewModel.CurrentDocument.Pages.Count)
+        if (ViewModel.CurrentDocument is not { } doc || pageIndex < 0 || pageIndex >= doc.Pages.Count)
         {
             return;
         }
 
-        if (ViewModel.CurrentDocument.IsContinuous)
+        if (ContinuousScrollViewer.VerticalScrollMode != ScrollMode.Enabled)
+        {
+            ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Enabled;
+        }
+
+        if (doc.IsContinuous)
         {
             double zoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor);
             double targetY = 24.0;
-            var pages = ViewModel.CurrentDocument.Pages;
-            int step = ViewModel.CurrentDocument.IsDoublePage ? 2 : 1;
+            var pages = doc.Pages;
+            int step = doc.IsDoublePage ? 2 : 1;
             int targetRow = pageIndex / step;
             for (int r = 0; r < targetRow && r * step < pages.Count; r++)
             {
                 targetY += pages[r * step].DisplayHeightDip + 16.0;
             }
 
-            double verticalOffset = targetY * zoom;
+            double verticalOffset = Math.Clamp(targetY * zoom, 0.0, Math.Max(0.0, ContinuousScrollViewer.ScrollableHeight));
             ContinuousScrollViewer.ChangeView(null, verticalOffset, null, disableAnimation: true);
+            doc.LastVerticalOffset = verticalOffset;
+            doc.FractionalPageIndex = CalculateFractionalPageIndex(verticalOffset);
         }
         else
         {
             ContinuousScrollViewer.ChangeView(0, 0, null, disableAnimation: true);
+            doc.LastVerticalOffset = 0;
+            doc.FractionalPageIndex = pageIndex;
+            if (_isFittedVertically || ViewModel.IsPresentationMode)
+            {
+                DispatcherQueue.TryEnqueue(() => ExecuteFitVertical(force: true));
+            }
         }
 
         ScheduleViewportUpdate();
@@ -1093,7 +1135,13 @@ public sealed partial class DocumentView : Page
 
     private void OnEscapeAcceleratorInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
-        if (ViewModel.IsPresentationMode)
+        if (ViewModel.IsSearchOpen)
+        {
+            args.Handled = true;
+            ViewModel.CloseSearch();
+            ReturnFocusToViewer();
+        }
+        else if (ViewModel.IsPresentationMode)
         {
             args.Handled = true;
             ViewModel.ExitPresentationCommand.Execute(null);
@@ -1103,6 +1151,701 @@ public sealed partial class DocumentView : Page
             args.Handled = true;
             ViewModel.ToggleFullScreenCommand.Execute(null);
         }
+    }
+
+    /// <summary>
+    /// Handles window-level tunneling key events for document navigation and classic keyboard shortcuts.
+    /// </summary>
+    /// <param name="e">Key event arguments.</param>
+    public void HandleWindowPreviewKeyDown(KeyRoutedEventArgs e)
+    {
+        if (e.Handled)
+        {
+            return;
+        }
+
+        object? focusedObj = XamlRoot is not null ? FocusManager.GetFocusedElement(XamlRoot) : null;
+        if (IsInsideContentDialog(focusedObj as DependencyObject))
+        {
+            return;
+        }
+
+        bool isCtrl = IsKeyDown(Windows.System.VirtualKey.Control)
+            || IsKeyDown(Windows.System.VirtualKey.LeftControl)
+            || IsKeyDown(Windows.System.VirtualKey.RightControl);
+        bool isShift = IsKeyDown(Windows.System.VirtualKey.Shift)
+            || IsKeyDown(Windows.System.VirtualKey.LeftShift)
+            || IsKeyDown(Windows.System.VirtualKey.RightShift);
+        bool isAlt = IsKeyDown(Windows.System.VirtualKey.Menu)
+            || IsKeyDown(Windows.System.VirtualKey.LeftMenu)
+            || IsKeyDown(Windows.System.VirtualKey.RightMenu);
+
+        // Global shortcuts that work even when the search box or page box is focused:
+        if (isCtrl && !isAlt)
+        {
+            if (e.Key == Windows.System.VirtualKey.W || e.Key == Windows.System.VirtualKey.F4)
+            {
+                if (ViewModel.HasDocument)
+                {
+                    e.Handled = true;
+                    ViewModel.CloseDocument();
+                }
+                return;
+            }
+
+            if (e.Key == Windows.System.VirtualKey.O && !isShift)
+            {
+                e.Handled = true;
+                _ = ViewModel.OpenFileCommand.ExecuteAsync(null);
+                return;
+            }
+
+            if (e.Key == Windows.System.VirtualKey.F && !isShift)
+            {
+                if (ViewModel.HasDocument)
+                {
+                    e.Handled = true;
+                    ViewModel.OpenSearch();
+                }
+                return;
+            }
+        }
+
+        if (!isCtrl && !isAlt)
+        {
+            if (e.Key == Windows.System.VirtualKey.F3 && ViewModel.HasDocument)
+            {
+                e.Handled = true;
+                if (!ViewModel.IsSearchOpen)
+                {
+                    ViewModel.OpenSearch();
+                }
+                return;
+            }
+
+            if (e.Key == Windows.System.VirtualKey.F5 && ViewModel.HasDocument)
+            {
+                e.Handled = true;
+                ViewModel.StartPresentation();
+                return;
+            }
+
+            if (e.Key == Windows.System.VirtualKey.F11)
+            {
+                e.Handled = true;
+                ViewModel.ToggleFullScreen();
+                return;
+            }
+        }
+
+        // If a TextBox or PasswordBox has focus, let it handle its own text editing and caret navigation.
+        if (focusedObj is TextBox or PasswordBox)
+        {
+            return;
+        }
+
+        if (!isCtrl && !isAlt && e.Key == Windows.System.VirtualKey.Escape)
+        {
+            if (ViewModel.IsSearchOpen)
+            {
+                e.Handled = true;
+                ViewModel.CloseSearch();
+                ReturnFocusToViewer();
+                return;
+            }
+
+            if (ViewModel.IsPresentationMode)
+            {
+                e.Handled = true;
+                ViewModel.ExitPresentation();
+                return;
+            }
+
+            if (ViewModel.IsFullScreen)
+            {
+                e.Handled = true;
+                ViewModel.ToggleFullScreen();
+                return;
+            }
+
+            if (ViewModel.IsAnnotationToolbarOpen)
+            {
+                e.Handled = true;
+                ViewModel.IsAnnotationToolbarOpen = false;
+                return;
+            }
+        }
+
+        if (ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return;
+        }
+
+        if (isCtrl && !isAlt)
+        {
+            switch (e.Key)
+            {
+                case Windows.System.VirtualKey.G:
+                    e.Handled = true;
+                    StatusBarPageBox.Focus(FocusState.Programmatic);
+                    StatusBarPageBox.SelectAll();
+                    return;
+
+                case Windows.System.VirtualKey.S:
+                    e.Handled = true;
+                    _ = ViewModel.SaveAsCommand.ExecuteAsync(null);
+                    return;
+
+                case Windows.System.VirtualKey.P:
+                    e.Handled = true;
+                    _ = ViewModel.PrintAsync();
+                    return;
+
+                case Windows.System.VirtualKey.N when isShift:
+                    e.Handled = true;
+                    _ = ViewModel.OpenCopyCommand.ExecuteAsync(null);
+                    return;
+
+                case Windows.System.VirtualKey.O when isShift:
+                    e.Handled = true;
+                    _ = ViewModel.OpenWithCommand.ExecuteAsync(null);
+                    return;
+
+                case Windows.System.VirtualKey.B:
+                    e.Handled = true;
+                    ViewModel.ToggleSidebar();
+                    return;
+
+                case Windows.System.VirtualKey.I:
+                    e.Handled = true;
+                    ViewModel.ToggleNightMode();
+                    return;
+
+                case Windows.System.VirtualKey.R:
+                    e.Handled = true;
+                    if (isShift)
+                    {
+                        ViewModel.RotateCounterClockwise();
+                    }
+                    else
+                    {
+                        ViewModel.RotateClockwise();
+                    }
+                    return;
+
+                case Windows.System.VirtualKey.Right:
+                    e.Handled = true;
+                    ViewModel.RotateClockwise();
+                    return;
+
+                case Windows.System.VirtualKey.Left:
+                    e.Handled = true;
+                    ViewModel.RotateCounterClockwise();
+                    return;
+
+                case Windows.System.VirtualKey.Add:
+                case (Windows.System.VirtualKey)187:
+                    e.Handled = true;
+                    OnZoomInClick(this, new RoutedEventArgs());
+                    return;
+
+                case Windows.System.VirtualKey.Subtract:
+                case (Windows.System.VirtualKey)189:
+                    e.Handled = true;
+                    OnZoomOutClick(this, new RoutedEventArgs());
+                    return;
+
+                case Windows.System.VirtualKey.Number0:
+                case Windows.System.VirtualKey.NumberPad0:
+                    e.Handled = true;
+                    ExecuteFitVertical(force: true);
+                    return;
+
+                case Windows.System.VirtualKey.Number1:
+                case Windows.System.VirtualKey.NumberPad1:
+                    e.Handled = true;
+                    _isFittedVertically = false;
+                    ApplyZoomAroundCenter(1.0f);
+                    return;
+
+                case Windows.System.VirtualKey.Number2:
+                case Windows.System.VirtualKey.NumberPad2:
+                    e.Handled = true;
+                    ExecuteFitHorizontal(force: true);
+                    return;
+
+                case Windows.System.VirtualKey.Home:
+                    e.Handled = true;
+                    NavigateToDocumentStart();
+                    return;
+
+                case Windows.System.VirtualKey.End:
+                    e.Handled = true;
+                    NavigateToDocumentEnd();
+                    return;
+            }
+
+            return;
+        }
+
+        if (isAlt && !isCtrl && e.Key == Windows.System.VirtualKey.Enter)
+        {
+            e.Handled = true;
+            _ = ViewModel.ShowPropertiesCommand.ExecuteAsync(null);
+            return;
+        }
+
+        if (!isCtrl && !isAlt)
+        {
+            switch (e.Key)
+            {
+                case Windows.System.VirtualKey.F9:
+                    e.Handled = true;
+                    ViewModel.ToggleSidebar();
+                    return;
+
+                case Windows.System.VirtualKey.Down:
+                    e.Handled = true;
+                    HandleDirectionalVertical(down: true, isPageStep: false);
+                    return;
+
+                case Windows.System.VirtualKey.Up:
+                    e.Handled = true;
+                    HandleDirectionalVertical(down: false, isPageStep: false);
+                    return;
+
+                case Windows.System.VirtualKey.PageDown:
+                    e.Handled = true;
+                    HandleDirectionalVertical(down: true, isPageStep: true);
+                    return;
+
+                case Windows.System.VirtualKey.PageUp:
+                    e.Handled = true;
+                    HandleDirectionalVertical(down: false, isPageStep: true);
+                    return;
+
+                case Windows.System.VirtualKey.Space:
+                    e.Handled = true;
+                    HandleDirectionalVertical(down: !isShift, isPageStep: true);
+                    return;
+
+                case Windows.System.VirtualKey.Right:
+                    e.Handled = true;
+                    HandleDirectionalHorizontal(right: true);
+                    return;
+
+                case Windows.System.VirtualKey.Left:
+                    e.Handled = true;
+                    HandleDirectionalHorizontal(right: false);
+                    return;
+
+                case Windows.System.VirtualKey.Home:
+                    e.Handled = true;
+                    NavigateToDocumentStart();
+                    return;
+
+                case Windows.System.VirtualKey.End:
+                    e.Handled = true;
+                    NavigateToDocumentEnd();
+                    return;
+            }
+        }
+    }
+
+    private static bool IsInsideContentDialog(DependencyObject? element)
+    {
+        while (element is not null)
+        {
+            if (element is ContentDialog)
+            {
+                return true;
+            }
+
+            element = VisualTreeHelper.GetParent(element);
+        }
+
+        return false;
+    }
+
+    private void HandleDirectionalVertical(bool down, bool isPageStep)
+    {
+        if (ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return;
+        }
+
+        if (doc.IsContinuous && !ViewModel.IsPresentationMode)
+        {
+            double step = isPageStep
+                ? Math.Max(160.0, ContinuousScrollViewer.ViewportHeight * 0.85)
+                : 84.0;
+            ScrollVerticallyBy(down ? step : -step);
+            return;
+        }
+
+        // Non-continuous mode or Presentation mode:
+        if (!isPageStep && !ViewModel.IsPresentationMode && !_isFittedVertically && ContinuousScrollViewer.ScrollableHeight > 4.0)
+        {
+            bool atTop = ContinuousScrollViewer.VerticalOffset <= 4.0;
+            bool atBottom = ContinuousScrollViewer.VerticalOffset >= ContinuousScrollViewer.ScrollableHeight - 4.0;
+            if ((down && !atBottom) || (!down && !atTop))
+            {
+                double newV = Math.Clamp(
+                    ContinuousScrollViewer.VerticalOffset + (down ? 84.0 : -84.0),
+                    0.0,
+                    ContinuousScrollViewer.ScrollableHeight);
+                ContinuousScrollViewer.ChangeView(null, newV, null, disableAnimation: true);
+                doc.LastVerticalOffset = newV;
+                ScheduleViewportUpdate();
+                return;
+            }
+        }
+
+        FlipPagedSlide(forward: down);
+    }
+
+    private void HandleDirectionalHorizontal(bool right)
+    {
+        if (ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return;
+        }
+
+        if (!doc.IsContinuous || ViewModel.IsPresentationMode)
+        {
+            FlipPagedSlide(forward: right);
+            return;
+        }
+
+        if (ContinuousScrollViewer.ScrollableWidth > 4.0)
+        {
+            double newH = Math.Clamp(
+                ContinuousScrollViewer.HorizontalOffset + (right ? 84.0 : -84.0),
+                0.0,
+                ContinuousScrollViewer.ScrollableWidth);
+            ContinuousScrollViewer.ChangeView(newH, ContinuousScrollViewer.VerticalOffset, null, disableAnimation: true);
+            doc.LastHorizontalOffset = newH;
+            ScheduleViewportUpdate();
+        }
+        else
+        {
+            if (right)
+            {
+                doc.NextPage();
+            }
+            else
+            {
+                doc.PreviousPage();
+            }
+        }
+    }
+
+    private void ScrollVerticallyBy(double deltaY)
+    {
+        if (ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return;
+        }
+
+        if (ContinuousScrollViewer.VerticalScrollMode != ScrollMode.Enabled)
+        {
+            ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Enabled;
+        }
+
+        double maxScroll = Math.Max(0.0, ContinuousScrollViewer.ScrollableHeight);
+        double newOffset = Math.Clamp(ContinuousScrollViewer.VerticalOffset + deltaY, 0.0, maxScroll);
+
+        ContinuousScrollViewer.ChangeView(null, newOffset, null, disableAnimation: true);
+        SyncScrollMetricsFromVerticalOffset(newOffset);
+        ScheduleViewportUpdate();
+    }
+
+    private void SyncScrollMetricsFromVerticalOffset(double verticalOffset)
+    {
+        if (ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return;
+        }
+
+        doc.LastVerticalOffset = verticalOffset;
+        doc.LastHorizontalOffset = ContinuousScrollViewer.HorizontalOffset;
+
+        if (doc.IsContinuous && ContinuousScrollViewer.ViewportHeight > 0)
+        {
+            int targetIndex = CalculateCurrentPageIndexFromScroll(verticalOffset);
+            if (doc.CurrentPageIndex != targetIndex)
+            {
+                _isUpdatingPageFromScroll = true;
+                try
+                {
+                    doc.CurrentPageIndex = targetIndex;
+                }
+                finally
+                {
+                    _isUpdatingPageFromScroll = false;
+                }
+            }
+
+            doc.FractionalPageIndex = CalculateFractionalPageIndex(verticalOffset);
+        }
+    }
+
+    private void FlipPagedSlide(bool forward)
+    {
+        if (ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return;
+        }
+
+        if (forward)
+        {
+            doc.NextPage();
+        }
+        else
+        {
+            doc.PreviousPage();
+        }
+
+        if (_isFittedVertically || ViewModel.IsPresentationMode)
+        {
+            DispatcherQueue.TryEnqueue(() => ExecuteFitVertical(force: true));
+        }
+        else
+        {
+            ContinuousScrollViewer.ChangeView(0, 0, null, disableAnimation: true);
+            ScheduleViewportUpdate();
+        }
+    }
+
+    private void NavigateToDocumentStart()
+    {
+        if (ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return;
+        }
+
+        if (doc.IsContinuous && !ViewModel.IsPresentationMode)
+        {
+            _isUpdatingPageFromScroll = true;
+            try
+            {
+                doc.GoToPage(0);
+            }
+            finally
+            {
+                _isUpdatingPageFromScroll = false;
+            }
+
+            ContinuousScrollViewer.ChangeView(null, 0.0, null, disableAnimation: true);
+            doc.LastVerticalOffset = 0.0;
+            doc.FractionalPageIndex = 0.0;
+            ScheduleViewportUpdate();
+        }
+        else
+        {
+            doc.GoToPage(0);
+            if (_isFittedVertically || ViewModel.IsPresentationMode)
+            {
+                DispatcherQueue.TryEnqueue(() => ExecuteFitVertical(force: true));
+            }
+            else
+            {
+                ContinuousScrollViewer.ChangeView(0, 0, null, disableAnimation: true);
+                ScheduleViewportUpdate();
+            }
+        }
+    }
+
+    private void NavigateToDocumentEnd()
+    {
+        if (ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return;
+        }
+
+        int lastIndex = doc.Pages.Count - 1;
+        if (doc.IsContinuous && !ViewModel.IsPresentationMode)
+        {
+            _isUpdatingPageFromScroll = true;
+            try
+            {
+                doc.GoToPage(lastIndex);
+            }
+            finally
+            {
+                _isUpdatingPageFromScroll = false;
+            }
+
+            double maxScroll = Math.Max(0.0, ContinuousScrollViewer.ScrollableHeight);
+            ContinuousScrollViewer.ChangeView(null, maxScroll, null, disableAnimation: true);
+            doc.LastVerticalOffset = maxScroll;
+            doc.FractionalPageIndex = lastIndex;
+            ScheduleViewportUpdate();
+        }
+        else
+        {
+            doc.GoToPage(lastIndex);
+            if (_isFittedVertically || ViewModel.IsPresentationMode)
+            {
+                DispatcherQueue.TryEnqueue(() => ExecuteFitVertical(force: true));
+            }
+            else
+            {
+                ContinuousScrollViewer.ChangeView(0, 0, null, disableAnimation: true);
+                ScheduleViewportUpdate();
+            }
+        }
+    }
+
+    private void OnSearchFocusRequested()
+    {
+        FocusSearchBox();
+    }
+
+    private void FocusSearchBox()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (ViewModel.IsSearchOpen && DocumentSearchBox is not null)
+            {
+                DocumentSearchBox.Focus(FocusState.Programmatic);
+                DocumentSearchBox.SelectAll();
+            }
+        });
+    }
+
+    private void OnDocumentSearchBoxKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Escape)
+        {
+            e.Handled = true;
+            ViewModel.CloseSearch();
+            ReturnFocusToViewer();
+        }
+        else if (e.Key == Windows.System.VirtualKey.Enter)
+        {
+            e.Handled = true;
+        }
+    }
+
+    private void OnSearchPrevClick(object sender, RoutedEventArgs e)
+    {
+        DocumentSearchBox?.Focus(FocusState.Programmatic);
+    }
+
+    private void OnSearchNextClick(object sender, RoutedEventArgs e)
+    {
+        DocumentSearchBox?.Focus(FocusState.Programmatic);
+    }
+
+    private void OnSearchCloseClick(object sender, RoutedEventArgs e)
+    {
+        ViewModel.CloseSearch();
+        ReturnFocusToViewer();
+    }
+
+    private void OnContextPrintClick(object sender, RoutedEventArgs e)
+    {
+        _ = ViewModel.PrintAsync();
+    }
+
+    private void PlayEmptyStateTransitionAnimation()
+    {
+        if (EmptyStatePanel is null || EmptyStateTransform is null)
+        {
+            return;
+        }
+
+        _transitionStoryboard?.Stop();
+        EmptyStatePanel.Opacity = 0.0;
+        EmptyStateTransform.TranslateY = 16.0;
+        EmptyStateTransform.ScaleX = 0.97;
+        EmptyStateTransform.ScaleY = 0.97;
+
+        var sb = new Storyboard();
+        var ease = new ExponentialEase { Exponent = 4.5, EasingMode = EasingMode.EaseOut };
+        var duration = new Duration(TimeSpan.FromMilliseconds(260));
+
+        var opacityAnim = new DoubleAnimation { From = 0.0, To = 1.0, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(opacityAnim, EmptyStatePanel);
+        Storyboard.SetTargetProperty(opacityAnim, "Opacity");
+        sb.Children.Add(opacityAnim);
+
+        var translateAnim = new DoubleAnimation { From = 16.0, To = 0.0, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(translateAnim, EmptyStateTransform);
+        Storyboard.SetTargetProperty(translateAnim, "TranslateY");
+        sb.Children.Add(translateAnim);
+
+        var scaleXAnim = new DoubleAnimation { From = 0.97, To = 1.0, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(scaleXAnim, EmptyStateTransform);
+        Storyboard.SetTargetProperty(scaleXAnim, "ScaleX");
+        sb.Children.Add(scaleXAnim);
+
+        var scaleYAnim = new DoubleAnimation { From = 0.97, To = 1.0, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(scaleYAnim, EmptyStateTransform);
+        Storyboard.SetTargetProperty(scaleYAnim, "ScaleY");
+        sb.Children.Add(scaleYAnim);
+
+        _transitionStoryboard = sb;
+        sb.Begin();
+    }
+
+    private void PlayDocumentOpenTransitionAnimation()
+    {
+        if (DocumentAreaGrid is null || DocumentAreaTransform is null)
+        {
+            return;
+        }
+
+        _transitionStoryboard?.Stop();
+        DocumentAreaGrid.Opacity = 0.0;
+        DocumentAreaTransform.TranslateY = 10.0;
+
+        var sb = new Storyboard();
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var duration = new Duration(TimeSpan.FromMilliseconds(200));
+
+        var opacityAnim = new DoubleAnimation { From = 0.0, To = 1.0, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(opacityAnim, DocumentAreaGrid);
+        Storyboard.SetTargetProperty(opacityAnim, "Opacity");
+        sb.Children.Add(opacityAnim);
+
+        var translateAnim = new DoubleAnimation { From = 10.0, To = 0.0, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(translateAnim, DocumentAreaTransform);
+        Storyboard.SetTargetProperty(translateAnim, "TranslateY");
+        sb.Children.Add(translateAnim);
+
+        _transitionStoryboard = sb;
+        sb.Begin();
+    }
+
+    private void PlaySearchBarOpenAnimation()
+    {
+        if (FloatingSearchBar is null || FloatingSearchBarTransform is null)
+        {
+            return;
+        }
+
+        _searchBarStoryboard?.Stop();
+        FloatingSearchBar.Opacity = 0.0;
+        FloatingSearchBarTransform.TranslateY = -10.0;
+
+        var sb = new Storyboard();
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var duration = new Duration(TimeSpan.FromMilliseconds(160));
+
+        var opacityAnim = new DoubleAnimation { From = 0.0, To = 1.0, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(opacityAnim, FloatingSearchBar);
+        Storyboard.SetTargetProperty(opacityAnim, "Opacity");
+        sb.Children.Add(opacityAnim);
+
+        var translateAnim = new DoubleAnimation { From = -10.0, To = 0.0, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(translateAnim, FloatingSearchBarTransform);
+        Storyboard.SetTargetProperty(translateAnim, "TranslateY");
+        sb.Children.Add(translateAnim);
+
+        _searchBarStoryboard = sb;
+        sb.Begin();
     }
 
     private float GetCurrentZoomFactor()

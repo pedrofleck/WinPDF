@@ -25,7 +25,8 @@
         RowDefinitions="Auto,*"
         AllowDrop="True"
         DragOver="OnWindowDragOver"
-        Drop="OnWindowDrop">
+        Drop="OnWindowDrop"
+        PreviewKeyDown="OnRootGridPreviewKeyDown">
 
         <!-- ================================================================= -->
         <!-- Barra Superior ÚNICA de 48 DIPs (TitleBar + CommandBar Integrada) -->
@@ -61,6 +62,7 @@
                         Click="OnSidebarToggleClick"
                         Command="{x:Bind ViewModel.ToggleSidebarCommand}"
                         CornerRadius="4"
+                        IsTabStop="False"
                         Style="{StaticResource SubtleButtonStyle}"
                         Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
                         <AnimatedIcon
@@ -107,6 +109,7 @@
                         Padding="12,0"
                         Command="{x:Bind ViewModel.OpenFileCommand}"
                         CornerRadius="4"
+                        IsTabStop="False"
                         Style="{StaticResource DefaultButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <FontIcon FontSize="16" Glyph="&#xE8E5;" />
@@ -120,8 +123,10 @@
                         Width="36"
                         Height="32"
                         Padding="0"
+                        Command="{x:Bind ViewModel.ToggleSearchCommand}"
                         CornerRadius="4"
                         IsEnabled="{x:Bind ViewModel.HasDocument, Mode=OneWay}"
+                        IsTabStop="False"
                         Style="{StaticResource SubtleButtonStyle}">
                         <AnimatedIcon
                             x:Name="SearchAnimatedIcon"
@@ -227,6 +232,7 @@
                     Padding="0"
                     Command="{x:Bind ViewModel.ToggleAnnotationToolbarCommand}"
                     CornerRadius="4"
+                    IsTabStop="False"
                     Style="{StaticResource SubtleButtonStyle}"
                     Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
                     <FontIcon FontSize="16" Glyph="&#xED63;" />
@@ -240,6 +246,7 @@
                     Height="32"
                     Padding="0"
                     CornerRadius="4"
+                    IsTabStop="False"
                     Style="{StaticResource SubtleButtonStyle}">
                     <StackPanel
                         Orientation="Horizontal"
@@ -276,74 +283,87 @@
                     </StackPanel>
                     <Button.Flyout>
                         <MenuFlyout Placement="BottomEdgeAlignedRight">
-                            <MenuFlyoutItem x:Uid="Menu_SaveAs" Command="{x:Bind ViewModel.SaveAsCommand}">
+                            <MenuFlyoutItem
+                                x:Uid="Menu_SaveAs"
+                                Command="{x:Bind ViewModel.SaveAsCommand}"
+                                IsEnabled="{x:Bind ViewModel.HasDocument, Mode=OneWay}"
+                                KeyboardAcceleratorTextOverride="Ctrl+S">
                                 <MenuFlyoutItem.Icon>
                                     <FontIcon Glyph="&#xE74E;" />
                                 </MenuFlyoutItem.Icon>
-                                <MenuFlyoutItem.KeyboardAccelerators>
-                                    <KeyboardAccelerator Key="S" Modifiers="Control" />
-                                </MenuFlyoutItem.KeyboardAccelerators>
                             </MenuFlyoutItem>
 
-                            <MenuFlyoutItem x:Uid="Menu_OpenCopy" Command="{x:Bind ViewModel.OpenCopyCommand}">
+                            <MenuFlyoutItem
+                                x:Uid="Menu_OpenCopy"
+                                Command="{x:Bind ViewModel.OpenCopyCommand}"
+                                IsEnabled="{x:Bind ViewModel.HasDocument, Mode=OneWay}"
+                                KeyboardAcceleratorTextOverride="Ctrl+Shift+N">
                                 <MenuFlyoutItem.Icon>
                                     <FontIcon Glyph="&#xE8C8;" />
                                 </MenuFlyoutItem.Icon>
-                                <MenuFlyoutItem.KeyboardAccelerators>
-                                    <KeyboardAccelerator Key="N" Modifiers="Control,Shift" />
-                                </MenuFlyoutItem.KeyboardAccelerators>
                             </MenuFlyoutItem>
 
-                            <MenuFlyoutItem x:Uid="Menu_OpenWith" Command="{x:Bind ViewModel.OpenWithCommand}">
+                            <MenuFlyoutItem
+                                x:Uid="Menu_OpenWith"
+                                Command="{x:Bind ViewModel.OpenWithCommand}"
+                                IsEnabled="{x:Bind ViewModel.HasDocument, Mode=OneWay}"
+                                KeyboardAcceleratorTextOverride="Ctrl+Shift+O">
                                 <MenuFlyoutItem.Icon>
                                     <FontIcon Glyph="&#xE7AC;" />
                                 </MenuFlyoutItem.Icon>
-                                <MenuFlyoutItem.KeyboardAccelerators>
-                                    <KeyboardAccelerator Key="O" Modifiers="Control,Shift" />
-                                </MenuFlyoutItem.KeyboardAccelerators>
                             </MenuFlyoutItem>
 
-                            <MenuFlyoutItem x:Uid="Menu_Print" Click="OnPrintClick">
+                            <MenuFlyoutItem
+                                x:Uid="Menu_Print"
+                                Click="OnPrintClick"
+                                IsEnabled="{x:Bind ViewModel.HasDocument, Mode=OneWay}"
+                                KeyboardAcceleratorTextOverride="Ctrl+P">
                                 <MenuFlyoutItem.Icon>
                                     <FontIcon Glyph="&#xE749;" />
                                 </MenuFlyoutItem.Icon>
-                                <MenuFlyoutItem.KeyboardAccelerators>
-                                    <KeyboardAccelerator Key="P" Modifiers="Control" />
-                                </MenuFlyoutItem.KeyboardAccelerators>
                             </MenuFlyoutItem>
 
                             <MenuFlyoutSeparator />
 
-                            <MenuFlyoutItem x:Uid="Menu_Rotate" Command="{x:Bind ViewModel.RotateClockwiseCommand}">
+                            <MenuFlyoutItem
+                                x:Uid="Menu_Rotate"
+                                Command="{x:Bind ViewModel.RotateClockwiseCommand}"
+                                IsEnabled="{x:Bind ViewModel.HasDocument, Mode=OneWay}"
+                                KeyboardAcceleratorTextOverride="Ctrl+R">
                                 <MenuFlyoutItem.Icon>
                                     <FontIcon Glyph="&#xE7AD;" />
                                 </MenuFlyoutItem.Icon>
-                                <MenuFlyoutItem.KeyboardAccelerators>
-                                    <KeyboardAccelerator Key="Right" Modifiers="Control" />
-                                </MenuFlyoutItem.KeyboardAccelerators>
                             </MenuFlyoutItem>
 
                             <ToggleMenuFlyoutItem
                                 x:Uid="Menu_NightMode"
                                 Command="{x:Bind ViewModel.ToggleNightModeCommand}"
-                                IsChecked="{x:Bind ViewModel.IsNightMode, Mode=OneWay}">
+                                IsChecked="{x:Bind ViewModel.IsNightMode, Mode=OneWay}"
+                                KeyboardAcceleratorTextOverride="Ctrl+I">
                                 <ToggleMenuFlyoutItem.Icon>
                                     <FontIcon Glyph="&#xE708;" />
                                 </ToggleMenuFlyoutItem.Icon>
-                                <ToggleMenuFlyoutItem.KeyboardAccelerators>
-                                    <KeyboardAccelerator Key="I" Modifiers="Control" />
-                                </ToggleMenuFlyoutItem.KeyboardAccelerators>
                             </ToggleMenuFlyoutItem>
 
                             <MenuFlyoutSeparator />
 
-                            <MenuFlyoutItem x:Uid="Menu_FullScreen" Command="{x:Bind ViewModel.ToggleFullScreenCommand}">
+                            <MenuFlyoutItem
+                                x:Uid="Menu_FullScreen"
+                                Command="{x:Bind ViewModel.ToggleFullScreenCommand}"
+                                KeyboardAcceleratorTextOverride="F11">
                                 <MenuFlyoutItem.Icon>
                                     <FontIcon Glyph="&#xE740;" />
                                 </MenuFlyoutItem.Icon>
-                                <MenuFlyoutItem.KeyboardAccelerators>
-                                    <KeyboardAccelerator Key="F11" />
-                                </MenuFlyoutItem.KeyboardAccelerators>
+                            </MenuFlyoutItem>
+
+                            <MenuFlyoutItem
+                                x:Uid="Menu_CloseDocument"
+                                Command="{x:Bind ViewModel.CloseDocumentCommand}"
+                                IsEnabled="{x:Bind ViewModel.HasDocument, Mode=OneWay}"
+                                KeyboardAcceleratorTextOverride="Ctrl+W">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE711;" />
+                                </MenuFlyoutItem.Icon>
                             </MenuFlyoutItem>
                         </MenuFlyout>
                     </Button.Flyout>
@@ -358,6 +378,7 @@
                     Padding="0"
                     Command="{x:Bind ViewModel.OpenSettingsCommand}"
                     CornerRadius="4"
+                    IsTabStop="False"
                     Style="{StaticResource SubtleButtonStyle}">
                     <AnimatedIcon
                         x:Name="SettingsAnimatedIcon"

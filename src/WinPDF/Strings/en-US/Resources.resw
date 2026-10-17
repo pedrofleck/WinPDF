@@ -209,4 +209,29 @@
   <data name="FullScreenInfoBar.Message" xml:space="preserve"><value>Press Esc to exit full screen</value></data>
   <data name="ExitFullScreenButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Exit full screen</value></data>
   <data name="ExitFullScreenButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Exit full screen (F11)</value></data>
+  <!-- ===================== QoL 4: Search Bar, Context Menu & Close Document ===================== -->
+  <data name="Menu_CloseDocument.Text" xml:space="preserve"><value>Close document</value></data>
+  <data name="Context_PrevPage.Text" xml:space="preserve"><value>Previous page</value></data>
+  <data name="Context_NextPage.Text" xml:space="preserve"><value>Next page</value></data>
+  <data name="Context_FitPage.Text" xml:space="preserve"><value>Fit to page</value></data>
+  <data name="Context_FitWidth.Text" xml:space="preserve"><value>Fit to width</value></data>
+  <data name="Context_RotateClockwise.Text" xml:space="preserve"><value>Rotate clockwise</value></data>
+  <data name="Context_RotateCounterClockwise.Text" xml:space="preserve"><value>Rotate counterclockwise</value></data>
+  <data name="Context_NightMode.Text" xml:space="preserve"><value>Night mode</value></data>
+  <data name="Context_Presentation.Text" xml:space="preserve"><value>Present as slides</value></data>
+  <data name="Context_FullScreen.Text" xml:space="preserve"><value>Full screen</value></data>
+  <data name="Context_SaveAs.Text" xml:space="preserve"><value>Save as…</value></data>
+  <data name="Context_Print.Text" xml:space="preserve"><value>Print…</value></data>
+  <data name="Context_Properties.Text" xml:space="preserve"><value>Document properties</value></data>
+  <data name="Context_CloseDocument.Text" xml:space="preserve"><value>Close document</value></data>
+  <data name="SearchBox.PlaceholderText" xml:space="preserve"><value>Find in document…</value></data>
+  <data name="SearchBox.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Find in document</value></data>
+  <data name="SearchPrevButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Previous match</value></data>
+  <data name="SearchPrevButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Previous match (Shift+F3)</value></data>
+  <data name="SearchNextButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Next match</value></data>
+  <data name="SearchNextButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Next match (F3)</value></data>
+  <data name="SearchMatchCaseToggle.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Match case</value></data>
+  <data name="SearchMatchCaseToggle.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Match case</value></data>
+  <data name="SearchCloseButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Close search</value></data>
+  <data name="SearchCloseButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Close search (Esc)</value></data>
 </root>
