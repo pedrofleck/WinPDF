@@ -128,7 +128,7 @@ public sealed class TileCache : IDisposable
     public const long DefaultMaxBaseBytes = 16L * 1024 * 1024;
 
     /// <summary>Maximum number of thumbnail entries retained in cache.</summary>
-    public const int MaxThumbnailEntries = 16;
+    public const int MaxThumbnailEntries = 64;
 
     /// <summary>Maximum number of Level 0 entries retained in cache.</summary>
     public const int MaxLevel0Entries = 4;
@@ -408,11 +408,9 @@ public sealed class TileCache : IDisposable
 
         foreach (TileCacheEntry entry in evicted)
         {
+            // Release only the cache's reference. When _referenceCount reaches 0, Release() calls DisposeResource().
+            // Never force-dispose while UI consumers (ThumbnailItemViewModel or PdfPageCanvas) still hold a reference.
             entry.Release();
-            if (entry is IDisposable disposable)
-            {
-                disposable.Dispose();
-            }
         }
     }
 

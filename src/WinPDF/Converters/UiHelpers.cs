@@ -106,30 +106,52 @@ public static class UiHelpers
     public static bool IsSidebarOpenWithDoc(bool hasDoc, bool isSidebarOpen) => hasDoc && isSidebarOpen;
 
     /// <summary>
-    /// Computes the corner radius for the main content container creating the curved junction with the sidebar.
+    /// Checks if the sidebar pane should be open, requiring a loaded document, sidebar enabled, and settings closed.
     /// </summary>
-    public static CornerRadius MainContainerCornerRadius(bool hasDoc, bool isSidebarOpen, bool isSettingsOpen) =>
-        (hasDoc && isSidebarOpen && !isSettingsOpen) ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
+    public static bool IsSidebarOpenInDocumentView(bool hasDoc, bool isSidebarOpen, bool isSettingsOpen) =>
+        hasDoc && isSidebarOpen && !isSettingsOpen;
 
     /// <summary>
-    /// Computes the border thickness for the main content container.
+    /// Returns the background brush for the main content container when a document or settings view is active.
     /// </summary>
-    public static Thickness MainContainerBorderThickness(bool hasDoc, bool isSidebarOpen, bool isSettingsOpen) =>
-        (!hasDoc || isSettingsOpen) ? new Thickness(0) : (isSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0));
-
-    /// <summary>
-    /// Returns the background brush for the main content container based on whether a document is loaded and settings state.
-    /// </summary>
-    public static Microsoft.UI.Xaml.Media.Brush MainContainerBackground(bool hasDoc, bool isSettingsOpen) =>
-        (hasDoc && !isSettingsOpen)
+    public static Microsoft.UI.Xaml.Media.Brush MainContainerBackgroundWithSettings(bool hasDoc, bool isSettingsOpen) =>
+        (hasDoc || isSettingsOpen)
             ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["LayerFillColorDefaultBrush"]
             : new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
 
     /// <summary>
-    /// Returns the border brush for the main content container based on whether a document is loaded and settings state.
+    /// Returns the border brush for the main content container when a document or settings view is active.
     /// </summary>
-    public static Microsoft.UI.Xaml.Media.Brush MainContainerBorderBrush(bool hasDoc, bool isSettingsOpen) =>
-        (hasDoc && !isSettingsOpen)
+    public static Microsoft.UI.Xaml.Media.Brush MainContainerBorderBrushWithSettings(bool hasDoc, bool isSettingsOpen) =>
+        (hasDoc || isSettingsOpen)
+            ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"]
+            : new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+
+    /// <summary>
+    /// Computes the corner radius for the main content container creating the curved junction with the sidebar.
+    /// </summary>
+    public static CornerRadius MainContainerCornerRadius(bool hasDoc, bool isSidebarOpen) =>
+        (hasDoc && isSidebarOpen) ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
+
+    /// <summary>
+    /// Computes the border thickness for the main content container.
+    /// </summary>
+    public static Thickness MainContainerBorderThickness(bool hasDoc, bool isSidebarOpen) =>
+        !hasDoc ? new Thickness(0) : (isSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0));
+
+    /// <summary>
+    /// Returns the background brush for the main content container based on whether a document is loaded.
+    /// </summary>
+    public static Microsoft.UI.Xaml.Media.Brush MainContainerBackground(bool hasDoc) =>
+        hasDoc
+            ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["LayerFillColorDefaultBrush"]
+            : new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
+
+    /// <summary>
+    /// Returns the border brush for the main content container based on whether a document is loaded.
+    /// </summary>
+    public static Microsoft.UI.Xaml.Media.Brush MainContainerBorderBrush(bool hasDoc) =>
+        hasDoc
             ? (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"]
             : new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
 

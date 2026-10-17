@@ -86,6 +86,7 @@ public sealed partial class PdfPageCanvas : Grid
     private readonly IPdfService _pdfService;
     private readonly TileCache _tileCache;
 
+    private CanvasBitmapEntry? _level0Entry;
     private CanvasBitmap? _level0Bitmap;
     private CanvasBitmap? _detailBitmap;
     private Rect _detailRectDip = Rect.Empty;
@@ -398,15 +399,31 @@ public sealed partial class PdfPageCanvas : Grid
     {
         if (d is PdfPageCanvas canvas)
         {
-            canvas._baseCanvas.ClearColor = canvas.IsNightMode
-                ? Windows.UI.Color.FromArgb(255, 18, 18, 18)
-                : Windows.UI.Color.FromArgb(255, 255, 255, 255);
-            canvas._baseCanvas.Invalidate();
-            if (canvas._detailCanvas.Visibility == Visibility.Visible)
-            {
-                canvas._detailCanvas.Invalidate();
-            }
+            canvas.RefreshNightModeVisuals();
         }
+    }
+
+    /// <summary>
+    /// Updates the night mode state and immediately invalidates both base and detail Win2D surfaces.
+    /// </summary>
+    /// <param name="isNightMode">Whether night mode is enabled.</param>
+    public void ApplyNightModeImmediate(bool isNightMode)
+    {
+        if (IsNightMode != isNightMode)
+        {
+            IsNightMode = isNightMode;
+        }
+
+        RefreshNightModeVisuals();
+    }
+
+    private void RefreshNightModeVisuals()
+    {
+        _baseCanvas.ClearColor = IsNightMode
+            ? Windows.UI.Color.FromArgb(255, 18, 18, 18)
+            : Windows.UI.Color.FromArgb(255, 255, 255, 255);
+        _baseCanvas.Invalidate();
+        _detailCanvas.Invalidate();
     }
 
     private static void OnRotationAnglePropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -432,10 +449,17 @@ public sealed partial class PdfPageCanvas : Grid
             canvas.ReleaseBitmaps();
             canvas._loadedPageIndex = canvas.PageInfo?.Index ?? -1;
             canvas.UpdateDimensions();
+            canvas.SubscribeToActiveDocument();
+            if (canvas._observedDocument is not null)
+            {
+                canvas.IsNightMode = canvas._observedDocument.IsNightMode;
+                canvas.RotationAngle = canvas._observedDocument.Rotation;
+            }
+
             if (canvas.PageInfo is not null)
             {
                 canvas.TryLoadCachedBitmaps();
-                canvas._baseCanvas.Invalidate();
+                canvas.RefreshNightModeVisuals();
                 canvas.UpdateRender();
             }
         }
@@ -557,7 +581,10 @@ public sealed partial class PdfPageCanvas : Grid
                 {
                     if (canvasEntry.Bitmap.Device is not null)
                     {
+                        _level0Entry?.Release();
+                        _level0Entry = canvasEntry;
                         _level0Bitmap = canvasEntry.Bitmap;
+                        return;
                     }
                 }
                 catch
@@ -888,6 +915,8 @@ public sealed partial class PdfPageCanvas : Grid
 
                 if (isValid && PageInfo?.Index == targetPageIndex && EffectiveDocumentId == targetDocId && !_isUnloaded)
                 {
+                    _level0Entry?.Release();
+                    _level0Entry = canvasEntry;
                     _level0Bitmap = canvasEntry.Bitmap;
                     _baseCanvas.Invalidate();
 
@@ -896,7 +925,6 @@ public sealed partial class PdfPageCanvas : Grid
                         UpdateViewport(EffectiveZoom);
                     }
 
-                    cached?.Release();
                     return;
                 }
             }
@@ -975,6 +1003,8 @@ public sealed partial class PdfPageCanvas : Grid
                     CanvasBitmapEntry cacheEntry = new(newBitmap);
                     _tileCache.Add(in baseKey, cacheEntry);
 
+                    _level0Entry?.Release();
+                    _level0Entry = cacheEntry;
                     _level0Bitmap = newBitmap;
                     _baseCanvas.Invalidate();
 
@@ -1268,6 +1298,9 @@ public sealed partial class PdfPageCanvas : Grid
     private void ReleaseBitmaps()
     {
         _level0Bitmap = null;
+        CanvasBitmapEntry? oldEntry = _level0Entry;
+        _level0Entry = null;
+        oldEntry?.Release();
 
         CanvasBitmap? bd = _detailBitmap;
         _detailBitmap = null;

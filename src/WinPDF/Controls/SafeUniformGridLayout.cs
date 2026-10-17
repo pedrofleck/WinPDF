@@ -20,6 +20,8 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
     private readonly List<double> _rowTops = new();
     private readonly List<double> _rowHeights = new();
     private readonly List<RealizedItem> _realizedItems = new();
+    private readonly HashSet<int> _activeRealizedIndices = new();
+    private readonly HashSet<int> _currentPassIndices = new();
     private double _lastCellWidth = 100.0;
 
     /// <summary>
@@ -216,6 +218,13 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
                         }
 
                         _realizedItems.Add(new RealizedItem(i, r, i - firstIdx));
+                        _currentPassIndices.Add(i);
+
+                        if (context.GetItemAt(i) is ThumbnailItemViewModel realizedVm && (!realizedVm.IsRealized || realizedVm.Image is null || realizedVm.Image.IsDisposed))
+                        {
+                            double scale = element.XamlRoot?.RasterizationScale ?? 1.0;
+                            realizedVm.NotifyRealized(scale);
+                        }
                     }
                     catch
                     {
@@ -232,6 +241,30 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
                 currentY += rowSpacing;
             }
         }
+
+        foreach (int prevIndex in _activeRealizedIndices)
+        {
+            if (!_currentPassIndices.Contains(prevIndex) && prevIndex >= 0 && prevIndex < itemCount)
+            {
+                try
+                {
+                    if (context.GetItemAt(prevIndex) is ThumbnailItemViewModel offscreenVm)
+                    {
+                        offscreenVm.NotifyRecycled();
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        _activeRealizedIndices.Clear();
+        foreach (int idx in _currentPassIndices)
+        {
+            _activeRealizedIndices.Add(idx);
+        }
+        _currentPassIndices.Clear();
 
         return new Size(availW, Math.Max(0.0, currentY));
     }

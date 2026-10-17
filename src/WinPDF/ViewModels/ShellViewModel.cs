@@ -501,11 +501,12 @@ public sealed partial class ShellViewModel : ObservableObject
         IsSidebarOpen = false;
         IsSearchOpen = false;
         IsAnnotationToolbarOpen = false;
-        CurrentDocument.IsContinuous = false;
-        CurrentDocument.IsDoublePage = false;
-        ViewMode = ViewMode.Paged;
         IsPresentationMode = true;
         IsFullScreen = true;
+        CurrentDocument.IsDoublePage = false;
+        CurrentDocument.IsContinuous = false;
+        ViewMode = ViewMode.Paged;
+        CurrentDocument.FitVertical();
     }
 
     /// <summary>

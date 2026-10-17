@@ -209,7 +209,7 @@
   <data name="FullScreenInfoBar.Message" xml:space="preserve"><value>Press Esc to exit full screen</value></data>
   <data name="ExitFullScreenButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Exit full screen</value></data>
   <data name="ExitFullScreenButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Exit full screen (F11)</value></data>
-  <!-- ===================== QoL 4: Search Bar, Context Menu & Close Document ===================== -->
+  <!-- ===================== QoL 4: Search Bar, Context Menu, Bookmarks & Close Document ===================== -->
   <data name="Menu_CloseDocument.Text" xml:space="preserve"><value>Close document</value></data>
   <data name="Context_PrevPage.Text" xml:space="preserve"><value>Previous page</value></data>
   <data name="Context_NextPage.Text" xml:space="preserve"><value>Next page</value></data>
@@ -234,4 +234,6 @@
   <data name="SearchMatchCaseToggle.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Match case</value></data>
   <data name="SearchCloseButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Close search</value></data>
   <data name="SearchCloseButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Close search (Esc)</value></data>
+  <data name="BookmarkDeleteItemButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Remove bookmark</value></data>
+  <data name="BookmarkDeleteItemButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Remove bookmark</value></data>
 </root>

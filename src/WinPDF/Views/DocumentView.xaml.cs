@@ -245,6 +245,55 @@ public sealed partial class DocumentView : Page
         }
     }
 
+    private void ApplyNightModeToAllCanvases(bool isNightMode)
+    {
+        foreach (var canvas in _activeCanvases.ToArray())
+        {
+            canvas.ApplyNightModeImmediate(isNightMode);
+        }
+
+        FindAndApplyNightMode(ContinuousPagesRepeater, isNightMode);
+    }
+
+    private static void FindAndApplyNightMode(DependencyObject? parent, bool isNightMode)
+    {
+        if (parent is null)
+        {
+            return;
+        }
+
+        int count = VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
+            if (child is PdfPageCanvas canvas)
+            {
+                canvas.ApplyNightModeImmediate(isNightMode);
+            }
+            else
+            {
+                FindAndApplyNightMode(child, isNightMode);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Restores focus and refreshes active canvases after closing the Settings overlay.
+    /// </summary>
+    public void OnReturnedFromSettings()
+    {
+        if (ViewModel.CurrentDocument is { } doc)
+        {
+            EmptyStatePanel.Visibility = Visibility.Collapsed;
+            DocumentAreaGrid.Visibility = Visibility.Visible;
+            DocumentAreaGrid.Opacity = 1.0;
+            StatusBarBorder.Visibility = ViewModel.IsPresentationMode ? Visibility.Collapsed : Visibility.Visible;
+            UpdateViewportPages(doc.ZoomFactor);
+            ApplyNightModeToAllCanvases(doc.IsNightMode);
+            ReturnFocusToViewer();
+        }
+    }
+
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(ShellViewModel.CurrentDocument))
@@ -252,12 +301,16 @@ public sealed partial class DocumentView : Page
             SubscribeToDocument(ViewModel.CurrentDocument);
             if (ViewModel.CurrentDocument is not null)
             {
+                EmptyStatePanel.Visibility = Visibility.Collapsed;
+                DocumentAreaGrid.Visibility = Visibility.Visible;
                 ScrollToPage(ViewModel.CurrentDocument.CurrentPageIndex);
                 PlayDocumentOpenTransitionAnimation();
                 DispatcherQueue.TryEnqueue(ReturnFocusToViewer);
             }
             else
             {
+                DocumentAreaGrid.Visibility = Visibility.Collapsed;
+                EmptyStatePanel.Visibility = Visibility.Visible;
                 PlayEmptyStateTransitionAnimation();
             }
         }
@@ -282,13 +335,36 @@ public sealed partial class DocumentView : Page
                 _presentationHideTimer.Start();
                 if (ViewModel.IsPresentationMode)
                 {
-                    DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
+                    _isFittedVertically = true;
+                    DispatcherQueue.TryEnqueue(() => ExecuteFitVertical(force: true));
+                    DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                    {
+                        if (ViewModel.IsPresentationMode)
+                        {
+                            ExecuteFitVertical(force: true);
+                        }
+                    });
+                    _ = Task.Run(async () =>
+                    {
+                        await Task.Delay(120).ConfigureAwait(false);
+                        DispatcherQueue.TryEnqueue(() =>
+                        {
+                            if (ViewModel.IsPresentationMode)
+                            {
+                                ExecuteFitVertical(force: true);
+                            }
+                        });
+                    });
                 }
             }
             else
             {
                 _presentationHideTimer.Stop();
                 FullScreenInfoBar.IsOpen = false;
+                if (ViewModel.CurrentDocument is { IsContinuous: false })
+                {
+                    DispatcherQueue.TryEnqueue(() => ExecuteFitVertical(force: true));
+                }
             }
         }
     }
@@ -392,6 +468,13 @@ public sealed partial class DocumentView : Page
             {
                 UpdateViewportPages(ViewModel.CurrentDocument?.ZoomFactor ?? ContinuousScrollViewer.ZoomFactor);
             });
+        }
+        else if (e.PropertyName == nameof(DocumentViewModel.IsNightMode))
+        {
+            if (_observedDocument is not null)
+            {
+                ApplyNightModeToAllCanvases(_observedDocument.IsNightMode);
+            }
         }
         else if (e.PropertyName == nameof(DocumentViewModel.ZoomFactor))
         {
@@ -1180,7 +1263,6 @@ public sealed partial class DocumentView : Page
             || IsKeyDown(Windows.System.VirtualKey.LeftMenu)
             || IsKeyDown(Windows.System.VirtualKey.RightMenu);
 
-        // Global shortcuts that work even when the search box or page box is focused:
         if (isCtrl && !isAlt)
         {
             if (e.Key == Windows.System.VirtualKey.W || e.Key == Windows.System.VirtualKey.F4)
@@ -1238,7 +1320,6 @@ public sealed partial class DocumentView : Page
             }
         }
 
-        // If a TextBox or PasswordBox has focus, let it handle its own text editing and caret navigation.
         if (focusedObj is TextBox or PasswordBox)
         {
             return;
@@ -1483,7 +1564,6 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        // Non-continuous mode or Presentation mode:
         if (!isPageStep && !ViewModel.IsPresentationMode && !_isFittedVertically && ContinuousScrollViewer.ScrollableHeight > 4.0)
         {
             bool atTop = ContinuousScrollViewer.VerticalOffset <= 4.0;

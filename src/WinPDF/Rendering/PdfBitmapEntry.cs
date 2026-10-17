@@ -76,19 +76,25 @@ public sealed class PdfBitmapEntry : TileCacheEntry, IDisposable
     public PdfBitmapEntry(PdfBitmapLease bitmap)
     {
         ArgumentNullException.ThrowIfNull(bitmap);
-        Bitmap = bitmap;
         Width = bitmap.Width;
         Height = bitmap.Height;
         Stride = bitmap.Stride;
         ByteLength = checked((int)bitmap.SizeInBytes);
         Pixels = ArrayPool<byte>.Shared.Rent(ByteLength);
 
-        unsafe
+        try
         {
-            fixed (byte* pDst = Pixels)
+            unsafe
             {
-                Buffer.MemoryCopy((void*)bitmap.Scan0, pDst, ByteLength, ByteLength);
+                fixed (byte* pDst = Pixels)
+                {
+                    Buffer.MemoryCopy((void*)bitmap.Scan0, pDst, ByteLength, ByteLength);
+                }
             }
+        }
+        finally
+        {
+            bitmap.Dispose();
         }
     }
 

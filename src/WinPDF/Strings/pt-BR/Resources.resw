@@ -115,7 +115,7 @@
   <data name="SettingsDialog_Title" xml:space="preserve"><value>Configurações</value></data>
   <data name="Settings_Page_Title.Text" xml:space="preserve"><value>Configurações</value></data>
   <data name="Settings_Theme_Header.Text" xml:space="preserve"><value>Tema do aplicativo</value></data>
-  <data name="Settings_Theme_System.Content" xml:space="preserve"><value>Seguir o sistema</value></data>
+  <data name="Settings_Theme_System.Content" xml:space="preserve"><value>Seguir o sistema (Padrão)</value></data>
   <data name="Settings_Theme_Light.Content" xml:space="preserve"><value>Claro</value></data>
   <data name="Settings_Theme_Dark.Content" xml:space="preserve"><value>Escuro</value></data>
   <data name="Settings_Theme_Description.Text" xml:space="preserve"><value>Selecionar o tema do aplicativo a ser exibido</value></data>
@@ -205,7 +205,7 @@
   <data name="FullScreenInfoBar.Message" xml:space="preserve"><value>Pressione Esc para sair da tela cheia</value></data>
   <data name="ExitFullScreenButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Sair da tela cheia</value></data>
   <data name="ExitFullScreenButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Sair da tela cheia (F11)</value></data>
-  <!-- ===================== QoL 4: Search Bar, Context Menu & Close Document ===================== -->
+  <!-- ===================== QoL 4: Search Bar, Context Menu, Bookmarks & Close Document ===================== -->
   <data name="Menu_CloseDocument.Text" xml:space="preserve"><value>Fechar documento</value></data>
   <data name="Context_PrevPage.Text" xml:space="preserve"><value>Página anterior</value></data>
   <data name="Context_NextPage.Text" xml:space="preserve"><value>Próxima página</value></data>
@@ -230,4 +230,6 @@
   <data name="SearchMatchCaseToggle.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Diferenciar maiúsculas de minúsculas</value></data>
   <data name="SearchCloseButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Fechar pesquisa</value></data>
   <data name="SearchCloseButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Fechar (Esc)</value></data>
+  <data name="BookmarkDeleteItemButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Remover marcador</value></data>
+  <data name="BookmarkDeleteItemButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Remover marcador</value></data>
 </root>

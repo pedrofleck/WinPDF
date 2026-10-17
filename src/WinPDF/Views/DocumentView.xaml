@@ -108,7 +108,7 @@
                             Click="OnFitPageClick"
                             KeyboardAcceleratorTextOverride="Ctrl+0">
                             <MenuFlyoutItem.Icon>
-                                <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xF616;" />
+                                <FontIcon Glyph="&#xE9A6;" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
 
@@ -117,7 +117,7 @@
                             Click="OnFitWidthClick"
                             KeyboardAcceleratorTextOverride="Ctrl+2">
                             <MenuFlyoutItem.Icon>
-                                <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xF617;" />
+                                <FontIcon Glyph="&#xE8A0;" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
 
@@ -413,10 +413,10 @@
                                 <TextBox
                                     x:Name="DocumentSearchBox"
                                     x:Uid="SearchBox"
-                                    Width="230"
+                                    Width="236"
                                     Height="30"
                                     MinHeight="30"
-                                    Padding="8,4,28,4"
+                                    Padding="28,4,8,4"
                                     FontSize="13"
                                     VerticalAlignment="Center"
                                     VerticalContentAlignment="Center"
@@ -429,8 +429,8 @@
                                 <FontIcon
                                     Glyph="&#xE721;"
                                     FontSize="12"
-                                    Margin="0,0,9,0"
-                                    HorizontalAlignment="Right"
+                                    Margin="9,0,0,0"
+                                    HorizontalAlignment="Left"
                                     VerticalAlignment="Center"
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                     IsHitTestVisible="False" />
@@ -514,48 +514,48 @@
                         BorderThickness="1"
                         CornerRadius="8"
                         Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsAnnotationToolbarOpen), Mode=OneWay}">
-                        <StackPanel Orientation="Horizontal" Spacing="4">
-                            <ToggleButton
-                                x:Uid="ToolSelectButton"
-                                Click="OnToolSelectClicked"
-                                IsChecked="{x:Bind converters:UiHelpers.IsSelectTool(ViewModel.ActiveTool), Mode=OneWay}">
-                                <FontIcon FontSize="14" Glyph="&#xEF20;" />
-                            </ToggleButton>
-                            <ToggleButton
-                                x:Uid="ToolPenButton"
-                                Click="OnToolPenClicked"
-                                IsChecked="{x:Bind converters:UiHelpers.IsPenTool(ViewModel.ActiveTool), Mode=OneWay}">
-                                <FontIcon FontSize="14" Glyph="&#xED63;" />
-                            </ToggleButton>
-                            <ToggleButton
-                                x:Uid="ToolHighlighterButton"
-                                Click="OnToolHighlighterClicked"
-                                IsChecked="{x:Bind converters:UiHelpers.IsHighlighterTool(ViewModel.ActiveTool), Mode=OneWay}">
-                                <FontIcon FontSize="14" Glyph="&#xE891;" />
-                            </ToggleButton>
-                            <ToggleButton
-                                x:Uid="ToolEraserButton"
-                                Click="OnToolEraserClicked"
-                                IsChecked="{x:Bind converters:UiHelpers.IsEraserTool(ViewModel.ActiveTool), Mode=OneWay}">
-                                <FontIcon FontSize="14" Glyph="&#xE75C;" />
-                            </ToggleButton>
-                            <ToggleButton
-                                x:Uid="ToolTextNoteButton"
-                                Click="OnToolTextNoteClicked"
-                                IsChecked="{x:Bind converters:UiHelpers.IsTextNoteTool(ViewModel.ActiveTool), Mode=OneWay}">
-                                <FontIcon FontSize="14" Glyph="&#xE70B;" />
-                            </ToggleButton>
+                    <StackPanel Orientation="Horizontal" Spacing="4">
+                        <ToggleButton
+                            x:Uid="ToolSelectButton"
+                            Click="OnToolSelectClicked"
+                            IsChecked="{x:Bind converters:UiHelpers.IsSelectTool(ViewModel.ActiveTool), Mode=OneWay}">
+                            <FontIcon FontSize="14" Glyph="&#xEF20;" />
+                        </ToggleButton>
+                        <ToggleButton
+                            x:Uid="ToolPenButton"
+                            Click="OnToolPenClicked"
+                            IsChecked="{x:Bind converters:UiHelpers.IsPenTool(ViewModel.ActiveTool), Mode=OneWay}">
+                            <FontIcon FontSize="14" Glyph="&#xED63;" />
+                        </ToggleButton>
+                        <ToggleButton
+                            x:Uid="ToolHighlighterButton"
+                            Click="OnToolHighlighterClicked"
+                            IsChecked="{x:Bind converters:UiHelpers.IsHighlighterTool(ViewModel.ActiveTool), Mode=OneWay}">
+                            <FontIcon FontSize="14" Glyph="&#xE891;" />
+                        </ToggleButton>
+                        <ToggleButton
+                            x:Uid="ToolEraserButton"
+                            Click="OnToolEraserClicked"
+                            IsChecked="{x:Bind converters:UiHelpers.IsEraserTool(ViewModel.ActiveTool), Mode=OneWay}">
+                            <FontIcon FontSize="14" Glyph="&#xE75C;" />
+                        </ToggleButton>
+                        <ToggleButton
+                            x:Uid="ToolTextNoteButton"
+                            Click="OnToolTextNoteClicked"
+                            IsChecked="{x:Bind converters:UiHelpers.IsTextNoteTool(ViewModel.ActiveTool), Mode=OneWay}">
+                            <FontIcon FontSize="14" Glyph="&#xE70B;" />
+                        </ToggleButton>
 
-                            <AppBarSeparator Margin="4,2,4,2" />
+                        <AppBarSeparator Margin="4,2,4,2" />
 
-                            <ToggleButton
-                                x:Uid="TouchDrawingToggle"
-                                IsTabStop="False"
-                                IsChecked="{x:Bind ViewModel.IsTouchDrawingEnabled, Mode=TwoWay}">
-                                <FontIcon FontSize="14" Glyph="&#xED5F;" />
-                            </ToggleButton>
-                        </StackPanel>
-                    </Border>
+                        <ToggleButton
+                            x:Uid="TouchDrawingToggle"
+                            IsTabStop="False"
+                            IsChecked="{x:Bind ViewModel.IsTouchDrawingEnabled, Mode=TwoWay}">
+                            <FontIcon FontSize="14" Glyph="&#xED5F;" />
+                        </ToggleButton>
+                    </StackPanel>
+                </Border>
                 </StackPanel>
             </Grid>
 
@@ -651,6 +651,7 @@
                             ToolTipService.ToolTip="{x:Bind PropertiesToolTipText, Mode=OneTime}">
                             <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                 <FontIcon Glyph="&#xE946;" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <FontIcon Glyph="&#xE74E;" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 <TextBlock
                                     Text="{x:Bind ViewModel.CurrentDocument.FormattedFileSize, Mode=OneWay}"
                                     FontSize="12"
@@ -698,7 +699,7 @@
                             Background="Transparent"
                             BorderThickness="0"
                             ToolTipService.ToolTip="{x:Bind ContinuousToolTipText, Mode=OneTime}">
-                            <FontIcon Glyph="&#xEC8F;" FontSize="13" />
+                            <FontIcon Glyph="&#xE8EA;" FontSize="13" />
                         </ToggleButton>
 
                         <!-- 4. Separador | -->
@@ -716,7 +717,7 @@
                             CornerRadius="4"
                             Click="OnFitPageClick"
                             ToolTipService.ToolTip="{x:Bind FitVerticalToolTipText, Mode=OneTime}">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xF616;" FontSize="13" />
+                            <FontIcon Glyph="&#xE9A6;" FontSize="13" />
                         </Button>
 
                         <!-- Botão Fit Horizontal (Ajustar à Largura) -->
@@ -730,7 +731,7 @@
                             CornerRadius="4"
                             Click="OnFitWidthClick"
                             ToolTipService.ToolTip="{x:Bind FitHorizontalToolTipText, Mode=OneTime}">
-                            <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xF617;" FontSize="13" />
+                            <FontIcon Glyph="&#xE8A0;" FontSize="13" />
                         </Button>
 
                         <!-- Caixa Seletora de Zoom (100% ▾) -->

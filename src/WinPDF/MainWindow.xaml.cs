@@ -26,7 +26,7 @@ namespace WinPDF;
 public sealed partial class MainWindow : Window
 {
     private const double CompactBreakpoint = 768.0;
-    private const double MinSidebarWidth = 220.0;
+    private const double MinSidebarWidth = 180.0;
     private const double MaxSidebarWidth = 480.0;
     private const double DefaultSidebarWidth = 260.0;
 
@@ -35,7 +35,7 @@ public sealed partial class MainWindow : Window
     private bool _wasSidebarClosedByNarrowWindow;
     private bool _isInternalSidebarToggle;
     private int _previousSidebarIndex = -1;
-
+    private RectInt32[]? _lastPassthroughRects;
 
     [LibraryImport("user32.dll", EntryPoint = "SendMessageW", SetLastError = true)]
     private static partial IntPtr SendMessage(IntPtr hWnd, uint Msg, UIntPtr wParam, IntPtr lParam);
@@ -57,9 +57,9 @@ public sealed partial class MainWindow : Window
 
         ViewModel = App.CurrentApp.Services.GetRequiredService<ShellViewModel>();
 
-        // Custom TitleBar integration with Mica: only center drag region moves the window
+        // Custom TitleBar integration with Mica
         ExtendsContentIntoTitleBar = true;
-        SetTitleBar(TitleBarDragRegion);
+        SetTitleBar(AppTitleBar);
 
         string iconPath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "Assets", "appicon.ico");
         if (System.IO.File.Exists(iconPath))
@@ -110,6 +110,9 @@ public sealed partial class MainWindow : Window
         // Window size and layout events
         SizeChanged += OnMainWindowSizeChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        AppTitleBar.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
+        SettingsBackBtn.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
+        ExitFullScreenBtn.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
         RegisterTitleBarAnimatedIconPointerHandlers();
 
         MainSplitView.OpenPaneLength = _savedSidebarWidth;
@@ -127,8 +130,6 @@ public sealed partial class MainWindow : Window
             MainContentContainer.BorderThickness = ViewModel.HasDocument ? new Thickness(0, 1, 0, 0) : new Thickness(0);
         };
 
-        SelectSidebarTab(ViewModel.SidebarTab);
-
         AppWindow.Changed += OnAppWindowChanged;
 
         if (Content is FrameworkElement root)
@@ -144,7 +145,7 @@ public sealed partial class MainWindow : Window
 
                 // Initial frame navigation
                 MainContentFrame.Navigate(typeof(DocumentView), ViewModel);
-                SelectSidebarTab(ViewModel.SidebarTab);
+                UpdateSidebarFooterSelectorBarSelection();
 
                 if (root.XamlRoot is not null)
                 {
@@ -271,76 +272,134 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private Storyboard? _ellipsisHoverStoryboard;
+    private Storyboard? _settingsSlideStoryboard;
+
+    private void PlaySettingsSlideAnimation()
+    {
+        if (SettingsFrameTranslate is null)
+        {
+            return;
+        }
+
+        _settingsSlideStoryboard?.Stop();
+        SettingsFrameTranslate.X = 28.0;
+
+        var sb = new Storyboard();
+        var anim = new DoubleAnimation
+        {
+            From = 28.0,
+            To = 0.0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(180)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(anim, SettingsFrameTranslate);
+        Storyboard.SetTargetProperty(anim, "X");
+        sb.Children.Add(anim);
+        _settingsSlideStoryboard = sb;
+        sb.Begin();
+    }
+
     private void RegisterTitleBarAnimatedIconPointerHandlers()
     {
-        HookAnimatedIconButton(SidebarToggleButton, SidebarToggleAnimatedIcon);
-        HookAnimatedIconButton(SearchBtn, SearchAnimatedIcon);
-        HookAnimatedIconButton(SettingsBackBtn, SettingsBackAnimatedIcon);
-        HookAnimatedIconButton(SettingsBtn, SettingsAnimatedIcon);
-        HookDocumentMenuButton();
+        SidebarToggleButton.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => AnimatedIcon.SetState(SidebarToggleAnimatedIcon, "Pressed")), true);
+        SidebarToggleButton.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, _) => AnimatedIcon.SetState(SidebarToggleAnimatedIcon, "PointerOver")), true);
+
+        SearchBtn.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => AnimatedIcon.SetState(SearchAnimatedIcon, "Pressed")), true);
+        SearchBtn.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, _) => AnimatedIcon.SetState(SearchAnimatedIcon, "PointerOver")), true);
+
+        SettingsBackBtn.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => AnimatedIcon.SetState(SettingsBackAnimatedIcon, "Pressed")), true);
+        SettingsBackBtn.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, _) => AnimatedIcon.SetState(SettingsBackAnimatedIcon, "PointerOver")), true);
+
+        SettingsBtn.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) => AnimatedIcon.SetState(SettingsAnimatedIcon, "Pressed")), true);
+        SettingsBtn.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((_, _) => AnimatedIcon.SetState(SettingsAnimatedIcon, "PointerOver")), true);
+
+        DocumentMenuBtn.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler(OnDocumentMenuPointerPressed), true);
+        DocumentMenuBtn.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(OnDocumentMenuPointerReleased), true);
     }
 
-    private static void HookAnimatedIconButton(Button button, AnimatedIcon icon)
+    private void OnSidebarTogglePointerEntered(object sender, PointerRoutedEventArgs e)
     {
-        AnimatedIcon.SetState(icon, "Normal");
-
-        button.AddHandler(UIElement.PointerEnteredEvent, new PointerEventHandler((_, _) =>
-        {
-            AnimatedIcon.SetState(icon, "PointerOver");
-        }), true);
-
-        button.AddHandler(UIElement.PointerExitedEvent, new PointerEventHandler((_, _) =>
-        {
-            AnimatedIcon.SetState(icon, "Normal");
-        }), true);
-
-        button.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) =>
-        {
-            AnimatedIcon.SetState(icon, "Pressed");
-        }), true);
-
-        button.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler((sender, e) =>
-        {
-            if (sender is FrameworkElement fe && fe.ActualWidth > 0 && fe.ActualHeight > 0)
-            {
-                var pos = e.GetCurrentPoint(fe).Position;
-                if (pos.X >= 0 && pos.Y >= 0 && pos.X <= fe.ActualWidth && pos.Y <= fe.ActualHeight)
-                {
-                    AnimatedIcon.SetState(icon, "PointerOver");
-                    return;
-                }
-            }
-
-            AnimatedIcon.SetState(icon, "Normal");
-        }), true);
-
-        button.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler((_, _) =>
-        {
-            AnimatedIcon.SetState(icon, "Normal");
-        }), true);
-
-        button.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler((_, _) =>
-        {
-            AnimatedIcon.SetState(icon, "Normal");
-        }), true);
+        AnimatedIcon.SetState(SidebarToggleAnimatedIcon, "PointerOver");
     }
 
-    private Storyboard? _ellipsisWaveStoryboard;
-
-    private void HookDocumentMenuButton()
+    private void OnSidebarTogglePointerExited(object sender, PointerRoutedEventArgs e)
     {
-        DocumentMenuBtn.AddHandler(UIElement.PointerPressedEvent, new PointerEventHandler((_, _) =>
+        AnimatedIcon.SetState(SidebarToggleAnimatedIcon, "Normal");
+    }
+
+    private void OnSearchButtonPointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        AnimatedIcon.SetState(SearchAnimatedIcon, "PointerOver");
+    }
+
+    private void OnSearchButtonPointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        AnimatedIcon.SetState(SearchAnimatedIcon, "Normal");
+    }
+
+    private void OnSettingsBackPointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        AnimatedIcon.SetState(SettingsBackAnimatedIcon, "PointerOver");
+    }
+
+    private void OnSettingsBackPointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        AnimatedIcon.SetState(SettingsBackAnimatedIcon, "Normal");
+    }
+
+    private void OnSettingsButtonPointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        AnimatedIcon.SetState(SettingsAnimatedIcon, "PointerOver");
+    }
+
+    private void OnSettingsButtonPointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        AnimatedIcon.SetState(SettingsAnimatedIcon, "Normal");
+    }
+
+    private void OnDocumentMenuPointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        PlayEllipsisWaveAnimation();
+    }
+
+    private void OnDocumentMenuPointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        AnimateEllipsisToRest();
+    }
+
+    private void OnDocumentMenuPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        _ellipsisHoverStoryboard?.Stop();
+        var sb = new Storyboard();
+
+        AddDoubleAnimation(sb, EllipsisDot1Transform, "TranslateX", -3.4, 90);
+        AddDoubleAnimation(sb, EllipsisDot3Transform, "TranslateX", 3.4, 90);
+        AddDoubleAnimation(sb, EllipsisDot1Transform, "TranslateY", 0.0, 90);
+        AddDoubleAnimation(sb, EllipsisDot2Transform, "TranslateY", 0.0, 90);
+        AddDoubleAnimation(sb, EllipsisDot3Transform, "TranslateY", 0.0, 90);
+
+        foreach (var transform in new[] { EllipsisDot1Transform, EllipsisDot2Transform, EllipsisDot3Transform })
         {
-            PlayEllipsisWaveAnimation();
-        }), true);
+            AddDoubleAnimation(sb, transform, "ScaleX", 0.85, 90);
+            AddDoubleAnimation(sb, transform, "ScaleY", 0.85, 90);
+        }
+
+        _ellipsisHoverStoryboard = sb;
+        sb.Begin();
+    }
+
+    private void OnDocumentMenuPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        AnimateEllipsisToRest();
     }
 
     private void PlayEllipsisWaveAnimation()
     {
-        _ellipsisWaveStoryboard?.Stop();
+        _ellipsisHoverStoryboard?.Stop();
         var sb = new Storyboard();
 
-        TranslateTransform[] dots = [EllipsisDot1Transform, EllipsisDot2Transform, EllipsisDot3Transform];
+        CompositeTransform[] dots = [EllipsisDot1Transform, EllipsisDot2Transform, EllipsisDot3Transform];
         for (int i = 0; i < dots.Length; i++)
         {
             var keyFrames = new DoubleAnimationUsingKeyFrames
@@ -355,22 +414,42 @@ public sealed partial class MainWindow : Window
             keyFrames.KeyFrames.Add(new EasingDoubleKeyFrame
             {
                 KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(105)),
-                Value = -3.0,
+                Value = -2.2,
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
             });
             keyFrames.KeyFrames.Add(new EasingDoubleKeyFrame
             {
-                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(225)),
+                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(220)),
                 Value = 0.0,
                 EasingFunction = new BounceEase { Bounces = 1, Bounciness = 3, EasingMode = EasingMode.EaseOut }
             });
 
             Storyboard.SetTarget(keyFrames, dots[i]);
-            Storyboard.SetTargetProperty(keyFrames, "Y");
+            Storyboard.SetTargetProperty(keyFrames, "TranslateY");
             sb.Children.Add(keyFrames);
         }
 
-        _ellipsisWaveStoryboard = sb;
+        _ellipsisHoverStoryboard = sb;
+        sb.Begin();
+    }
+
+    private void AnimateEllipsisToRest()
+    {
+        _ellipsisHoverStoryboard?.Stop();
+        var sb = new Storyboard();
+
+        AddDoubleAnimation(sb, EllipsisDot1Transform, "TranslateX", -5.0, 160);
+        AddDoubleAnimation(sb, EllipsisDot2Transform, "TranslateX", 0.0, 160);
+        AddDoubleAnimation(sb, EllipsisDot3Transform, "TranslateX", 5.0, 160);
+
+        foreach (var transform in new[] { EllipsisDot1Transform, EllipsisDot2Transform, EllipsisDot3Transform })
+        {
+            AddDoubleAnimation(sb, transform, "TranslateY", 0.0, 160);
+            AddDoubleAnimation(sb, transform, "ScaleX", 1.0, 160);
+            AddDoubleAnimation(sb, transform, "ScaleY", 1.0, 160);
+        }
+
+        _ellipsisHoverStoryboard = sb;
         sb.Begin();
     }
 
@@ -413,23 +492,22 @@ public sealed partial class MainWindow : Window
 
     private void UpdateMainContainerStyle()
     {
-        if (ViewModel.HasDocument && !ViewModel.IsSettingsOpen)
+        if (ViewModel.HasDocument || ViewModel.IsSettingsOpen)
         {
             MainContentContainer.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["LayerFillColorDefaultBrush"];
             MainContentContainer.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
-            MainContentContainer.BorderThickness = ViewModel.IsSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0);
-            MainContentContainer.CornerRadius = ViewModel.IsSidebarOpen ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
         }
         else
         {
             MainContentContainer.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
             MainContentContainer.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
-            MainContentContainer.BorderThickness = new Thickness(0);
-            MainContentContainer.CornerRadius = new CornerRadius(0);
         }
     }
 
     private double _lastRightInsetDip = -1;
+    private FrameworkElement[]? _documentInteractiveElements;
+    private FrameworkElement[]? _settingsInteractiveElements;
+    private readonly List<RectInt32> _reusablePassthroughRects = new(8);
 
     private void UpdateTitleBarInsets()
     {
@@ -468,19 +546,72 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private static bool AreRectsEqualList(RectInt32[] a, List<RectInt32> b)
+    {
+        if (a.Length != b.Count)
+        {
+            return false;
+        }
 
+        for (int i = 0; i < a.Length; i++)
+        {
+            if (a[i].X != b[i].X || a[i].Y != b[i].Y || a[i].Width != b[i].Width || a[i].Height != b[i].Height)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private void UpdateTitleBarNonClientRegions()
     {
-        if (!AppWindowTitleBar.IsCustomizationSupported())
+        if (!AppWindowTitleBar.IsCustomizationSupported() || Content?.XamlRoot is null)
         {
             return;
         }
 
+        double scale = Content.XamlRoot.RasterizationScale;
+        _reusablePassthroughRects.Clear();
+
+        FrameworkElement[] interactiveElements = ViewModel.IsSettingsOpen
+            ? (_settingsInteractiveElements ??= [SettingsBackBtn, ExitFullScreenBtn])
+            : (_documentInteractiveElements ??=
+            [
+                SidebarToggleButton,
+                OpenFileBtn,
+                SearchBtn,
+                AnnotationToolsToggleBtn,
+                DocumentMenuBtn,
+                SettingsBtn,
+                ExitFullScreenBtn
+            ]);
+
+        foreach (var element in interactiveElements)
+        {
+            if (element.IsLoaded && element.Visibility == Visibility.Visible && element.ActualWidth > 0 && element.ActualHeight > 0)
+            {
+                var transform = element.TransformToVisual(null);
+                var bounds = transform.TransformBounds(new Windows.Foundation.Rect(0, 0, element.ActualWidth, element.ActualHeight));
+                _reusablePassthroughRects.Add(new RectInt32(
+                    (int)Math.Round(bounds.X * scale),
+                    (int)Math.Round(bounds.Y * scale),
+                    (int)Math.Round(bounds.Width * scale),
+                    (int)Math.Round(bounds.Height * scale)));
+            }
+        }
+
+        if (_lastPassthroughRects is not null && AreRectsEqualList(_lastPassthroughRects, _reusablePassthroughRects))
+        {
+            return;
+        }
+
+        var newRects = _reusablePassthroughRects.ToArray();
         try
         {
             var nonClientInput = InputNonClientPointerSource.GetForWindowId(AppWindow.Id);
-            nonClientInput.ClearRegionRects(NonClientRegionKind.Passthrough);
+            nonClientInput.SetRegionRects(NonClientRegionKind.Passthrough, newRects);
+            _lastPassthroughRects = newRects;
         }
         catch
         {
@@ -532,7 +663,6 @@ public sealed partial class MainWindow : Window
         {
             UpdateSidebarLayout();
             UpdateMainContainerStyle();
-            SelectSidebarTab(ViewModel.SidebarTab);
             DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsAnnotationToolbarOpen))
@@ -545,25 +675,33 @@ public sealed partial class MainWindow : Window
             UpdateMainContainerStyle();
             if (ViewModel.IsSettingsOpen)
             {
-                MainContentFrame.Navigate(typeof(SettingsView), ViewModel, new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromRight });
+                if (SettingsContentFrame.Content is null)
+                {
+                    SettingsContentFrame.Navigate(typeof(SettingsView), ViewModel);
+                }
+
+                PlaySettingsSlideAnimation();
             }
             else
             {
-                if (MainContentFrame.CanGoBack)
+                if (ViewModel.HasDocument)
                 {
-                    MainContentFrame.GoBack(new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromLeft });
+                    ViewModel.CurrentDocument?.SetThumbnailsActive(ViewModel.IsSidebarOpen && ViewModel.SidebarTab == SidebarTab.Thumbnails);
                 }
-                else
+
+                if (MainContentFrame.Content is DocumentView docView)
                 {
-                    MainContentFrame.Navigate(typeof(DocumentView), ViewModel, new SlideNavigationTransitionInfo { Effect = SlideNavigationTransitionEffect.FromLeft });
+                    docView.OnReturnedFromSettings();
                 }
+
+                DispatcherQueue.TryEnqueue(UpdateSidebarLayout);
             }
 
             DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
         }
         else if (e.PropertyName == nameof(ShellViewModel.SidebarTab))
         {
-            SelectSidebarTab(ViewModel.SidebarTab);
+            UpdateSidebarFooterSelectorBarSelection();
         }
     }
 
@@ -665,26 +803,32 @@ public sealed partial class MainWindow : Window
         titleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
     }
 
-    private void OnSidebarTabButtonClick(object sender, RoutedEventArgs e)
+    private void OnSidebarFooterSelectionChanged(SelectorBar sender, SelectorBarSelectionChangedEventArgs args)
     {
-        if (sender is FrameworkElement { Tag: string tag } &&
-            Enum.TryParse<SidebarTab>(tag, out var tab))
+        if (sender.SelectedItem is null)
         {
-            SelectSidebarTab(tab);
+            return;
         }
-    }
 
-    private void SelectSidebarTab(SidebarTab targetTab)
-    {
-        int targetIndex = (int)targetTab;
-        Type pageType = targetTab switch
+        int currentSelectedIndex = sender.Items.IndexOf(sender.SelectedItem);
+        Type pageType = sender.SelectedItem switch
         {
-            SidebarTab.Thumbnails => typeof(ThumbnailsTabPage),
-            SidebarTab.Outline => typeof(OutlineTabPage),
-            SidebarTab.Annotations => typeof(AnnotationsTabPage),
-            SidebarTab.Bookmarks => typeof(BookmarksTabPage),
-            SidebarTab.Attachments => typeof(AttachmentsTabPage),
+            var item when item == ThumbnailsSelectorItem => typeof(ThumbnailsTabPage),
+            var item when item == OutlineSelectorItem => typeof(OutlineTabPage),
+            var item when item == AnnotationsSelectorItem => typeof(AnnotationsTabPage),
+            var item when item == BookmarksSelectorItem => typeof(BookmarksTabPage),
+            var item when item == AttachmentsSelectorItem => typeof(AttachmentsTabPage),
             _ => typeof(ThumbnailsTabPage)
+        };
+
+        SidebarTab targetTab = sender.SelectedItem switch
+        {
+            var item when item == ThumbnailsSelectorItem => SidebarTab.Thumbnails,
+            var item when item == OutlineSelectorItem => SidebarTab.Outline,
+            var item when item == AnnotationsSelectorItem => SidebarTab.Annotations,
+            var item when item == BookmarksSelectorItem => SidebarTab.Bookmarks,
+            var item when item == AttachmentsSelectorItem => SidebarTab.Attachments,
+            _ => SidebarTab.Thumbnails
         };
 
         if (ViewModel.SidebarTab != targetTab)
@@ -696,15 +840,38 @@ public sealed partial class MainWindow : Window
         {
             SidebarContentFrame.Navigate(pageType, ViewModel);
         }
-        else if (targetIndex != _previousSidebarIndex)
+        else if (currentSelectedIndex != _previousSidebarIndex)
         {
-            var effect = targetIndex - _previousSidebarIndex > 0
+            var effect = currentSelectedIndex - _previousSidebarIndex > 0
                 ? SlideNavigationTransitionEffect.FromRight
                 : SlideNavigationTransitionEffect.FromLeft;
             SidebarContentFrame.Navigate(pageType, ViewModel, new SlideNavigationTransitionInfo { Effect = effect });
         }
 
-        _previousSidebarIndex = targetIndex;
+        _previousSidebarIndex = currentSelectedIndex;
+    }
+
+    private void UpdateSidebarFooterSelectorBarSelection()
+    {
+        if (SidebarFooterSelectorBar is null)
+        {
+            return;
+        }
+
+        SelectorBarItem targetItem = ViewModel.SidebarTab switch
+        {
+            SidebarTab.Thumbnails => ThumbnailsSelectorItem,
+            SidebarTab.Outline => OutlineSelectorItem,
+            SidebarTab.Annotations => AnnotationsSelectorItem,
+            SidebarTab.Bookmarks => BookmarksSelectorItem,
+            SidebarTab.Attachments => AttachmentsSelectorItem,
+            _ => ThumbnailsSelectorItem
+        };
+
+        if (SidebarFooterSelectorBar.SelectedItem != targetItem)
+        {
+            SidebarFooterSelectorBar.SelectedItem = targetItem;
+        }
     }
 
     private void OnPrintClick(object sender, RoutedEventArgs e)

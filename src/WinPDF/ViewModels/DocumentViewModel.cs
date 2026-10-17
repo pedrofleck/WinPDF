@@ -127,6 +127,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
     partial void OnIsPresentationModeChanged(bool value)
     {
+        foreach (PdfPageRow row in DisplayedRows)
+        {
+            row.IsPresentationMode = value;
+        }
+
         UpdateDisplayedRows();
     }
 
@@ -182,6 +187,14 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     /// </summary>
     [ObservableProperty]
     public partial bool IsNightMode { get; set; }
+
+    partial void OnIsNightModeChanged(bool value)
+    {
+        foreach (PdfPageRow row in DisplayedRows)
+        {
+            row.IsNightMode = value;
+        }
+    }
 
     /// <summary>
     /// Gets or sets the clockwise rotation angle in degrees (0, 90, 180, 270).
@@ -494,6 +507,18 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Removes a specific bookmark item from the document's bookmarks collection.
+    /// </summary>
+    /// <param name="bookmark">The bookmark item to remove.</param>
+    public void RemoveBookmark(BookmarkItemViewModel? bookmark)
+    {
+        if (bookmark is not null && Bookmarks.Remove(bookmark))
+        {
+            UpdateIsCurrentPageBookmarked();
+        }
+    }
+
+    /// <summary>
     /// Rotates the document view 90 degrees clockwise.
     /// </summary>
     public void RotateClockwise()
@@ -802,7 +827,12 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
     private void RequestThumbnail(ThumbnailItemViewModel item, double scale)
     {
-        if (item.Image is not null || item.LoadCancellation is not null || _isDisposed)
+        if (item.Image is { IsDisposed: true })
+        {
+            item.ClearImage();
+        }
+
+        if (item.Image is { IsDisposed: false } || item.LoadCancellation is not null || _isDisposed)
         {
             return;
         }
@@ -822,7 +852,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
         if (_tileCache.TryGet(in key, out TileCacheEntry? cachedEntry))
         {
-            if (cachedEntry is PdfBitmapEntry bitmapEntry)
+            if (cachedEntry is PdfBitmapEntry { IsDisposed: false } bitmapEntry)
             {
                 item.SetImage(bitmapEntry);
                 return;

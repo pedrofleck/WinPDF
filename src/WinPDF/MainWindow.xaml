@@ -4,6 +4,7 @@
     Title="WinPDF"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:animatedvisuals="using:Microsoft.UI.Xaml.Controls.AnimatedVisuals"
     xmlns:converters="using:WinPDF.Converters"
     xmlns:controls="using:WinPDF.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -11,7 +12,6 @@
     xmlns:models="using:WinPDF.Models"
     xmlns:views="using:WinPDF.Views"
     xmlns:vm="using:WinPDF.ViewModels"
-    xmlns:animatedvisuals="using:Microsoft.UI.Xaml.Controls.AnimatedVisuals"
     mc:Ignorable="d">
 
     <Window.SystemBackdrop>
@@ -63,13 +63,14 @@
                         Command="{x:Bind ViewModel.ToggleSidebarCommand}"
                         CornerRadius="4"
                         IsTabStop="False"
+                        PointerEntered="OnSidebarTogglePointerEntered"
+                        PointerExited="OnSidebarTogglePointerExited"
                         Style="{StaticResource SubtleButtonStyle}"
                         Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
                         <AnimatedIcon
                             x:Name="SidebarToggleAnimatedIcon"
                             Width="16"
-                            Height="16"
-                            AnimatedIcon.State="Normal">
+                            Height="16">
                             <AnimatedIcon.Source>
                                 <animatedvisuals:AnimatedGlobalNavigationButtonVisualSource />
                             </AnimatedIcon.Source>
@@ -127,17 +128,18 @@
                         CornerRadius="4"
                         IsEnabled="{x:Bind ViewModel.HasDocument, Mode=OneWay}"
                         IsTabStop="False"
+                        PointerEntered="OnSearchButtonPointerEntered"
+                        PointerExited="OnSearchButtonPointerExited"
                         Style="{StaticResource SubtleButtonStyle}">
                         <AnimatedIcon
                             x:Name="SearchAnimatedIcon"
                             Width="16"
-                            Height="16"
-                            AnimatedIcon.State="Normal">
+                            Height="16">
                             <AnimatedIcon.Source>
                                 <animatedvisuals:AnimatedFindVisualSource />
                             </AnimatedIcon.Source>
                             <AnimatedIcon.FallbackIconSource>
-                                <FontIconSource FontSize="16" Glyph="&#xE721;" />
+                                <SymbolIconSource Symbol="Find" />
                             </AnimatedIcon.FallbackIconSource>
                         </AnimatedIcon>
                     </Button>
@@ -159,36 +161,27 @@
                     Padding="0"
                     Command="{x:Bind ViewModel.CloseSettingsCommand}"
                     CornerRadius="4"
+                    PointerEntered="OnSettingsBackPointerEntered"
+                    PointerExited="OnSettingsBackPointerExited"
                     Style="{StaticResource SubtleButtonStyle}">
                     <AnimatedIcon
                         x:Name="SettingsBackAnimatedIcon"
                         Width="16"
-                        Height="16"
-                        AnimatedIcon.State="Normal">
+                        Height="16">
                         <AnimatedIcon.Source>
                             <animatedvisuals:AnimatedBackVisualSource />
                         </AnimatedIcon.Source>
                         <AnimatedIcon.FallbackIconSource>
-                            <FontIconSource FontSize="16" Glyph="&#xE72B;" />
+                            <SymbolIconSource Symbol="Back" />
                         </AnimatedIcon.FallbackIconSource>
                     </AnimatedIcon>
                 </Button>
 
-                <StackPanel
+                <TextBlock
+                    x:Uid="SettingsTitleText"
                     VerticalAlignment="Center"
-                    Orientation="Horizontal"
-                    Spacing="6">
-                    <Image
-                        Width="16"
-                        Height="16"
-                        VerticalAlignment="Center"
-                        Source="ms-appx:///Assets/appicon.png" />
-                    <TextBlock
-                        x:Uid="AppTitleBarText"
-                        VerticalAlignment="Center"
-                        FontWeight="SemiBold"
-                        Style="{StaticResource CaptionTextBlockStyle}" />
-                </StackPanel>
+                    FontWeight="SemiBold"
+                    Style="{StaticResource CaptionTextBlockStyle}" />
             </StackPanel>
 
             <!-- Centro: Área de Arraste da Janela + Nome do Documento -->
@@ -247,40 +240,48 @@
                     Padding="0"
                     CornerRadius="4"
                     IsTabStop="False"
+                    PointerEntered="OnDocumentMenuPointerEntered"
+                    PointerExited="OnDocumentMenuPointerExited"
                     Style="{StaticResource SubtleButtonStyle}">
-                    <StackPanel
-                        Orientation="Horizontal"
-                        Spacing="2.5"
+                    <Grid
+                        Width="16"
+                        Height="16"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center">
                         <Ellipse
-                            x:Name="EllipsisDot1"
-                            Width="3.5"
-                            Height="3.5"
-                            Fill="{ThemeResource TextFillColorPrimaryBrush}">
+                            Width="3"
+                            Height="3"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Fill="{ThemeResource TextFillColorPrimaryBrush}"
+                            RenderTransformOrigin="0.5,0.5">
                             <Ellipse.RenderTransform>
-                                <TranslateTransform x:Name="EllipsisDot1Transform" />
+                                <CompositeTransform x:Name="EllipsisDot1Transform" TranslateX="-5" />
                             </Ellipse.RenderTransform>
                         </Ellipse>
                         <Ellipse
-                            x:Name="EllipsisDot2"
-                            Width="3.5"
-                            Height="3.5"
-                            Fill="{ThemeResource TextFillColorPrimaryBrush}">
+                            Width="3"
+                            Height="3"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Fill="{ThemeResource TextFillColorPrimaryBrush}"
+                            RenderTransformOrigin="0.5,0.5">
                             <Ellipse.RenderTransform>
-                                <TranslateTransform x:Name="EllipsisDot2Transform" />
+                                <CompositeTransform x:Name="EllipsisDot2Transform" TranslateX="0" />
                             </Ellipse.RenderTransform>
                         </Ellipse>
                         <Ellipse
-                            x:Name="EllipsisDot3"
-                            Width="3.5"
-                            Height="3.5"
-                            Fill="{ThemeResource TextFillColorPrimaryBrush}">
+                            Width="3"
+                            Height="3"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Fill="{ThemeResource TextFillColorPrimaryBrush}"
+                            RenderTransformOrigin="0.5,0.5">
                             <Ellipse.RenderTransform>
-                                <TranslateTransform x:Name="EllipsisDot3Transform" />
+                                <CompositeTransform x:Name="EllipsisDot3Transform" TranslateX="5" />
                             </Ellipse.RenderTransform>
                         </Ellipse>
-                    </StackPanel>
+                    </Grid>
                     <Button.Flyout>
                         <MenuFlyout Placement="BottomEdgeAlignedRight">
                             <MenuFlyoutItem
@@ -379,17 +380,18 @@
                     Command="{x:Bind ViewModel.OpenSettingsCommand}"
                     CornerRadius="4"
                     IsTabStop="False"
+                    PointerEntered="OnSettingsButtonPointerEntered"
+                    PointerExited="OnSettingsButtonPointerExited"
                     Style="{StaticResource SubtleButtonStyle}">
                     <AnimatedIcon
                         x:Name="SettingsAnimatedIcon"
                         Width="16"
-                        Height="16"
-                        AnimatedIcon.State="Normal">
+                        Height="16">
                         <AnimatedIcon.Source>
                             <animatedvisuals:AnimatedSettingsVisualSource />
                         </AnimatedIcon.Source>
                         <AnimatedIcon.FallbackIconSource>
-                            <FontIconSource FontSize="16" Glyph="&#xE713;" />
+                            <SymbolIconSource Symbol="Setting" />
                         </AnimatedIcon.FallbackIconSource>
                     </AnimatedIcon>
                 </Button>
@@ -420,7 +422,7 @@
             x:Name="MainSplitView"
             Grid.Row="1"
             DisplayMode="Inline"
-            IsPaneOpen="{x:Bind converters:UiHelpers.IsSidebarOpenWithDoc(ViewModel.HasDocument, ViewModel.IsSidebarOpen), Mode=OneWay}"
+            IsPaneOpen="{x:Bind converters:UiHelpers.IsSidebarOpenInDocumentView(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}"
             OpenPaneLength="260"
             PaneBackground="Transparent"
             PanePlacement="Left">
@@ -442,168 +444,63 @@
                             Background="Transparent"
                             IsNavigationStackEnabled="False" />
 
-                        <!-- Rodapé com Botões de Abas da Barra Lateral (Ícones de 20px com Alvo Touch Amplo) -->
+                        <!-- Rodapé com SelectorBar Nativo sem Bordas (Ícones Maiores de 20px) -->
                         <Border
                             Grid.Row="1"
-                            Padding="0,4,0,4"
+                            Padding="4,6,4,6"
                             Background="Transparent"
                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                             BorderThickness="0,1,0,0">
-                            <StackPanel
-                                x:Name="SidebarFooterButtonsPanel"
-                                Orientation="Horizontal"
+                            <SelectorBar
+                                x:Name="SidebarFooterSelectorBar"
                                 HorizontalAlignment="Center"
-                                Spacing="2">
-                                <!-- Aba 1: Miniaturas das Páginas -->
-                                <Button
-                                    x:Name="ThumbnailsTabBtn"
+                                SelectionChanged="OnSidebarFooterSelectionChanged">
+                                <SelectorBarItem
+                                    x:Name="ThumbnailsSelectorItem"
                                     x:Uid="Sidebar_Thumbnails"
-                                    Width="40"
-                                    Height="36"
-                                    Padding="0"
-                                    CornerRadius="4"
-                                    Style="{StaticResource SubtleButtonStyle}"
-                                    Click="OnSidebarTabButtonClick"
-                                    Tag="Thumbnails">
-                                    <Grid Width="40" Height="36" Background="Transparent">
-                                        <FontIcon
-                                            FontSize="20"
-                                            Glyph="&#xF0E2;"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center" />
-                                        <Rectangle
-                                            Width="18"
-                                            Height="3"
-                                            RadiusX="1.5"
-                                            RadiusY="1.5"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Bottom"
-                                            Margin="0,0,0,2"
-                                            Fill="{ThemeResource AccentFillColorDefaultBrush}"
-                                            Visibility="{x:Bind converters:UiHelpers.ThumbnailsVisibility(ViewModel.SidebarTab), Mode=OneWay}" />
-                                    </Grid>
-                                </Button>
-
-                                <!-- Aba 2: Sumário / Índice -->
-                                <Button
-                                    x:Name="OutlineTabBtn"
+                                    Margin="2,0"
+                                    Padding="6,6">
+                                    <SelectorBarItem.Icon>
+                                        <FontIcon FontSize="20" Glyph="&#xF0E2;" />
+                                    </SelectorBarItem.Icon>
+                                </SelectorBarItem>
+                                <SelectorBarItem
+                                    x:Name="OutlineSelectorItem"
                                     x:Uid="Sidebar_Outline"
-                                    Width="40"
-                                    Height="36"
-                                    Padding="0"
-                                    CornerRadius="4"
-                                    Style="{StaticResource SubtleButtonStyle}"
-                                    Click="OnSidebarTabButtonClick"
-                                    Tag="Outline">
-                                    <Grid Width="40" Height="36" Background="Transparent">
-                                        <FontIcon
-                                            FontSize="20"
-                                            Glyph="&#xE8FD;"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center" />
-                                        <Rectangle
-                                            Width="18"
-                                            Height="3"
-                                            RadiusX="1.5"
-                                            RadiusY="1.5"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Bottom"
-                                            Margin="0,0,0,2"
-                                            Fill="{ThemeResource AccentFillColorDefaultBrush}"
-                                            Visibility="{x:Bind converters:UiHelpers.OutlineVisibility(ViewModel.SidebarTab), Mode=OneWay}" />
-                                    </Grid>
-                                </Button>
-
-                                <!-- Aba 3: Anotações -->
-                                <Button
-                                    x:Name="AnnotationsTabBtn"
+                                    Margin="2,0"
+                                    Padding="6,6">
+                                    <SelectorBarItem.Icon>
+                                        <FontIcon FontSize="20" Glyph="&#xE8FD;" />
+                                    </SelectorBarItem.Icon>
+                                </SelectorBarItem>
+                                <SelectorBarItem
+                                    x:Name="AnnotationsSelectorItem"
                                     x:Uid="Sidebar_Annotations"
-                                    Width="40"
-                                    Height="36"
-                                    Padding="0"
-                                    CornerRadius="4"
-                                    Style="{StaticResource SubtleButtonStyle}"
-                                    Click="OnSidebarTabButtonClick"
-                                    Tag="Annotations">
-                                    <Grid Width="40" Height="36" Background="Transparent">
-                                        <FontIcon
-                                            FontSize="20"
-                                            Glyph="&#xE90A;"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center" />
-                                        <Rectangle
-                                            Width="18"
-                                            Height="3"
-                                            RadiusX="1.5"
-                                            RadiusY="1.5"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Bottom"
-                                            Margin="0,0,0,2"
-                                            Fill="{ThemeResource AccentFillColorDefaultBrush}"
-                                            Visibility="{x:Bind converters:UiHelpers.AnnotationsVisibility(ViewModel.SidebarTab), Mode=OneWay}" />
-                                    </Grid>
-                                </Button>
-
-                                <!-- Aba 4: Marcadores -->
-                                <Button
-                                    x:Name="BookmarksTabBtn"
+                                    Margin="2,0"
+                                    Padding="6,6">
+                                    <SelectorBarItem.Icon>
+                                        <FontIcon FontSize="20" Glyph="&#xE8F2;" />
+                                    </SelectorBarItem.Icon>
+                                </SelectorBarItem>
+                                <SelectorBarItem
+                                    x:Name="BookmarksSelectorItem"
                                     x:Uid="Sidebar_Bookmarks"
-                                    Width="40"
-                                    Height="36"
-                                    Padding="0"
-                                    CornerRadius="4"
-                                    Style="{StaticResource SubtleButtonStyle}"
-                                    Click="OnSidebarTabButtonClick"
-                                    Tag="Bookmarks">
-                                    <Grid Width="40" Height="36" Background="Transparent">
-                                        <FontIcon
-                                            FontSize="20"
-                                            Glyph="&#xE728;"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center" />
-                                        <Rectangle
-                                            Width="18"
-                                            Height="3"
-                                            RadiusX="1.5"
-                                            RadiusY="1.5"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Bottom"
-                                            Margin="0,0,0,2"
-                                            Fill="{ThemeResource AccentFillColorDefaultBrush}"
-                                            Visibility="{x:Bind converters:UiHelpers.BookmarksVisibility(ViewModel.SidebarTab), Mode=OneWay}" />
-                                    </Grid>
-                                </Button>
-
-                                <!-- Aba 5: Anexos -->
-                                <Button
-                                    x:Name="AttachmentsTabBtn"
+                                    Margin="2,0"
+                                    Padding="6,6">
+                                    <SelectorBarItem.Icon>
+                                        <FontIcon FontSize="20" Glyph="&#xE8A4;" />
+                                    </SelectorBarItem.Icon>
+                                </SelectorBarItem>
+                                <SelectorBarItem
+                                    x:Name="AttachmentsSelectorItem"
                                     x:Uid="Sidebar_Attachments"
-                                    Width="40"
-                                    Height="36"
-                                    Padding="0"
-                                    CornerRadius="4"
-                                    Style="{StaticResource SubtleButtonStyle}"
-                                    Click="OnSidebarTabButtonClick"
-                                    Tag="Attachments">
-                                    <Grid Width="40" Height="36" Background="Transparent">
-                                        <FontIcon
-                                            FontSize="20"
-                                            Glyph="&#xE723;"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center" />
-                                        <Rectangle
-                                            Width="18"
-                                            Height="3"
-                                            RadiusX="1.5"
-                                            RadiusY="1.5"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Bottom"
-                                            Margin="0,0,0,2"
-                                            Fill="{ThemeResource AccentFillColorDefaultBrush}"
-                                            Visibility="{x:Bind converters:UiHelpers.AttachmentsVisibility(ViewModel.SidebarTab), Mode=OneWay}" />
-                                    </Grid>
-                                </Button>
-                            </StackPanel>
+                                    Margin="2,0"
+                                    Padding="6,6">
+                                    <SelectorBarItem.Icon>
+                                        <FontIcon FontSize="20" Glyph="&#xE723;" />
+                                    </SelectorBarItem.Icon>
+                                </SelectorBarItem>
+                            </SelectorBar>
                         </Border>
                     </Grid>
 
@@ -640,16 +537,29 @@
             <!-- Container Arredondado Principal -->
             <Border
                 x:Name="MainContentContainer"
-                Background="{x:Bind converters:UiHelpers.MainContainerBackground(ViewModel.HasDocument, ViewModel.IsSettingsOpen), Mode=OneWay}"
-                BorderBrush="{x:Bind converters:UiHelpers.MainContainerBorderBrush(ViewModel.HasDocument, ViewModel.IsSettingsOpen), Mode=OneWay}"
-                BorderThickness="{x:Bind converters:UiHelpers.MainContainerBorderThickness(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}"
-                CornerRadius="{x:Bind converters:UiHelpers.MainContainerCornerRadius(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}">
+                Background="{x:Bind converters:UiHelpers.MainContainerBackgroundWithSettings(ViewModel.HasDocument, ViewModel.IsSettingsOpen), Mode=OneWay}"
+                BorderBrush="{x:Bind converters:UiHelpers.MainContainerBorderBrushWithSettings(ViewModel.HasDocument, ViewModel.IsSettingsOpen), Mode=OneWay}"
+                BorderThickness="{x:Bind converters:UiHelpers.MainContainerBorderThickness(ViewModel.HasDocument, ViewModel.IsSidebarOpen), Mode=OneWay}"
+                CornerRadius="{x:Bind converters:UiHelpers.MainContainerCornerRadius(ViewModel.HasDocument, ViewModel.IsSidebarOpen), Mode=OneWay}">
+                <Grid>
+                    <!-- Frame de Conteúdo Principal (DocumentView permanece vivo na árvore visual o tempo todo) -->
+                    <Frame
+                        x:Name="MainContentFrame"
+                        Background="Transparent"
+                        IsNavigationStackEnabled="False"
+                        Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.IsSettingsOpen), Mode=OneWay}" />
 
-                <!-- Frame de Conteúdo Principal (DocumentView vs. SettingsView) -->
-                <Frame
-                    x:Name="MainContentFrame"
-                    Background="Transparent"
-                    IsNavigationStackEnabled="True" />
+                    <!-- Frame Dedicado de Configurações (evita descarregar o DocumentView e os CanvasControls do Win2D) -->
+                    <Frame
+                        x:Name="SettingsContentFrame"
+                        Background="{ThemeResource LayerFillColorDefaultBrush}"
+                        IsNavigationStackEnabled="False"
+                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsSettingsOpen), Mode=OneWay}">
+                        <Frame.RenderTransform>
+                            <TranslateTransform x:Name="SettingsFrameTranslate" />
+                        </Frame.RenderTransform>
+                    </Frame>
+                </Grid>
             </Border>
         </SplitView>
     </Grid>
