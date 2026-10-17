@@ -143,7 +143,7 @@
   <data name="Settings_About_LicenseText.Text" xml:space="preserve"><value>O WinPDF é um software de código aberto distribuído sob a Licença MIT.</value></data>
 
   <!-- ===================== Document Properties Dialog ===================== -->
-  <data name="DocProps_Title" xml:space="preserve"><value>Propriedades do Documento</value></data>
+  <data name="DocProps_Title" xml:space="preserve"><value>Propriedades</value></data>
   <data name="DocProps_FileName" xml:space="preserve"><value>Nome do arquivo:</value></data>
   <data name="DocProps_FilePath" xml:space="preserve"><value>Local:</value></data>
   <data name="DocProps_FileSize" xml:space="preserve"><value>Tamanho do arquivo:</value></data>
@@ -245,12 +245,14 @@
   <data name="Properties_CopyPathLabel.Text" xml:space="preserve"><value>Copiar Caminho</value></data>
   <data name="Properties_OpenFileLocationButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Abrir pasta no Gerenciador de Arquivos</value></data>
   <data name="Properties_OpenFileLocationButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Abrir local do arquivo</value></data>
-  <data name="Properties_OpenFileLocationLabel.Text" xml:space="preserve"><value>Abrir Local</value></data>
+  <data name="Properties_OpenFileLocationLabel.Text" xml:space="preserve"><value>Abrir o local do arquivo</value></data>
   <data name="Properties_FileNameHeading.Text" xml:space="preserve"><value>Nome do arquivo</value></data>
-  <data name="Properties_DateTimeHeading.Text" xml:space="preserve"><value>Data e hora</value></data>
-  <data name="Properties_SizeHeading.Text" xml:space="preserve"><value>Informações de tamanho</value></data>
+  <data name="Properties_DateTimeHeading.Text" xml:space="preserve"><value>Data de modificação</value></data>
+  <data name="Properties_SizeHeading.Text" xml:space="preserve"><value>Tamanho do arquivo</value></data>
+  <data name="Properties_PageSizeHeading.Text" xml:space="preserve"><value>Dimensões da página</value></data>
+  <data name="Properties_PageCountHeading.Text" xml:space="preserve"><value>Páginas</value></data>
   <data name="Properties_PagesCountLabel.Text" xml:space="preserve"><value>páginas</value></data>
-  <data name="Properties_FolderLocationHeading.Text" xml:space="preserve"><value>Origem e local da pasta</value></data>
+  <data name="Properties_FolderLocationHeading.Text" xml:space="preserve"><value>Local do arquivo</value></data>
   <data name="Properties_AdditionalInfoHeading.Text" xml:space="preserve"><value>Informações adicionais</value></data>
   <data name="Properties_PdfVersionLabel.Text" xml:space="preserve"><value>Versão do PDF</value></data>
   <data name="Properties_DocTitleLabel.Text" xml:space="preserve"><value>Título</value></data>

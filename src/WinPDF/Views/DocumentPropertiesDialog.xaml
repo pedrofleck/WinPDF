@@ -6,117 +6,242 @@
     xmlns:converters="using:WinPDF.Converters"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    HorizontalAlignment="Center"
-    VerticalAlignment="Center"
-    Width="560"
-    MaxWidth="580"
-    Padding="0"
     Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
     BackgroundSizing="InnerBorderEdge"
-    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+    BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
     BorderThickness="1"
     CornerRadius="8"
     mc:Ignorable="d">
 
+    <ContentDialog.Resources>
+        <x:Double x:Key="ContentDialogMinWidth">480</x:Double>
+        <x:Double x:Key="ContentDialogMaxWidth">480</x:Double>
+        <x:Double x:Key="ContentDialogMinHeight">200</x:Double>
+        <x:Double x:Key="ContentDialogMaxHeight">680</x:Double>
+        <Thickness x:Key="ContentDialogPadding">0</Thickness>
+        <Thickness x:Key="ContentDialogTitleMargin">0</Thickness>
+        <Thickness x:Key="ContentDialogSeparatorThickness">0</Thickness>
+        <SolidColorBrush x:Key="ContentDialogTopOverlay" Color="Transparent" />
+        <StaticResource x:Key="ContentDialogBackground" ResourceKey="AcrylicBackgroundFillColorDefaultBrush" />
+        <StaticResource x:Key="ContentDialogBorderBrush" ResourceKey="SurfaceStrokeColorDefaultBrush" />
+        <Thickness x:Key="ContentDialogBorderWidth">1</Thickness>
+    </ContentDialog.Resources>
+
     <Grid
-        Width="560"
+        Width="480"
         HorizontalAlignment="Center"
         RowDefinitions="Auto,*,Auto">
 
-        <!-- Row 0: Dialog Title (Form layout: 32px top, 20px bottom, 24px sides) -->
+        <!-- Row 0: Standard Windows 11 Dialog Title -->
         <TextBlock
             Grid.Row="0"
-            Text="{x:Bind DialogTitle, Mode=OneTime}"
-            FontSize="20"
-            FontWeight="SemiBold"
+            Margin="24,24,24,16"
             Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-            Margin="24,28,24,20" />
+            Style="{StaticResource SubtitleTextBlockStyle}"
+            Text="{x:Bind DialogTitle, Mode=OneTime}" />
 
-        <!-- Row 1: Scrollable Body (Windows 4px grid & Form layout guidelines) -->
+        <!-- Row 1: Single-Column Scrollable Properties Body in Acrylic -->
         <ScrollViewer
             Grid.Row="1"
-            MaxHeight="460"
+            MaxHeight="440"
             Padding="24,0,24,24"
             HorizontalScrollBarVisibility="Disabled"
             VerticalScrollBarVisibility="Auto">
-            <StackPanel Spacing="20">
-                <!-- Section 1: File Name -->
-                <StackPanel Spacing="4">
+            <StackPanel Spacing="16">
+                <!-- File Name -->
+                <StackPanel Spacing="2">
                     <TextBlock
                         x:Uid="Properties_FileNameHeading"
-                        FontSize="12"
-                        FontWeight="SemiBold"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
                     <TextBlock
-                        FontSize="14"
-                        FontWeight="Normal"
                         Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                         IsTextSelectionEnabled="True"
+                        Style="{StaticResource BodyTextBlockStyle}"
                         Text="{x:Bind Document.FileName, Mode=OneWay}"
                         TextWrapping="Wrap" />
                 </StackPanel>
 
-                <!-- Section 2: Date and Time -->
-                <StackPanel Spacing="4">
+                <!-- Document Title (if present) -->
+                <StackPanel
+                    Spacing="2"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasMetaTitle), Mode=OneWay}">
+                    <TextBlock
+                        x:Uid="Properties_DocTitleLabel"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        IsTextSelectionEnabled="True"
+                        Style="{StaticResource BodyTextBlockStyle}"
+                        Text="{x:Bind Document.MetaTitle, Mode=OneWay}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+
+                <!-- Author (if present) -->
+                <StackPanel
+                    Spacing="2"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasMetaAuthor), Mode=OneWay}">
+                    <TextBlock
+                        x:Uid="Properties_DocAuthorLabel"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        IsTextSelectionEnabled="True"
+                        Style="{StaticResource BodyTextBlockStyle}"
+                        Text="{x:Bind Document.MetaAuthor, Mode=OneWay}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+
+                <!-- Subject (if present) -->
+                <StackPanel
+                    Spacing="2"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasMetaSubject), Mode=OneWay}">
+                    <TextBlock
+                        x:Uid="Properties_DocSubjectLabel"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        IsTextSelectionEnabled="True"
+                        Style="{StaticResource BodyTextBlockStyle}"
+                        Text="{x:Bind Document.MetaSubject, Mode=OneWay}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+
+                <!-- Keywords (if present) -->
+                <StackPanel
+                    Spacing="2"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasMetaKeywords), Mode=OneWay}">
+                    <TextBlock
+                        x:Uid="Properties_DocKeywordsLabel"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        IsTextSelectionEnabled="True"
+                        Style="{StaticResource BodyTextBlockStyle}"
+                        Text="{x:Bind Document.MetaKeywords, Mode=OneWay}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+
+                <!-- Date Modified -->
+                <StackPanel Spacing="2">
                     <TextBlock
                         x:Uid="Properties_DateTimeHeading"
-                        FontSize="12"
-                        FontWeight="SemiBold"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
                     <TextBlock
-                        FontSize="14"
                         Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                        Text="{x:Bind Document.FileModificationDateOnlyFormatted, Mode=OneWay}"
+                        IsTextSelectionEnabled="True"
+                        Style="{StaticResource BodyTextBlockStyle}"
+                        Text="{x:Bind Document.FileModificationDateFormatted, Mode=OneWay}"
                         TextWrapping="Wrap" />
-                    <TextBlock
-                        FontSize="12"
-                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                        Text="{x:Bind Document.FileModificationTimeOnlyFormatted, Mode=OneWay}" />
                 </StackPanel>
 
-                <!-- Section 3: Size Information -->
-                <StackPanel Spacing="4">
+                <!-- Page Dimensions -->
+                <StackPanel Spacing="2">
                     <TextBlock
-                        x:Uid="Properties_SizeHeading"
-                        FontSize="12"
-                        FontWeight="SemiBold"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        x:Uid="Properties_PageSizeHeading"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
                     <TextBlock
-                        FontSize="14"
                         Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        IsTextSelectionEnabled="True"
+                        Style="{StaticResource BodyTextBlockStyle}"
                         Text="{x:Bind Document.ActivePageDimensionsFormatted, Mode=OneWay}"
                         TextWrapping="Wrap" />
-                    <TextBlock
-                        FontSize="14"
-                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                        Text="{x:Bind Document.FileSizeDetailed, Mode=OneWay}"
-                        TextWrapping="Wrap" />
-                    <StackPanel Orientation="Horizontal" Spacing="4">
-                        <TextBlock
-                            FontSize="14"
-                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                            Text="{x:Bind Document.PageCount, Mode=OneWay}" />
-                        <TextBlock
-                            x:Uid="Properties_PagesCountLabel"
-                            FontSize="14"
-                            Foreground="{ThemeResource TextFillColorPrimaryBrush}" />
-                    </StackPanel>
                 </StackPanel>
 
-                <!-- Section 4: Folder Origin and Location -->
-                <StackPanel Spacing="4">
+                <!-- File Size -->
+                <StackPanel Spacing="2">
+                    <TextBlock
+                        x:Uid="Properties_SizeHeading"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        IsTextSelectionEnabled="True"
+                        Style="{StaticResource BodyTextBlockStyle}"
+                        Text="{x:Bind Document.FileSizeDetailed, Mode=OneWay}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+
+                <!-- Page Count -->
+                <StackPanel Spacing="2">
+                    <TextBlock
+                        x:Uid="Properties_PageCountHeading"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        IsTextSelectionEnabled="True"
+                        Style="{StaticResource BodyTextBlockStyle}"
+                        Text="{x:Bind Document.PageCount, Mode=OneWay}" />
+                </StackPanel>
+
+                <!-- PDF Version (if present) -->
+                <StackPanel
+                    Spacing="2"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasMetaPdfVersion), Mode=OneWay}">
+                    <TextBlock
+                        x:Uid="Properties_PdfVersionLabel"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        IsTextSelectionEnabled="True"
+                        Style="{StaticResource BodyTextBlockStyle}"
+                        Text="{x:Bind Document.MetaPdfVersion, Mode=OneWay}" />
+                </StackPanel>
+
+                <!-- Creator Application (if present) -->
+                <StackPanel
+                    Spacing="2"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasMetaCreator), Mode=OneWay}">
+                    <TextBlock
+                        x:Uid="Properties_DocCreatorLabel"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        IsTextSelectionEnabled="True"
+                        Style="{StaticResource BodyTextBlockStyle}"
+                        Text="{x:Bind Document.MetaCreator, Mode=OneWay}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+
+                <!-- PDF Producer (if present) -->
+                <StackPanel
+                    Spacing="2"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasMetaProducer), Mode=OneWay}">
+                    <TextBlock
+                        x:Uid="Properties_DocProducerLabel"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                        IsTextSelectionEnabled="True"
+                        Style="{StaticResource BodyTextBlockStyle}"
+                        Text="{x:Bind Document.MetaProducer, Mode=OneWay}"
+                        TextWrapping="Wrap" />
+                </StackPanel>
+
+                <!-- File Location + Open File Location Link (Windows 11 Media Player Style) -->
+                <StackPanel Spacing="2">
                     <TextBlock
                         x:Uid="Properties_FolderLocationHeading"
-                        FontSize="12"
-                        FontWeight="SemiBold"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
                     <TextBlock
-                        FontSize="14"
                         Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                        Text="{x:Bind Document.FolderName, Mode=OneWay}"
-                        TextTrimming="CharacterEllipsis" />
+                        IsTextSelectionEnabled="True"
+                        Style="{StaticResource BodyTextBlockStyle}"
+                        Text="{x:Bind Document.FilePath, Mode=OneWay}"
+                        TextWrapping="Wrap" />
                     <HyperlinkButton
-                        Margin="0,4,0,0"
+                        Margin="0,6,0,0"
                         Padding="0"
                         HorizontalAlignment="Left"
                         HorizontalContentAlignment="Left"
@@ -124,164 +249,29 @@
                         ToolTipService.ToolTip="{x:Bind Document.FilePath, Mode=OneWay}">
                         <TextBlock
                             x:Uid="Properties_OpenFileLocationLabel"
-                            FontSize="13"
                             Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                            TextDecorations="Underline" />
+                            Style="{StaticResource BodyTextBlockStyle}" />
                     </HyperlinkButton>
-                </StackPanel>
-
-                <!-- Section 5: Additional Metadata -->
-                <StackPanel
-                    Spacing="16"
-                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasAdditionalMetadata), Mode=OneWay}">
-
-                    <Border
-                        Height="1"
-                        Margin="0,4,0,8"
-                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
-
-                    <TextBlock
-                        x:Uid="Properties_AdditionalInfoHeading"
-                        FontSize="12"
-                        FontWeight="SemiBold"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-
-                    <!-- PDF Version -->
-                    <StackPanel
-                        Spacing="4"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasMetaPdfVersion), Mode=OneWay}">
-                        <TextBlock
-                            x:Uid="Properties_PdfVersionLabel"
-                            FontSize="12"
-                            FontWeight="SemiBold"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <TextBlock
-                            FontSize="14"
-                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                            Text="{x:Bind Document.MetaPdfVersion, Mode=OneWay}" />
-                    </StackPanel>
-
-                    <!-- Title -->
-                    <StackPanel
-                        Spacing="4"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasMetaTitle), Mode=OneWay}">
-                        <TextBlock
-                            x:Uid="Properties_DocTitleLabel"
-                            FontSize="12"
-                            FontWeight="SemiBold"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <TextBlock
-                            FontSize="14"
-                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                            IsTextSelectionEnabled="True"
-                            Text="{x:Bind Document.MetaTitle, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
-
-                    <!-- Author -->
-                    <StackPanel
-                        Spacing="4"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasMetaAuthor), Mode=OneWay}">
-                        <TextBlock
-                            x:Uid="Properties_DocAuthorLabel"
-                            FontSize="12"
-                            FontWeight="SemiBold"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <TextBlock
-                            FontSize="14"
-                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                            IsTextSelectionEnabled="True"
-                            Text="{x:Bind Document.MetaAuthor, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
-
-                    <!-- Subject -->
-                    <StackPanel
-                        Spacing="4"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasMetaSubject), Mode=OneWay}">
-                        <TextBlock
-                            x:Uid="Properties_DocSubjectLabel"
-                            FontSize="12"
-                            FontWeight="SemiBold"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <TextBlock
-                            FontSize="14"
-                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                            IsTextSelectionEnabled="True"
-                            Text="{x:Bind Document.MetaSubject, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
-
-                    <!-- Keywords -->
-                    <StackPanel
-                        Spacing="4"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasMetaKeywords), Mode=OneWay}">
-                        <TextBlock
-                            x:Uid="Properties_DocKeywordsLabel"
-                            FontSize="12"
-                            FontWeight="SemiBold"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <TextBlock
-                            FontSize="14"
-                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                            IsTextSelectionEnabled="True"
-                            Text="{x:Bind Document.MetaKeywords, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
-
-                    <!-- Application / Creator -->
-                    <StackPanel
-                        Spacing="4"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasMetaCreator), Mode=OneWay}">
-                        <TextBlock
-                            x:Uid="Properties_DocCreatorLabel"
-                            FontSize="12"
-                            FontWeight="SemiBold"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <TextBlock
-                            FontSize="14"
-                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                            IsTextSelectionEnabled="True"
-                            Text="{x:Bind Document.MetaCreator, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
-
-                    <!-- PDF Producer -->
-                    <StackPanel
-                        Spacing="4"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasMetaProducer), Mode=OneWay}">
-                        <TextBlock
-                            x:Uid="Properties_DocProducerLabel"
-                            FontSize="12"
-                            FontWeight="SemiBold"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <TextBlock
-                            FontSize="14"
-                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                            IsTextSelectionEnabled="True"
-                            Text="{x:Bind Document.MetaProducer, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
                 </StackPanel>
             </StackPanel>
         </ScrollViewer>
 
-        <!-- Row 2: Distinct footer tone (Windows Media Player & Form layout style) -->
+        <!-- Row 2: Distinct Bottom Command Area Tone (Windows 11 ContentDialog / Media Player Style) -->
         <Border
             Grid.Row="2"
-            Background="{ThemeResource LayerFillColorAltBrush}"
+            Padding="24,16"
+            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="0,1,0,0"
-            CornerRadius="0,0,8,8"
-            Padding="24,18">
+            CornerRadius="0,0,7,7">
             <Button
                 x:Name="CloseButton"
-                Content="{x:Bind CloseButtonLabel, Mode=OneTime}"
+                MinWidth="200"
+                Height="32"
+                HorizontalAlignment="Right"
                 Click="OnCloseButtonClick"
-                Style="{StaticResource DefaultButtonStyle}"
-                HorizontalAlignment="Center"
-                MinWidth="260"
-                Height="36" />
+                Content="{x:Bind CloseButtonLabel, Mode=OneTime}"
+                Style="{StaticResource DefaultButtonStyle}" />
         </Border>
     </Grid>
 </ContentDialog>

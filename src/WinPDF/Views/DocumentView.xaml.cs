@@ -2303,15 +2303,59 @@ public sealed partial class DocumentView : Page
         return Math.Max(120.0, rawViewerWidth - leftW);
     }
 
+    private void OnNightModeMenuItemLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is DependencyObject root)
+        {
+            AlignMenuFlyoutAcceleratorRight(root);
+        }
+    }
+
+    private static void AlignMenuFlyoutAcceleratorRight(DependencyObject parent)
+    {
+        int count = VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
+            if (child is TextBlock tb && tb.Name == "KeyboardAcceleratorTextBlock")
+            {
+                tb.TextAlignment = TextAlignment.Right;
+                tb.HorizontalAlignment = HorizontalAlignment.Right;
+                return;
+            }
+
+            AlignMenuFlyoutAcceleratorRight(child);
+        }
+    }
+
     private double GetTargetDocumentOffsetDip(double? explicitZoom = null)
     {
-        if (!ViewModel.HasDocument || ViewModel.IsPresentationMode)
+        if (ViewModel is null || !ViewModel.HasDocument || ViewModel.IsPresentationMode)
         {
             return 0.0;
         }
 
         double leftW = (ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
-        return leftW / 2.0;
+        double centeredOffset = leftW / 2.0;
+
+        if (leftW > 0.0 && ContinuousScrollViewer is not null && ContinuousPagesRepeater is not null)
+        {
+            double zoom = explicitZoom ?? (ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0));
+            double viewerW = ContinuousScrollViewer.ActualWidth > 0 ? ContinuousScrollViewer.ActualWidth : _lastHandledScrollViewerSize.Width;
+            double repW = ContinuousPagesRepeater.ActualWidth;
+            if (viewerW > 0 && repW > 0)
+            {
+                double zoomedPageW = repW * zoom;
+                double unshiftedLeft = Math.Max(24.0, (viewerW - zoomedPageW) / 2.0);
+                double minClearanceOffset = (leftW + 24.0) - unshiftedLeft;
+                if (minClearanceOffset > centeredOffset)
+                {
+                    return minClearanceOffset;
+                }
+            }
+        }
+
+        return centeredOffset;
     }
 
     /// <summary>
@@ -2335,8 +2379,8 @@ public sealed partial class DocumentView : Page
         _isHorizontalPushAnimating = false;
 
         double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
-        double targetDocOffsetDip = leftW / 2.0;
         double zoom = ContinuousScrollViewer?.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
+        double targetDocOffsetDip = GetTargetDocumentOffsetDip(zoom);
 
         if (PagesRepeaterPushTransform is not null)
         {
@@ -2396,8 +2440,8 @@ public sealed partial class DocumentView : Page
         _isHorizontalPushAnimating = true;
 
         double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
-        double targetDocOffsetDip = leftW / 2.0;
         double zoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
+        double targetDocOffsetDip = GetTargetDocumentOffsetDip(zoom);
         double targetRepeaterX = targetDocOffsetDip / Math.Max(0.05, zoom);
 
         var sb = new Storyboard();

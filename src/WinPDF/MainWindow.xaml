@@ -339,7 +339,8 @@
                                 x:Uid="Menu_NightMode"
                                 Command="{x:Bind ViewModel.ToggleNightModeCommand}"
                                 IsChecked="{x:Bind ViewModel.IsNightMode, Mode=OneWay}"
-                                KeyboardAcceleratorTextOverride="Ctrl+I">
+                                KeyboardAcceleratorTextOverride="Ctrl+I"
+                                Loaded="OnToggleMenuFlyoutItemLoaded">
                                 <ToggleMenuFlyoutItem.Icon>
                                     <FontIcon Glyph="&#xE708;" />
                                 </ToggleMenuFlyoutItem.Icon>

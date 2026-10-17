@@ -121,7 +121,11 @@
                             Click="OnFitPageClick"
                             KeyboardAcceleratorTextOverride="Ctrl+0">
                             <MenuFlyoutItem.Icon>
-                                <FontIcon Glyph="&#xE9A6;" />
+                                <FontIcon Glyph="&#xE9A6;" RenderTransformOrigin="0.5,0.5">
+                                    <FontIcon.RenderTransform>
+                                        <CompositeTransform TranslateY="1.5" />
+                                    </FontIcon.RenderTransform>
+                                </FontIcon>
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
 
@@ -130,7 +134,11 @@
                             Click="OnFitWidthClick"
                             KeyboardAcceleratorTextOverride="Ctrl+2">
                             <MenuFlyoutItem.Icon>
-                                <FontIcon Glyph="&#xF58A;" />
+                                <FontIcon Glyph="&#xF58A;" RenderTransformOrigin="0.5,0.5">
+                                    <FontIcon.RenderTransform>
+                                        <CompositeTransform ScaleX="0.9" ScaleY="0.9" TranslateY="2" />
+                                    </FontIcon.RenderTransform>
+                                </FontIcon>
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
 
@@ -156,7 +164,8 @@
                             x:Uid="Context_NightMode"
                             Command="{x:Bind ViewModel.ToggleNightModeCommand}"
                             IsChecked="{x:Bind ViewModel.IsNightMode, Mode=OneWay}"
-                            KeyboardAcceleratorTextOverride="Ctrl+I">
+                            KeyboardAcceleratorTextOverride="Ctrl+I"
+                            Loaded="OnNightModeMenuItemLoaded">
                             <ToggleMenuFlyoutItem.Icon>
                                 <FontIcon Glyph="&#xE708;" />
                             </ToggleMenuFlyoutItem.Icon>
@@ -750,7 +759,16 @@
                                 <StaticResource x:Key="ToggleButtonBorderBrushPointerOver" ResourceKey="SubtleFillColorTransparentBrush" />
                                 <StaticResource x:Key="ToggleButtonBorderBrushPressed" ResourceKey="SubtleFillColorTransparentBrush" />
                             </ToggleButton.Resources>
-                            <FontIcon Glyph="&#xE89A;" FontSize="12" VerticalAlignment="Center" />
+                            <FontIcon
+                                Glyph="&#xE89A;"
+                                FontSize="12"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                RenderTransformOrigin="0.5,0.5">
+                                <FontIcon.RenderTransform>
+                                    <CompositeTransform TranslateY="0.5" />
+                                </FontIcon.RenderTransform>
+                            </FontIcon>
                         </ToggleButton>
 
                         <!-- 2. Separator | -->
@@ -775,7 +793,16 @@
                                 <StaticResource x:Key="ToggleButtonBorderBrushPointerOver" ResourceKey="SubtleFillColorTransparentBrush" />
                                 <StaticResource x:Key="ToggleButtonBorderBrushPressed" ResourceKey="SubtleFillColorTransparentBrush" />
                             </ToggleButton.Resources>
-                            <FontIcon Glyph="&#xEC8F;" FontSize="12" VerticalAlignment="Center" />
+                            <FontIcon
+                                Glyph="&#xEC8F;"
+                                FontSize="11"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                RenderTransformOrigin="0.5,0.5">
+                                <FontIcon.RenderTransform>
+                                    <CompositeTransform ScaleX="0.92" ScaleY="0.92" TranslateY="0.5" />
+                                </FontIcon.RenderTransform>
+                            </FontIcon>
                         </ToggleButton>
 
                         <!-- 4. Separator | -->
@@ -793,7 +820,11 @@
                             CornerRadius="4"
                             Click="OnFitPageClick"
                             ToolTipService.ToolTip="{x:Bind FitVerticalToolTipText, Mode=OneTime}">
-                            <FontIcon Glyph="&#xE9A6;" FontSize="13" />
+                            <FontIcon
+                                Glyph="&#xE9A6;"
+                                FontSize="13"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
                         </Button>
 
                         <!-- Fit Horizontal button (Fit to width) -->
@@ -807,7 +838,16 @@
                             CornerRadius="4"
                             Click="OnFitWidthClick"
                             ToolTipService.ToolTip="{x:Bind FitHorizontalToolTipText, Mode=OneTime}">
-                            <FontIcon Glyph="&#xF58A;" FontSize="13" />
+                            <FontIcon
+                                Glyph="&#xF58A;"
+                                FontSize="12"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                RenderTransformOrigin="0.5,0.5">
+                                <FontIcon.RenderTransform>
+                                    <CompositeTransform ScaleX="0.92" ScaleY="0.92" TranslateY="0.5" />
+                                </FontIcon.RenderTransform>
+                            </FontIcon>
                         </Button>
 
                         <!-- Zoom preset dropdown (100% ▾) -->

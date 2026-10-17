@@ -240,6 +240,31 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void OnToggleMenuFlyoutItemLoaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is DependencyObject root)
+        {
+            AlignMenuFlyoutAcceleratorRight(root);
+        }
+    }
+
+    private static void AlignMenuFlyoutAcceleratorRight(DependencyObject parent)
+    {
+        int count = VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
+            if (child is TextBlock tb && tb.Name == "KeyboardAcceleratorTextBlock")
+            {
+                tb.TextAlignment = TextAlignment.Right;
+                tb.HorizontalAlignment = HorizontalAlignment.Right;
+                return;
+            }
+
+            AlignMenuFlyoutAcceleratorRight(child);
+        }
+    }
+
     private void OnSidebarToggleClick(object sender, RoutedEventArgs e)
     {
         // Manual user interaction clears automatic narrow memory
