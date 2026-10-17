@@ -889,6 +889,11 @@ public sealed partial class ShellViewModel : ObservableObject
         }
 
         CurrentDocument = null;
+        _settingsService.Update(s =>
+        {
+            s.LastOpenedFilePath = null;
+            s.LastOpenedPageIndex = 0;
+        });
     }
 
     /// <summary>

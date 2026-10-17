@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
+using WinPDF.Models;
 using WinPDF.Rendering;
 using WinPDF.Services;
 using WinPDF.ViewModels;
@@ -48,8 +49,9 @@ public partial class App : Application
         AppDomain.CurrentDomain.UnhandledException += OnCurrentDomainUnhandledException;
         TaskScheduler.UnobservedTaskException += OnTaskSchedulerUnobservedTaskException;
 
-        InitializeComponent();
         _services = ConfigureServices();
+
+        InitializeComponent();
 
         string[] cmdArgs = Environment.GetCommandLineArgs();
         for (int i = 1; i < cmdArgs.Length; i++)
@@ -196,12 +198,10 @@ public partial class App : Application
         }
 
         ShellViewModel shellViewModel = _services.GetRequiredService<ShellViewModel>();
-        if (startupPdf is not null)
-        {
-            shellViewModel.IsInitialDocumentOpening = true;
-            _ = shellViewModel.OpenFilePathAsync(startupPdf);
-        }
-        else if (!isAutoTest)
+        bool isSessionRestore = false;
+        int initialPageIndex = 0;
+
+        if (startupPdf is null && !isAutoTest)
         {
             ISettingsService settingsService = _services.GetRequiredService<ISettingsService>();
             if (settingsService.Settings.ReopenLastDocument &&
@@ -210,13 +210,9 @@ public partial class App : Application
                 string lastPath = settingsService.Settings.LastOpenedFilePath;
                 if (System.IO.File.Exists(lastPath))
                 {
-                    int lastPage = Math.Max(0, settingsService.Settings.LastOpenedPageIndex);
-                    shellViewModel.IsInitialDocumentOpening = true;
-                    _ = shellViewModel.OpenFilePathAsync(
-                        lastPath,
-                        default,
-                        isStartupSessionRestore: true,
-                        initialPageIndex: lastPage);
+                    startupPdf = lastPath;
+                    isSessionRestore = true;
+                    initialPageIndex = Math.Max(0, settingsService.Settings.LastOpenedPageIndex);
                 }
                 else
                 {
@@ -236,9 +232,14 @@ public partial class App : Application
             }
         }
 
+        if (startupPdf is not null)
+        {
+            shellViewModel.IsInitialDocumentOpening = true;
+        }
+
         _mainWindow = new MainWindow();
 
-        // Initialize window context for pickers and dialogs
+        // Initialize window context for pickers and dialogs before starting any async file operations
         IWindowContext windowContext = _services.GetRequiredService<IWindowContext>();
         windowContext.Initialize(_mainWindow);
 
@@ -250,5 +251,20 @@ public partial class App : Application
         }
 
         _mainWindow.Activate();
+
+        if (startupPdf is not null)
+        {
+            string pathToOpen = startupPdf;
+            bool restoreFlag = isSessionRestore;
+            int pageToRestore = initialPageIndex;
+            _mainWindow.DispatcherQueue.TryEnqueue(() =>
+            {
+                _ = shellViewModel.OpenFilePathAsync(
+                    pathToOpen,
+                    default,
+                    isStartupSessionRestore: restoreFlag,
+                    initialPageIndex: pageToRestore);
+            });
+        }
     }
 }

@@ -92,7 +92,7 @@
             <Grid
                 x:Name="ScrollViewerContentRoot"
                 Grid.Row="0"
-                Background="{x:Bind converters:UiHelpers.ViewerBackground(ViewModel.IsPresentationMode), Mode=OneWay}">
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
                 <Grid.ContextFlyout>
                     <MenuFlyout>
                         <MenuFlyoutItem
@@ -222,6 +222,11 @@
                         </MenuFlyoutItem>
                     </MenuFlyout>
                 </Grid.ContextFlyout>
+
+                <Border
+                    Background="Black"
+                    IsHitTestVisible="False"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsPresentationMode), Mode=OneWay}" />
 
                 <ScrollViewer
                     x:Name="ContinuousScrollViewer"

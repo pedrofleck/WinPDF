@@ -106,6 +106,7 @@ public sealed partial class MainWindow : Window
         UpdateTitleBarTheme();
         _uiSettings.ColorValuesChanged += (_, _) => DispatcherQueue.TryEnqueue(UpdateTitleBarTheme);
         RootGrid.Loaded += (_, _) => UpdateTitleBarTheme();
+        RootGrid.ActualThemeChanged += (_, _) => UpdateTitleBarTheme();
 
         // Window size and layout events
         SizeChanged += OnMainWindowSizeChanged;
@@ -119,8 +120,8 @@ public sealed partial class MainWindow : Window
         {
             if (ViewModel.HasDocument && !ViewModel.IsSettingsOpen)
             {
-                MainContentContainer.CornerRadius = new CornerRadius(8, 0, 0, 0);
-                MainContentContainer.BorderThickness = new Thickness(1, 1, 0, 0);
+                MainContentBackdropBorder.CornerRadius = new CornerRadius(8, 0, 0, 0);
+                MainContentBackdropBorder.BorderThickness = new Thickness(1, 1, 0, 0);
             }
 
             if (SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage)
@@ -137,8 +138,8 @@ public sealed partial class MainWindow : Window
         };
         MainSplitView.PaneClosing += (_, _) =>
         {
-            MainContentContainer.CornerRadius = new CornerRadius(0);
-            MainContentContainer.BorderThickness = ViewModel.HasDocument ? new Thickness(0, 1, 0, 0) : new Thickness(0);
+            MainContentBackdropBorder.CornerRadius = new CornerRadius(0);
+            MainContentBackdropBorder.BorderThickness = ViewModel.HasDocument ? new Thickness(0, 1, 0, 0) : new Thickness(0);
         };
 
         SelectSidebarTab(ViewModel.SidebarTab);
@@ -150,7 +151,7 @@ public sealed partial class MainWindow : Window
             root.Loaded += (_, _) =>
             {
                 SetInitialWindowBounds();
-                ApplyRequestedThemeFromViewModel();
+                ApplyRequestedThemeFromViewModel(isStartup: true);
                 UpdateTitleBarTheme();
                 UpdateTitleBarInsets();
                 UpdateTitleBarNonClientRegions();
@@ -581,17 +582,27 @@ public sealed partial class MainWindow : Window
                 s.LastOpenedFilePath = doc.FilePath;
                 s.LastOpenedPageIndex = doc.CurrentPageIndex;
             }
+            else
+            {
+                s.LastOpenedFilePath = null;
+                s.LastOpenedPageIndex = 0;
+            }
         });
     }
 
-    private void ApplyRequestedThemeFromViewModel()
+    private void ApplyRequestedThemeFromViewModel(bool isStartup = false)
     {
-        RootGrid.RequestedTheme = ViewModel.CurrentTheme switch
+        ElementTheme desiredTheme = ViewModel.CurrentTheme switch
         {
             AppThemePreference.Light => ElementTheme.Light,
             AppThemePreference.Dark => ElementTheme.Dark,
             _ => ElementTheme.Default
         };
+
+        if (RootGrid.RequestedTheme != desiredTheme)
+        {
+            RootGrid.RequestedTheme = desiredTheme;
+        }
     }
 
     private void OnSidebarSplitterDragDelta(object sender, DragDeltaEventArgs e)
@@ -613,31 +624,28 @@ public sealed partial class MainWindow : Window
 
         if (!ViewModel.HasDocument)
         {
-            MainContentContainer.CornerRadius = new CornerRadius(0);
-            MainContentContainer.BorderThickness = new Thickness(0);
+            MainContentBackdropBorder.CornerRadius = new CornerRadius(0);
+            MainContentBackdropBorder.BorderThickness = new Thickness(0);
         }
         else
         {
-            MainContentContainer.CornerRadius = ViewModel.IsSidebarOpen ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
-            MainContentContainer.BorderThickness = ViewModel.IsSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0);
+            MainContentBackdropBorder.CornerRadius = ViewModel.IsSidebarOpen ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
+            MainContentBackdropBorder.BorderThickness = ViewModel.IsSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0);
         }
     }
 
     private void UpdateMainContainerStyle()
     {
+        MainContentBackdropBorder.Visibility = ViewModel.HasDocument ? Visibility.Visible : Visibility.Collapsed;
         if (ViewModel.HasDocument)
         {
-            MainContentContainer.Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["LayerFillColorDefaultBrush"];
-            MainContentContainer.BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
-            MainContentContainer.BorderThickness = ViewModel.IsSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0);
-            MainContentContainer.CornerRadius = ViewModel.IsSidebarOpen ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
+            MainContentBackdropBorder.BorderThickness = ViewModel.IsSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0);
+            MainContentBackdropBorder.CornerRadius = ViewModel.IsSidebarOpen ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
         }
         else
         {
-            MainContentContainer.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
-            MainContentContainer.BorderBrush = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(0, 0, 0, 0));
-            MainContentContainer.BorderThickness = new Thickness(0);
-            MainContentContainer.CornerRadius = new CornerRadius(0);
+            MainContentBackdropBorder.BorderThickness = new Thickness(0);
+            MainContentBackdropBorder.CornerRadius = new CornerRadius(0);
         }
     }
 
@@ -723,8 +731,11 @@ public sealed partial class MainWindow : Window
         }
         else if (e.PropertyName == nameof(ShellViewModel.CurrentTheme))
         {
-            ApplyRequestedThemeFromViewModel();
-            UpdateTitleBarTheme();
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                ApplyRequestedThemeFromViewModel(isStartup: false);
+                UpdateTitleBarTheme();
+            });
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsSidebarOpen))
         {
@@ -841,12 +852,7 @@ public sealed partial class MainWindow : Window
 
         var titleBar = AppWindow.TitleBar;
 
-        bool isDark = RootGrid.RequestedTheme switch
-        {
-            ElementTheme.Dark => true,
-            ElementTheme.Light => false,
-            _ => Application.Current.RequestedTheme == ApplicationTheme.Dark
-        };
+        bool isDark = RootGrid.ActualTheme == ElementTheme.Dark;
 
         titleBar.ButtonForegroundColor = isDark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;
         titleBar.ButtonHoverForegroundColor = isDark ? Microsoft.UI.Colors.White : Microsoft.UI.Colors.Black;

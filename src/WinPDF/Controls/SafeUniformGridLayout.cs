@@ -139,6 +139,7 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
         base.OnItemsChangedCore(context, source, args);
         _rowTops.Clear();
         _rowHeights.Clear();
+        _activeRealizedIndices.Clear();
         InvalidateMeasure();
     }
 
@@ -220,7 +221,8 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
                         _realizedItems.Add(new RealizedItem(i, r, i - firstIdx));
                         _currentPassIndices.Add(i);
 
-                        if (context.GetItemAt(i) is ThumbnailItemViewModel realizedVm && (!realizedVm.IsRealized || realizedVm.Image is null || realizedVm.Image.IsDisposed))
+                        if (context.GetItemAt(i) is ThumbnailItemViewModel realizedVm &&
+                            (!realizedVm.IsRealized || (realizedVm.LoadCancellation is null && (realizedVm.Image is null || realizedVm.Image.IsDisposed))))
                         {
                             double scale = element.XamlRoot?.RasterizationScale ?? 1.0;
                             realizedVm.NotifyRealized(scale);

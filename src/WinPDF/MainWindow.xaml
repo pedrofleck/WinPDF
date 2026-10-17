@@ -641,20 +641,22 @@
                 </Grid>
             </SplitView.Pane>
 
-            <!-- Container Arredondado Principal -->
-            <Border
-                x:Name="MainContentContainer"
-                Background="{x:Bind converters:UiHelpers.MainContainerBackground(ViewModel.HasDocument, ViewModel.IsSettingsOpen), Mode=OneWay}"
-                BorderBrush="{x:Bind converters:UiHelpers.MainContainerBorderBrush(ViewModel.HasDocument, ViewModel.IsSettingsOpen), Mode=OneWay}"
-                BorderThickness="{x:Bind converters:UiHelpers.MainContainerBorderThickness(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}"
-                CornerRadius="{x:Bind converters:UiHelpers.MainContainerCornerRadius(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}">
+            <!-- Container Arredondado Principal (Usa ThemeResource Nativo para Troca Instantânea Claro/Escuro) -->
+            <Grid x:Name="MainContentContainer">
+                <Border
+                    x:Name="MainContentBackdropBorder"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="{x:Bind converters:UiHelpers.MainContainerBorderThickness(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}"
+                    CornerRadius="{x:Bind converters:UiHelpers.MainContainerCornerRadius(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}" />
 
                 <!-- Frame de Conteúdo Principal (DocumentView Sempre Preservado na Árvore Visual) -->
                 <Frame
                     x:Name="MainContentFrame"
                     Background="Transparent"
                     IsNavigationStackEnabled="False" />
-            </Border>
+            </Grid>
         </SplitView>
 
         <!-- Frame de Configurações em Página Inteira (Sobreposto sem Descarregar DocumentView ou Barra Lateral) -->

@@ -162,7 +162,6 @@ public sealed partial class DocumentView : Page
 
         if (ViewModel.CurrentDocument is not null)
         {
-            ApplyInitialZoomForDocument();
             UpdateViewportPages(ViewModel.CurrentDocument.ZoomFactor);
         }
     }
@@ -320,15 +319,22 @@ public sealed partial class DocumentView : Page
             SubscribeToDocument(ViewModel.CurrentDocument);
             if (ViewModel.CurrentDocument is not null)
             {
-                ApplyInitialZoomForDocument();
                 ScrollToPage(ViewModel.CurrentDocument.CurrentPageIndex, allowUnclampedOffset: true);
                 PlayDocumentOpenTransitionAnimation();
-                DispatcherQueue.TryEnqueue(() =>
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
                 {
-                    if (ViewModel.CurrentDocument is not null)
+                    if (ViewModel.CurrentDocument is { } activeDoc)
                     {
-                        ApplyInitialZoomForDocument();
-                        ScrollToPage(ViewModel.CurrentDocument.CurrentPageIndex, allowUnclampedOffset: true);
+                        if (ViewModel.DefaultZoomIndex == 0 && ContinuousScrollViewer.ActualWidth > 100)
+                        {
+                            ExecuteFitHorizontal(force: true);
+                        }
+                        else if (ViewModel.DefaultZoomIndex == 1 && ContinuousScrollViewer.ActualHeight > 100)
+                        {
+                            ExecuteFitVertical(force: true);
+                        }
+
+                        ScrollToPage(activeDoc.CurrentPageIndex, allowUnclampedOffset: true);
                     }
 
                     ReturnFocusToViewer();

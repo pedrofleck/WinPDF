@@ -120,8 +120,10 @@ public sealed partial class ThumbnailsTabPage : Page
         {
             for (int i = 0; i < doc.Thumbnails.Count; i++)
             {
-                if (ThumbnailsRepeater.TryGetElement(i) is not null)
+                if (ThumbnailsRepeater.TryGetElement(i) is FrameworkElement realizedEl)
                 {
+                    realizedEl.DataContext = doc.Thumbnails[i];
+                    BindPresenterInElement(realizedEl, doc.Thumbnails[i]);
                     doc.Thumbnails[i].NotifyRealized(scale);
                 }
             }
@@ -143,9 +145,15 @@ public sealed partial class ThumbnailsTabPage : Page
         if (e.PropertyName == nameof(ShellViewModel.CurrentDocument))
         {
             SubscribeToDocument(ViewModel.CurrentDocument);
-            double width = ThumbnailsScrollViewer.ActualWidth > 0 ? ThumbnailsScrollViewer.ActualWidth : 260.0;
-            UpdateThumbnailSizes(width, force: true);
-            UpdateTargetScrollPosition(allowAnimation: false);
+            _isUserScrollingSidebar = false;
+            _userScrollDebounceTimer.Stop();
+
+            // Force ItemsRepeater to recycle elements from the previous document and bind fresh items
+            ThumbnailsRepeater.ItemsSource = null;
+            ThumbnailsRepeater.ItemsSource = ViewModel.CurrentDocument?.Thumbnails;
+
+            RefreshAfterVisibilityRestored();
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RefreshAfterVisibilityRestored);
         }
         else if (e.PropertyName is nameof(ShellViewModel.IsSidebarOpen) or nameof(ShellViewModel.SidebarTab) or nameof(ShellViewModel.IsSettingsOpen))
         {
@@ -521,8 +529,34 @@ public sealed partial class ThumbnailsTabPage : Page
         if (ViewModel.CurrentDocument is not null && args.Index >= 0 && args.Index < ViewModel.CurrentDocument.Thumbnails.Count)
         {
             var thumbnail = ViewModel.CurrentDocument.Thumbnails[args.Index];
+            if (args.Element is FrameworkElement fe)
+            {
+                fe.DataContext = thumbnail;
+                BindPresenterInElement(fe, thumbnail);
+            }
+
             double scale = XamlRoot?.RasterizationScale ?? 1.0;
             thumbnail.NotifyRealized(scale);
+        }
+    }
+
+    private static void BindPresenterInElement(DependencyObject parent, ThumbnailItemViewModel thumbnail)
+    {
+        int count = VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
+            if (child is WinPDF.Controls.ThumbnailPresenter presenter)
+            {
+                if (!ReferenceEquals(presenter.Item, thumbnail))
+                {
+                    presenter.Item = thumbnail;
+                }
+
+                return;
+            }
+
+            BindPresenterInElement(child, thumbnail);
         }
     }
 
