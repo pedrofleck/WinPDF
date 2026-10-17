@@ -627,24 +627,64 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Saves the current document annotations.
+    /// Saves the current document (including any rotation and future annotation edits) in-place,
+    /// or prompts for a target location if the file cannot be overwritten directly.
     /// </summary>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     [RelayCommand]
-    public Task SaveAsync()
+    public async Task SaveAsync(CancellationToken cancellationToken = default)
     {
-        if (CurrentDocument is not null)
+        if (CurrentDocument is null)
         {
-            CurrentDocument.HasUnsavedChanges = false;
+            return;
         }
 
-        return Task.CompletedTask;
+        if (string.IsNullOrWhiteSpace(CurrentDocument.FilePath) || !System.IO.File.Exists(CurrentDocument.FilePath))
+        {
+            await SaveAsAsync(cancellationToken);
+            return;
+        }
+
+        try
+        {
+            PdfSaveOptions options = new(
+                UserRotationDegrees: CurrentDocument.Rotation,
+                PageEditCommitters: null,
+                SaveFlags: 0);
+
+            await _pdfService.SaveDocumentAsync(
+                CurrentDocument.DocumentId,
+                CurrentDocument.FilePath,
+                options,
+                cancellationToken);
+
+            CurrentDocument.HasUnsavedChanges = false;
+            CurrentDocument.RefreshFileInfo();
+            UpdateTitle();
+            UpdateFormattedStrings();
+
+            string savedTitle = ResourceStrings.Get(ResourceKeys.StatusSaved);
+            NotificationRequested?.Invoke(savedTitle, CurrentDocument.FileName);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            string title = ResourceStrings.Get(ResourceKeys.DialogSaveErrorTitle);
+            string content = ResourceStrings.Format(ResourceKeys.DialogSaveErrorContent, CurrentDocument.FileName, ex.Message);
+            string close = ResourceStrings.Get(ResourceKeys.DialogClose);
+            await _dialogService.ShowMessageAsync(title, content, close, cancellationToken);
+        }
     }
 
     /// <summary>
-    /// Prompts the user for a new file location and saves a copy of the document.
+    /// Prompts the user for a destination file path via the native Windows Save Picker and writes
+    /// the PDF document (including any committed page rotations and future annotation layers) via PDFium.
     /// </summary>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     [RelayCommand]
-    public async Task SaveAsAsync(CancellationToken cancellationToken)
+    public async Task SaveAsAsync(CancellationToken cancellationToken = default)
     {
         if (CurrentDocument is null)
         {
@@ -652,16 +692,49 @@ public sealed partial class ShellViewModel : ObservableObject
         }
 
         string? targetPath = await _filePickerService.PickSavePdfAsync(CurrentDocument.FileName, cancellationToken);
-        if (!string.IsNullOrWhiteSpace(targetPath))
+        if (string.IsNullOrWhiteSpace(targetPath))
         {
+            return;
+        }
+
+        try
+        {
+            PdfSaveOptions options = new(
+                UserRotationDegrees: CurrentDocument.Rotation,
+                PageEditCommitters: null,
+                SaveFlags: 0);
+
+            await _pdfService.SaveDocumentAsync(
+                CurrentDocument.DocumentId,
+                targetPath,
+                options,
+                cancellationToken);
+
             CurrentDocument.FilePath = targetPath;
             CurrentDocument.FileName = System.IO.Path.GetFileName(targetPath);
             CurrentDocument.HasUnsavedChanges = false;
+            CurrentDocument.RefreshFileInfo();
+            UpdateTitle();
+            UpdateFormattedStrings();
+
             _settingsService.Update(s =>
             {
                 s.LastOpenedFilePath = targetPath;
                 s.LastOpenedPageIndex = CurrentDocument.CurrentPageIndex;
             });
+
+            string savedTitle = ResourceStrings.Get(ResourceKeys.StatusSaved);
+            NotificationRequested?.Invoke(savedTitle, CurrentDocument.FileName);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            string title = ResourceStrings.Get(ResourceKeys.DialogSaveErrorTitle);
+            string content = ResourceStrings.Format(ResourceKeys.DialogSaveErrorContent, System.IO.Path.GetFileName(targetPath), ex.Message);
+            string close = ResourceStrings.Get(ResourceKeys.DialogClose);
+            await _dialogService.ShowMessageAsync(title, content, close, cancellationToken);
         }
     }
 
@@ -675,14 +748,36 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Opens a copy of the current document.
+    /// Opens a copy of the current document in a new independent WinPDF window (Ctrl+Shift+N).
     /// </summary>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     [RelayCommand]
-    public Task OpenCopyAsync(CancellationToken cancellationToken)
+    public Task OpenCopyAsync(CancellationToken cancellationToken = default)
     {
-        if (CurrentDocument is null)
+        if (CurrentDocument is null || string.IsNullOrWhiteSpace(CurrentDocument.FilePath))
         {
             return Task.CompletedTask;
+        }
+
+        try
+        {
+            string? exePath = Environment.ProcessPath;
+            if (!string.IsNullOrWhiteSpace(exePath) && System.IO.File.Exists(exePath))
+            {
+                var startInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = exePath,
+                    UseShellExecute = false,
+                    WorkingDirectory = System.IO.Path.GetDirectoryName(exePath) ?? System.AppContext.BaseDirectory
+                };
+                startInfo.ArgumentList.Add(CurrentDocument.FilePath);
+                System.Diagnostics.Process.Start(startInfo);
+                return Task.CompletedTask;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to spawn new window for OpenCopy: {ex.Message}");
         }
 
         return OpenFilePathAsync(CurrentDocument.FilePath, cancellationToken);

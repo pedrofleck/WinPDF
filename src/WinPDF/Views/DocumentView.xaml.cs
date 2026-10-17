@@ -44,6 +44,7 @@ public sealed partial class DocumentView : Page
     private PointerEventHandler? _wheelHandler;
     private Storyboard? _transitionStoryboard;
     private Storyboard? _searchBarStoryboard;
+    private Storyboard? _propertiesPaneStoryboard;
 
     /// <summary>Gets the localized page prefix text.</summary>
     public string PagePrefixText => ResourceStrings.Get(ResourceKeys.StatusBarPagePrefix);
@@ -160,6 +161,11 @@ public sealed partial class DocumentView : Page
             ShowTopNotification(title, message);
         }
 
+        if (PropertiesPaneContainer is not null)
+        {
+            PropertiesPaneContainer.Visibility = (ViewModel.IsPropertiesOpen && ViewModel.HasDocument) ? Visibility.Visible : Visibility.Collapsed;
+        }
+
         if (ViewModel.CurrentDocument is not null)
         {
             UpdateViewportPages(ViewModel.CurrentDocument.ZoomFactor);
@@ -201,6 +207,7 @@ public sealed partial class DocumentView : Page
         ViewModel.DefaultZoomPreferenceChanged -= OnDefaultZoomPreferenceChanged;
         _transitionStoryboard?.Stop();
         _searchBarStoryboard?.Stop();
+        _propertiesPaneStoryboard?.Stop();
         UnsubscribeFromDocument();
 
         _zoomDebounceCts?.Cancel();
@@ -356,6 +363,10 @@ public sealed partial class DocumentView : Page
             {
                 ReturnFocusToViewer();
             }
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.IsPropertiesOpen))
+        {
+            AnimatePropertiesPane(ViewModel.IsPropertiesOpen && ViewModel.HasDocument);
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsNightMode))
         {
@@ -1479,7 +1490,13 @@ public sealed partial class DocumentView : Page
 
     private void OnEscapeAcceleratorInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
-        if (ViewModel.IsSearchOpen)
+        if (ViewModel.IsPropertiesOpen)
+        {
+            args.Handled = true;
+            ViewModel.CloseProperties();
+            ReturnFocusToViewer();
+        }
+        else if (ViewModel.IsSearchOpen)
         {
             args.Handled = true;
             ViewModel.CloseSearch();
@@ -2178,6 +2195,137 @@ public sealed partial class DocumentView : Page
         sb.Children.Add(translateAnim);
 
         _transitionStoryboard = sb;
+        sb.Begin();
+    }
+
+    private void AnimatePropertiesPane(bool opening)
+    {
+        if (PropertiesPaneContainer is null || PropertiesPaneTransform is null || PagesRepeaterPushTransform is null)
+        {
+            return;
+        }
+
+        const double PaneTotalWidth = 308.0;
+        const double HalfPushOffset = PaneTotalWidth / 2.0;
+
+        _propertiesPaneStoryboard?.Stop();
+
+        var sb = new Storyboard();
+        var ease = new ExponentialEase { Exponent = 4.5, EasingMode = EasingMode.EaseOut };
+        var duration = new Duration(TimeSpan.FromMilliseconds(230));
+
+        if (opening)
+        {
+            PropertiesPaneContainer.Margin = new Thickness(0);
+            PropertiesPaneContainer.Visibility = Visibility.Visible;
+            PropertiesPaneContainer.Opacity = 0.0;
+            PropertiesPaneTransform.TranslateX = PaneTotalWidth;
+            PagesRepeaterPushTransform.TranslateX = HalfPushOffset;
+
+            var paneTranslate = new DoubleAnimation
+            {
+                From = PaneTotalWidth,
+                To = 0.0,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(paneTranslate, PropertiesPaneTransform);
+            Storyboard.SetTargetProperty(paneTranslate, "TranslateX");
+            sb.Children.Add(paneTranslate);
+
+            var paneOpacity = new DoubleAnimation
+            {
+                From = 0.0,
+                To = 1.0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(170)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(paneOpacity, PropertiesPaneContainer);
+            Storyboard.SetTargetProperty(paneOpacity, "Opacity");
+            sb.Children.Add(paneOpacity);
+
+            var docPush = new DoubleAnimation
+            {
+                From = HalfPushOffset,
+                To = 0.0,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(docPush, PagesRepeaterPushTransform);
+            Storyboard.SetTargetProperty(docPush, "TranslateX");
+            sb.Children.Add(docPush);
+
+            sb.Completed += (_, _) =>
+            {
+                if (ViewModel.IsPropertiesOpen && ViewModel.HasDocument)
+                {
+                    PropertiesPaneContainer.Opacity = 1.0;
+                    PropertiesPaneTransform.TranslateX = 0.0;
+                    PagesRepeaterPushTransform.TranslateX = 0.0;
+                }
+            };
+        }
+        else
+        {
+            if (PropertiesPaneContainer.Visibility == Visibility.Collapsed)
+            {
+                return;
+            }
+
+            // Reclaim layout width immediately at t=0 while counter-translating the document by -HalfPushOffset,
+            // so both the document and the closing card glide smoothly to the right in unison with 1 layout pass!
+            PropertiesPaneContainer.Margin = new Thickness(-PaneTotalWidth, 0, 0, 0);
+            PropertiesPaneContainer.Opacity = 1.0;
+            PropertiesPaneTransform.TranslateX = 0.0;
+            PagesRepeaterPushTransform.TranslateX = -HalfPushOffset;
+
+            var paneTranslate = new DoubleAnimation
+            {
+                From = 0.0,
+                To = PaneTotalWidth,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(paneTranslate, PropertiesPaneTransform);
+            Storyboard.SetTargetProperty(paneTranslate, "TranslateX");
+            sb.Children.Add(paneTranslate);
+
+            var paneOpacity = new DoubleAnimation
+            {
+                From = 1.0,
+                To = 0.0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(160)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(paneOpacity, PropertiesPaneContainer);
+            Storyboard.SetTargetProperty(paneOpacity, "Opacity");
+            sb.Children.Add(paneOpacity);
+
+            var docPush = new DoubleAnimation
+            {
+                From = -HalfPushOffset,
+                To = 0.0,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(docPush, PagesRepeaterPushTransform);
+            Storyboard.SetTargetProperty(docPush, "TranslateX");
+            sb.Children.Add(docPush);
+
+            sb.Completed += (_, _) =>
+            {
+                if (!ViewModel.IsPropertiesOpen || !ViewModel.HasDocument)
+                {
+                    PropertiesPaneContainer.Visibility = Visibility.Collapsed;
+                    PropertiesPaneContainer.Margin = new Thickness(0);
+                    PropertiesPaneContainer.Opacity = 0.0;
+                    PropertiesPaneTransform.TranslateX = 0.0;
+                    PagesRepeaterPushTransform.TranslateX = 0.0;
+                }
+            };
+        }
+
+        _propertiesPaneStoryboard = sb;
         sb.Begin();
     }
 

@@ -8,6 +8,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:models="using:WinPDF.Models"
+    xmlns:views="using:WinPDF.Views"
     xmlns:vm="using:WinPDF.ViewModels"
     Background="Transparent"
     mc:Ignorable="d">
@@ -81,18 +82,21 @@
         <!-- Área de Exibição do Documento -->
         <Grid
             x:Name="DocumentAreaGrid"
+            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
             RenderTransformOrigin="0.5,0.5"
             Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}"
+            ColumnDefinitions="*,Auto"
             RowDefinitions="*,Auto">
             <Grid.RenderTransform>
                 <CompositeTransform x:Name="DocumentAreaTransform" />
             </Grid.RenderTransform>
 
-            <!-- Row 0: Visualizador Unificado do Documento (Contínuo e Paginado) -->
+            <!-- Row 0, Col 0: Visualizador Unificado do Documento (Contínuo e Paginado) -->
             <Grid
                 x:Name="ScrollViewerContentRoot"
                 Grid.Row="0"
-                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
+                Grid.Column="0"
+                Background="Transparent">
                 <Grid.ContextFlyout>
                     <MenuFlyout>
                         <MenuFlyoutItem
@@ -244,7 +248,11 @@
                         Margin="{x:Bind converters:UiHelpers.RepeaterMargin(ViewModel.IsPresentationMode, ViewModel.CurrentDocument.IsContinuous), Mode=OneWay}"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
+                        RenderTransformOrigin="0.5,0.5"
                         ItemsSource="{x:Bind ViewModel.CurrentDocument.DisplayedRows, Mode=OneWay}">
+                        <ItemsRepeater.RenderTransform>
+                            <CompositeTransform x:Name="PagesRepeaterPushTransform" />
+                        </ItemsRepeater.RenderTransform>
                         <ItemsRepeater.Layout>
                             <StackLayout Orientation="Vertical" Spacing="16" />
                         </ItemsRepeater.Layout>
@@ -576,10 +584,25 @@
                 </StackPanel>
             </Grid>
 
+            <!-- Row 0, Col 1: Card Flutuante de Informações do Arquivo (Estilo Fotos do Windows 11) -->
+            <Border
+                x:Name="PropertiesPaneContainer"
+                Grid.Row="0"
+                Grid.Column="1"
+                VerticalAlignment="Stretch"
+                RenderTransformOrigin="0.5,0.5"
+                Visibility="Collapsed">
+                <Border.RenderTransform>
+                    <CompositeTransform x:Name="PropertiesPaneTransform" />
+                </Border.RenderTransform>
+                <views:DocumentPropertiesView x:Name="DocumentPropertiesPanel" />
+            </Border>
+
             <!-- Row 1: Barra de Status Inferior Nativa de 32 DIPs (estilo Paint / Fotos / Notepad) -->
             <Border
                 x:Name="StatusBarBorder"
                 Grid.Row="1"
+                Grid.ColumnSpan="2"
                 Height="32"
                 Padding="12,0"
                 BorderThickness="0,1,0,0"

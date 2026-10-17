@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using WinPDF.Interop.Pdfium;
 using WinPDF.Models;
@@ -95,6 +96,211 @@ internal sealed unsafe class PdfiumEngine : IDisposable
         {
             _pageCache.RemoveDocument(documentId);
             document.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Saves the open document to <paramref name="targetFilePath"/> via <c>FPDF_SaveAsCopy</c>, applying any
+    /// page rotation and extensible page edit committers (ink, text, shapes, comments) before writing.
+    /// </summary>
+    internal void SaveDocument(
+        long documentId,
+        string targetFilePath,
+        PdfSaveOptions options,
+        CancellationToken cancellationToken)
+    {
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        string fullTargetPath = System.IO.Path.GetFullPath(targetFilePath);
+        string? targetDir = System.IO.Path.GetDirectoryName(fullTargetPath);
+        if (!string.IsNullOrEmpty(targetDir))
+        {
+            System.IO.Directory.CreateDirectory(targetDir);
+        }
+
+        string tempFilePath = System.IO.Path.Combine(
+            targetDir ?? System.IO.Path.GetTempPath(),
+            $".{System.IO.Path.GetFileName(fullTargetPath)}.{Guid.NewGuid():N}.winpdf.tmp");
+
+        int extraRotationSteps = (PageCoordinateTransform.NormalizeRotation(options.UserRotationDegrees) / 90) % 4;
+        IReadOnlyList<IPdfPageEditCommitter>? committers = options.PageEditCommitters;
+        bool hasCommitters = committers is { Count: > 0 };
+
+        List<(int PageIndex, int OriginalRotation)>? modifiedRotations = null;
+
+        try
+        {
+            if (extraRotationSteps != 0 || hasCommitters)
+            {
+                int pageCount = Math.Max(0, PdfiumNative.FPDF_GetPageCount(document));
+                if (extraRotationSteps != 0)
+                {
+                    modifiedRotations = new List<(int, int)>(pageCount);
+                }
+
+                for (int i = 0; i < pageCount; i++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    bool pageNeedsRotation = extraRotationSteps != 0;
+                    bool pageHasCommitter = false;
+                    if (hasCommitters)
+                    {
+                        for (int c = 0; c < committers!.Count; c++)
+                        {
+                            if (committers[c].PageIndex == i)
+                            {
+                                pageHasCommitter = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!pageNeedsRotation && !pageHasCommitter)
+                    {
+                        continue;
+                    }
+
+                    using PdfiumPageHandle page = PdfiumNative.FPDF_LoadPage(document, i);
+                    if (page.IsInvalid)
+                    {
+                        continue;
+                    }
+
+                    if (pageNeedsRotation)
+                    {
+                        int origRot = PdfiumNative.FPDFPage_GetRotation(page);
+                        if (origRot is < 0 or > 3)
+                        {
+                            origRot = 0;
+                        }
+
+                        modifiedRotations!.Add((i, origRot));
+                        int newRot = (origRot + extraRotationSteps) % 4;
+                        PdfiumNative.FPDFPage_SetRotation(page, newRot);
+                    }
+
+                    if (pageHasCommitter)
+                    {
+                        bool contentChanged = false;
+                        for (int c = 0; c < committers!.Count; c++)
+                        {
+                            if (committers[c].PageIndex == i)
+                            {
+                                contentChanged |= committers[c].CommitToPage(document.DangerousGetHandle(), page.DangerousGetHandle());
+                            }
+                        }
+
+                        if (contentChanged)
+                        {
+                            _ = PdfiumNative.FPDFPage_GenerateContent(page);
+                        }
+                    }
+                }
+            }
+
+            using (FileStream outStream = new(
+                tempFilePath,
+                FileMode.Create,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 65536,
+                FileOptions.SequentialScan))
+            {
+                GCHandle streamHandle = GCHandle.Alloc(outStream, GCHandleType.Normal);
+                try
+                {
+                    FpdfFileWrite fileWrite = new()
+                    {
+                        Version = 1,
+                        WriteBlock = &WriteFileBlock,
+                        UserData = GCHandle.ToIntPtr(streamHandle)
+                    };
+
+                    int saveResult = PdfiumNative.FPDF_SaveAsCopy(document, &fileWrite, options.SaveFlags);
+                    if (saveResult == 0)
+                    {
+                        throw new PdfiumException(PdfiumErrorCode.File, $"FPDF_SaveAsCopy failed for '{fullTargetPath}'.");
+                    }
+                }
+                finally
+                {
+                    if (streamHandle.IsAllocated)
+                    {
+                        streamHandle.Free();
+                    }
+                }
+
+                outStream.Flush(flushToDisk: true);
+            }
+
+            System.IO.File.Move(tempFilePath, fullTargetPath, overwrite: true);
+        }
+        catch (Exception ex) when (ex is not PdfiumException and not OperationCanceledException)
+        {
+            throw new PdfiumException(PdfiumErrorCode.File, $"Failed to write '{fullTargetPath}': {ex.Message}", ex);
+        }
+        finally
+        {
+            if (modifiedRotations is { Count: > 0 })
+            {
+                foreach ((int pageIdx, int origRot) in modifiedRotations)
+                {
+                    try
+                    {
+                        using PdfiumPageHandle page = PdfiumNative.FPDF_LoadPage(document, pageIdx);
+                        if (!page.IsInvalid)
+                        {
+                            PdfiumNative.FPDFPage_SetRotation(page, origRot);
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+
+            try
+            {
+                if (System.IO.File.Exists(tempFilePath))
+                {
+                    System.IO.File.Delete(tempFilePath);
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int WriteFileBlock(FpdfFileWrite* pThis, void* data, uint size)
+    {
+        try
+        {
+            if (size == 0)
+            {
+                return 1;
+            }
+
+            if (pThis is null || data is null || size > int.MaxValue)
+            {
+                return 0;
+            }
+
+            if (GCHandle.FromIntPtr(pThis->UserData).Target is not FileStream stream)
+            {
+                return 0;
+            }
+
+            ReadOnlySpan<byte> buffer = new(data, (int)size);
+            stream.Write(buffer);
+            return 1;
+        }
+        catch
+        {
+            return 0;
         }
     }
 

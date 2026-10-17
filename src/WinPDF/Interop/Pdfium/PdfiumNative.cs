@@ -78,6 +78,18 @@ internal static unsafe partial class PdfiumNative
 
     [LibraryImport(Lib)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial void FPDFPage_SetRotation(PdfiumPageHandle page, int rotate);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPage_GenerateContent(PdfiumPageHandle page);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDF_SaveAsCopy(PdfiumDocumentHandle document, FpdfFileWrite* fileWrite, uint flags);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial int FPDFPage_GetCropBox(PdfiumPageHandle page, out float left, out float bottom, out float right, out float top);
 
     [LibraryImport(Lib)]

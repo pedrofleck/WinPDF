@@ -91,3 +91,20 @@ internal struct FsSizeF
     /// <summary>Height in points.</summary>
     public float Height;
 }
+
+/// <summary>
+/// Managed mirror of <c>FPDF_FILEWRITE</c> (<c>fpdf_save.h</c>) with an embedded user context pointer
+/// passed back via the <c>pThis</c> first argument of <see cref="WriteBlock"/>.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal unsafe struct FpdfFileWrite
+{
+    /// <summary>Structure version. Must be 1.</summary>
+    public int Version;
+
+    /// <summary>Block writer callback: <c>int (FpdfFileWrite* pThis, void* pData, uint size)</c>.</summary>
+    public delegate* unmanaged[Cdecl]<FpdfFileWrite*, void*, uint, int> WriteBlock;
+
+    /// <summary>Opaque GCHandle pointer referencing the target <see cref="System.IO.Stream"/>.</summary>
+    public nint UserData;
+}

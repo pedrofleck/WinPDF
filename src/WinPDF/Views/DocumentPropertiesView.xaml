@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <UserControl
     x:Class="WinPDF.Views.DocumentPropertiesView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -8,344 +9,305 @@
     xmlns:vm="using:WinPDF.ViewModels"
     mc:Ignorable="d">
 
-    <Grid
+    <!-- Card Flutuante Estilo Fotos do Windows 11 -->
+    <Border
+        Width="300"
+        Margin="0,8,8,8"
         Background="{ThemeResource LayerFillColorDefaultBrush}"
         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-        BorderThickness="1,0,0,0">
-        <Grid.RowDefinitions>
-            <!-- Linha 0: Cabeçalho com Título e Botão Fechar -->
-            <RowDefinition Height="Auto" />
-            <!-- Linha 1: Botões de Ação Rápida (Copiar Caminho / Abrir Local) -->
-            <RowDefinition Height="Auto" />
-            <!-- Linha 2: Conteúdo com Rolagem -->
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
+        BorderThickness="1"
+        CornerRadius="8"
+        Translation="0,0,16">
+        <Border.Shadow>
+            <ThemeShadow />
+        </Border.Shadow>
 
-        <!-- ================================================================= -->
-        <!-- Cabeçalho Superior da Barra Lateral                               -->
-        <!-- ================================================================= -->
-        <Grid
-            Grid.Row="0"
-            Padding="20,16,16,12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-
-            <TextBlock
-                x:Uid="Properties_Title"
-                Grid.Column="0"
-                VerticalAlignment="Center"
-                FontSize="20"
-                FontWeight="SemiBold"
-                Text="Informação" />
-
-            <Button
-                x:Name="ClosePropertiesBtn"
-                x:Uid="Properties_CloseButton"
-                Grid.Column="1"
-                Width="32"
-                Height="32"
-                Padding="0"
-                Command="{x:Bind ViewModel.ClosePropertiesCommand, Mode=OneWay}"
-                CornerRadius="4"
-                IsTabStop="False"
-                Style="{StaticResource SubtleButtonStyle}">
-                <FontIcon FontSize="12" Glyph="&#xE711;" />
-            </Button>
-        </Grid>
-
-        <!-- ================================================================= -->
-        <!-- Botões de Ação Rápida (Estilo Fotos do Windows 11)                -->
-        <!-- ================================================================= -->
-        <Grid
-            Grid.Row="1"
-            Margin="16,0,16,16"
-            ColumnSpacing="8">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-
-            <!-- Ação 1: Copiar Caminho -->
-            <Button
-                x:Name="CopyPathButton"
-                x:Uid="Properties_CopyPathButton"
-                Grid.Column="0"
-                Height="54"
-                HorizontalAlignment="Stretch"
-                Padding="8,6"
-                Command="{x:Bind ViewModel.CopyFilePathCommand, Mode=OneWay}"
-                CornerRadius="6"
-                Style="{StaticResource DefaultButtonStyle}">
-                <StackPanel
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Spacing="4">
-                    <FontIcon
+        <Grid RowDefinitions="Auto,*">
+            <!-- ============================================================= -->
+            <!-- Cabeçalho Superior do Card ("Informação" + Botão Fechar)      -->
+            <!-- ============================================================= -->
+            <Border
+                Grid.Row="0"
+                Padding="18,12,12,12"
+                Background="{ThemeResource LayerFillColorAltBrush}"
+                BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                BorderThickness="0,0,0,1"
+                CornerRadius="8,8,0,0">
+                <Grid ColumnDefinitions="*,Auto">
+                    <TextBlock
+                        x:Uid="Properties_Title"
+                        Grid.Column="0"
+                        VerticalAlignment="Center"
                         FontSize="16"
-                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                        Glyph="&#xE8C8;" />
-                    <TextBlock
-                        x:Uid="Properties_CopyPathLabel"
-                        FontSize="11"
-                        Text="Copiar Caminho"
-                        TextAlignment="Center"
-                        TextTrimming="CharacterEllipsis" />
-                </StackPanel>
-            </Button>
-
-            <!-- Ação 2: Abrir Local no Explorador -->
-            <Button
-                x:Name="OpenFileLocationButton"
-                x:Uid="Properties_OpenFileLocationButton"
-                Grid.Column="1"
-                Height="54"
-                HorizontalAlignment="Stretch"
-                Padding="8,6"
-                Command="{x:Bind ViewModel.OpenFileLocationCommand, Mode=OneWay}"
-                CornerRadius="6"
-                Style="{StaticResource DefaultButtonStyle}">
-                <StackPanel
-                    HorizontalAlignment="Center"
-                    VerticalAlignment="Center"
-                    Spacing="4">
-                    <FontIcon
-                        FontSize="16"
-                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                        Glyph="&#xED25;" />
-                    <TextBlock
-                        x:Uid="Properties_OpenFileLocationLabel"
-                        FontSize="11"
-                        Text="Abrir Local"
-                        TextAlignment="Center"
-                        TextTrimming="CharacterEllipsis" />
-                </StackPanel>
-            </Button>
-        </Grid>
-
-        <!-- ================================================================= -->
-        <!-- Conteúdo com Rolagem das Propriedades                             -->
-        <!-- ================================================================= -->
-        <ScrollViewer
-            Grid.Row="2"
-            HorizontalScrollBarVisibility="Disabled"
-            VerticalScrollBarVisibility="Auto">
-            <StackPanel
-                Padding="20,0,20,24"
-                Spacing="18">
-
-                <!-- Seção 1: Nome do Arquivo -->
-                <StackPanel Spacing="4">
-                    <TextBlock
-                        x:Uid="Properties_FileNameHeading"
-                        FontSize="12"
-                        FontWeight="Medium"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="Nome do arquivo" />
-                    <TextBlock
-                        FontSize="14"
                         FontWeight="SemiBold"
-                        IsTextSelectionEnabled="True"
-                        Text="{x:Bind ViewModel.CurrentDocument.FileName, Mode=OneWay}"
-                        TextWrapping="Wrap" />
-                </StackPanel>
+                        Text="Informação" />
 
-                <!-- Seção 2: Data e Hora -->
-                <StackPanel Spacing="4">
-                    <TextBlock
-                        x:Uid="Properties_DateTimeHeading"
-                        FontSize="12"
-                        FontWeight="Medium"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="Data e hora" />
-                    <TextBlock
-                        FontSize="13"
-                        Text="{x:Bind ViewModel.CurrentDocument.FileModificationDateFormatted, Mode=OneWay}"
-                        TextWrapping="Wrap" />
-                </StackPanel>
-
-                <!-- Seção 3: Informações de Tamanho e Dimensões -->
-                <StackPanel Spacing="4">
-                    <TextBlock
-                        x:Uid="Properties_SizeHeading"
-                        FontSize="12"
-                        FontWeight="Medium"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="Informações de tamanho" />
-                    <TextBlock
-                        FontSize="13"
-                        Text="{x:Bind ViewModel.CurrentDocument.ActivePageDimensionsFormatted, Mode=OneWay}"
-                        TextWrapping="Wrap" />
-                    <TextBlock
-                        FontSize="13"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="{x:Bind ViewModel.CurrentDocument.FileSizeDetailed, Mode=OneWay}"
-                        TextWrapping="Wrap" />
-                    <StackPanel Orientation="Horizontal" Spacing="4">
-                        <TextBlock
-                            FontSize="13"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="{x:Bind ViewModel.CurrentDocument.PageCount, Mode=OneWay}" />
-                        <TextBlock
-                            x:Uid="Properties_PagesCountLabel"
-                            FontSize="13"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            Text="páginas" />
-                    </StackPanel>
-                </StackPanel>
-
-                <!-- Seção 4: Origem e Local da Pasta -->
-                <StackPanel Spacing="4">
-                    <TextBlock
-                        x:Uid="Properties_FolderLocationHeading"
-                        FontSize="12"
-                        FontWeight="Medium"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="Origem e local da pasta" />
-                    <TextBlock
-                        FontSize="13"
-                        FontWeight="SemiBold"
-                        Text="{x:Bind ViewModel.CurrentDocument.FolderName, Mode=OneWay}"
-                        TextTrimming="CharacterEllipsis" />
-                    <HyperlinkButton
+                    <Button
+                        x:Name="ClosePropertiesBtn"
+                        x:Uid="Properties_CloseButton"
+                        Grid.Column="1"
+                        Width="30"
+                        Height="30"
                         Padding="0"
-                        HorizontalAlignment="Left"
-                        HorizontalContentAlignment="Left"
-                        Command="{x:Bind ViewModel.OpenFileLocationCommand, Mode=OneWay}"
-                        ToolTipService.ToolTip="{x:Bind ViewModel.CurrentDocument.FilePath, Mode=OneWay}">
+                        Command="{x:Bind ViewModel.ClosePropertiesCommand, Mode=OneWay}"
+                        CornerRadius="4"
+                        IsTabStop="False"
+                        Style="{StaticResource SubtleButtonStyle}">
+                        <FontIcon FontSize="11" Glyph="&#xE711;" />
+                    </Button>
+                </Grid>
+            </Border>
+
+            <!-- ============================================================= -->
+            <!-- Conteúdo com Rolagem (Hierarquia e Espaçamento Windows Photos) -->
+            <!-- ============================================================= -->
+            <ScrollViewer
+                Grid.Row="1"
+                HorizontalScrollBarVisibility="Disabled"
+                VerticalScrollBarVisibility="Auto">
+                <StackPanel
+                    Padding="18,16,18,20"
+                    Spacing="18">
+
+                    <!-- Seção 1: Nome do Arquivo -->
+                    <StackPanel Spacing="4">
+                        <TextBlock
+                            x:Uid="Properties_FileNameHeading"
+                            FontSize="12"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                            Text="Nome do arquivo" />
                         <TextBlock
                             FontSize="12"
-                            Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                            IsTextSelectionEnabled="False"
-                            Text="{x:Bind ViewModel.CurrentDocument.FilePath, Mode=OneWay}"
-                            TextDecorations="Underline"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            IsTextSelectionEnabled="True"
+                            Text="{x:Bind ViewModel.CurrentDocument.FileName, Mode=OneWay}"
                             TextWrapping="Wrap" />
-                    </HyperlinkButton>
+                    </StackPanel>
+
+                    <!-- Seção 2: Data e Hora -->
+                    <StackPanel Spacing="3">
+                        <TextBlock
+                            x:Uid="Properties_DateTimeHeading"
+                            FontSize="12"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                            Text="Data e hora" />
+                        <TextBlock
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.CurrentDocument.FileModificationDateOnlyFormatted, Mode=OneWay}"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.CurrentDocument.FileModificationTimeOnlyFormatted, Mode=OneWay}" />
+                    </StackPanel>
+
+                    <!-- Seção 3: Informações de Tamanho -->
+                    <StackPanel Spacing="3">
+                        <TextBlock
+                            x:Uid="Properties_SizeHeading"
+                            FontSize="12"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                            Text="Informações de tamanho" />
+                        <TextBlock
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.CurrentDocument.ActivePageDimensionsFormatted, Mode=OneWay}"
+                            TextWrapping="Wrap" />
+                        <TextBlock
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.CurrentDocument.FileSizeDetailed, Mode=OneWay}"
+                            TextWrapping="Wrap" />
+                        <StackPanel Orientation="Horizontal" Spacing="4">
+                            <TextBlock
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind ViewModel.CurrentDocument.PageCount, Mode=OneWay}" />
+                            <TextBlock
+                                x:Uid="Properties_PagesCountLabel"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="páginas" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Seção 4: Origem e Local da Pasta (Clicar no link abre a pasta no Explorer) -->
+                    <StackPanel Spacing="3">
+                        <TextBlock
+                            x:Uid="Properties_FolderLocationHeading"
+                            FontSize="12"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                            Text="Origem e local da pasta" />
+                        <TextBlock
+                            FontSize="12"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            Text="{x:Bind ViewModel.CurrentDocument.FolderName, Mode=OneWay}"
+                            TextTrimming="CharacterEllipsis" />
+                        <HyperlinkButton
+                            Margin="0,2,0,0"
+                            Padding="0"
+                            HorizontalAlignment="Left"
+                            HorizontalContentAlignment="Left"
+                            Command="{x:Bind ViewModel.OpenFileLocationCommand, Mode=OneWay}"
+                            ToolTipService.ToolTip="{x:Bind ViewModel.CurrentDocument.FilePath, Mode=OneWay}">
+                            <TextBlock
+                                FontSize="12"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                IsTextSelectionEnabled="False"
+                                Text="{x:Bind ViewModel.CurrentDocument.FilePath, Mode=OneWay}"
+                                TextDecorations="Underline"
+                                TextWrapping="Wrap" />
+                        </HyperlinkButton>
+                    </StackPanel>
+
+                    <!-- Seção 5: Informações Adicionais (Metadados Reais do PDF) -->
+                    <StackPanel
+                        Spacing="14"
+                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasAdditionalMetadata), Mode=OneWay}">
+
+                        <Border
+                            Height="1"
+                            Margin="0,0,0,2"
+                            Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                        <TextBlock
+                            x:Uid="Properties_AdditionalInfoHeading"
+                            FontSize="12"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                            Text="Informações adicionais" />
+
+                        <!-- Versão do PDF -->
+                        <StackPanel
+                            Spacing="2"
+                            Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasMetaPdfVersion), Mode=OneWay}">
+                            <TextBlock
+                                x:Uid="Properties_PdfVersionLabel"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                Text="Versão do PDF" />
+                            <TextBlock
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Text="{x:Bind ViewModel.CurrentDocument.MetaPdfVersion, Mode=OneWay}" />
+                        </StackPanel>
+
+                        <!-- Título -->
+                        <StackPanel
+                            Spacing="2"
+                            Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasMetaTitle), Mode=OneWay}">
+                            <TextBlock
+                                x:Uid="Properties_DocTitleLabel"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                Text="Título" />
+                            <TextBlock
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                IsTextSelectionEnabled="True"
+                                Text="{x:Bind ViewModel.CurrentDocument.MetaTitle, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <!-- Autor -->
+                        <StackPanel
+                            Spacing="2"
+                            Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasMetaAuthor), Mode=OneWay}">
+                            <TextBlock
+                                x:Uid="Properties_DocAuthorLabel"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                Text="Autor" />
+                            <TextBlock
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                IsTextSelectionEnabled="True"
+                                Text="{x:Bind ViewModel.CurrentDocument.MetaAuthor, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <!-- Assunto -->
+                        <StackPanel
+                            Spacing="2"
+                            Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasMetaSubject), Mode=OneWay}">
+                            <TextBlock
+                                x:Uid="Properties_DocSubjectLabel"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                Text="Assunto" />
+                            <TextBlock
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                IsTextSelectionEnabled="True"
+                                Text="{x:Bind ViewModel.CurrentDocument.MetaSubject, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <!-- Palavras-chave -->
+                        <StackPanel
+                            Spacing="2"
+                            Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasMetaKeywords), Mode=OneWay}">
+                            <TextBlock
+                                x:Uid="Properties_DocKeywordsLabel"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                Text="Palavras-chave" />
+                            <TextBlock
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                IsTextSelectionEnabled="True"
+                                Text="{x:Bind ViewModel.CurrentDocument.MetaKeywords, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <!-- Aplicativo de Criação -->
+                        <StackPanel
+                            Spacing="2"
+                            Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasMetaCreator), Mode=OneWay}">
+                            <TextBlock
+                                x:Uid="Properties_DocCreatorLabel"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                Text="Aplicativo de criação" />
+                            <TextBlock
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                IsTextSelectionEnabled="True"
+                                Text="{x:Bind ViewModel.CurrentDocument.MetaCreator, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+
+                        <!-- Produtor do PDF -->
+                        <StackPanel
+                            Spacing="2"
+                            Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasMetaProducer), Mode=OneWay}">
+                            <TextBlock
+                                x:Uid="Properties_DocProducerLabel"
+                                FontSize="12"
+                                FontWeight="SemiBold"
+                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                Text="Produtor do PDF" />
+                            <TextBlock
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                IsTextSelectionEnabled="True"
+                                Text="{x:Bind ViewModel.CurrentDocument.MetaProducer, Mode=OneWay}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </StackPanel>
                 </StackPanel>
-
-                <!-- Seção 5: Metadados do PDF (Informações Adicionais) -->
-                <StackPanel
-                    Spacing="12"
-                    Visibility="{x:Bind converters:UiHelpers.VisibleIfHasMetadata(ViewModel.CurrentDocument.Metadata), Mode=OneWay}">
-                    <TextBlock
-                        x:Uid="Properties_AdditionalInfoHeading"
-                        FontSize="12"
-                        FontWeight="Medium"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Text="Informações adicionais" />
-
-                    <!-- Versão do PDF -->
-                    <StackPanel
-                        Spacing="2"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIfNotNullOrEmpty(ViewModel.CurrentDocument.Metadata.PdfVersion), Mode=OneWay}">
-                        <TextBlock
-                            x:Uid="Properties_PdfVersionLabel"
-                            FontSize="11"
-                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="Versão do PDF" />
-                        <TextBlock
-                            FontSize="13"
-                            Text="{x:Bind ViewModel.CurrentDocument.Metadata.PdfVersion, Mode=OneWay}" />
-                    </StackPanel>
-
-                    <!-- Título -->
-                    <StackPanel
-                        Spacing="2"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIfNotNullOrEmpty(ViewModel.CurrentDocument.Metadata.Title), Mode=OneWay}">
-                        <TextBlock
-                            x:Uid="Properties_DocTitleLabel"
-                            FontSize="11"
-                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="Título" />
-                        <TextBlock
-                            FontSize="13"
-                            IsTextSelectionEnabled="True"
-                            Text="{x:Bind ViewModel.CurrentDocument.Metadata.Title, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
-
-                    <!-- Autor -->
-                    <StackPanel
-                        Spacing="2"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIfNotNullOrEmpty(ViewModel.CurrentDocument.Metadata.Author), Mode=OneWay}">
-                        <TextBlock
-                            x:Uid="Properties_DocAuthorLabel"
-                            FontSize="11"
-                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="Autor" />
-                        <TextBlock
-                            FontSize="13"
-                            IsTextSelectionEnabled="True"
-                            Text="{x:Bind ViewModel.CurrentDocument.Metadata.Author, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
-
-                    <!-- Assunto -->
-                    <StackPanel
-                        Spacing="2"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIfNotNullOrEmpty(ViewModel.CurrentDocument.Metadata.Subject), Mode=OneWay}">
-                        <TextBlock
-                            x:Uid="Properties_DocSubjectLabel"
-                            FontSize="11"
-                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="Assunto" />
-                        <TextBlock
-                            FontSize="13"
-                            IsTextSelectionEnabled="True"
-                            Text="{x:Bind ViewModel.CurrentDocument.Metadata.Subject, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
-
-                    <!-- Palavras-chave -->
-                    <StackPanel
-                        Spacing="2"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIfNotNullOrEmpty(ViewModel.CurrentDocument.Metadata.Keywords), Mode=OneWay}">
-                        <TextBlock
-                            x:Uid="Properties_DocKeywordsLabel"
-                            FontSize="11"
-                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="Palavras-chave" />
-                        <TextBlock
-                            FontSize="13"
-                            IsTextSelectionEnabled="True"
-                            Text="{x:Bind ViewModel.CurrentDocument.Metadata.Keywords, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
-
-                    <!-- Aplicativo de Criação -->
-                    <StackPanel
-                        Spacing="2"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIfNotNullOrEmpty(ViewModel.CurrentDocument.Metadata.Creator), Mode=OneWay}">
-                        <TextBlock
-                            x:Uid="Properties_DocCreatorLabel"
-                            FontSize="11"
-                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="Aplicativo de criação" />
-                        <TextBlock
-                            FontSize="13"
-                            IsTextSelectionEnabled="True"
-                            Text="{x:Bind ViewModel.CurrentDocument.Metadata.Creator, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
-
-                    <!-- Produtor do PDF -->
-                    <StackPanel
-                        Spacing="2"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIfNotNullOrEmpty(ViewModel.CurrentDocument.Metadata.Producer), Mode=OneWay}">
-                        <TextBlock
-                            x:Uid="Properties_DocProducerLabel"
-                            FontSize="11"
-                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                            Text="Produtor do PDF" />
-                        <TextBlock
-                            FontSize="13"
-                            IsTextSelectionEnabled="True"
-                            Text="{x:Bind ViewModel.CurrentDocument.Metadata.Producer, Mode=OneWay}"
-                            TextWrapping="Wrap" />
-                    </StackPanel>
-                </StackPanel>
-            </StackPanel>
-        </ScrollViewer>
-    </Grid>
+            </ScrollViewer>
+        </Grid>
+    </Border>
 </UserControl>

@@ -100,6 +100,100 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     public partial PdfMetadata? Metadata { get; set; }
 
+    partial void OnMetadataChanged(PdfMetadata? value)
+    {
+        OnPropertyChanged(nameof(HasAdditionalMetadata));
+        OnPropertyChanged(nameof(HasMetaPdfVersion));
+        OnPropertyChanged(nameof(MetaPdfVersion));
+        OnPropertyChanged(nameof(HasMetaTitle));
+        OnPropertyChanged(nameof(MetaTitle));
+        OnPropertyChanged(nameof(HasMetaAuthor));
+        OnPropertyChanged(nameof(MetaAuthor));
+        OnPropertyChanged(nameof(HasMetaSubject));
+        OnPropertyChanged(nameof(MetaSubject));
+        OnPropertyChanged(nameof(HasMetaKeywords));
+        OnPropertyChanged(nameof(MetaKeywords));
+        OnPropertyChanged(nameof(HasMetaCreator));
+        OnPropertyChanged(nameof(MetaCreator));
+        OnPropertyChanged(nameof(HasMetaProducer));
+        OnPropertyChanged(nameof(MetaProducer));
+    }
+
+    /// <summary>Gets a value indicating whether at least one PDF metadata field is present.</summary>
+    public bool HasAdditionalMetadata =>
+        HasMetaPdfVersion || HasMetaTitle || HasMetaAuthor || HasMetaSubject ||
+        HasMetaKeywords || HasMetaCreator || HasMetaProducer;
+
+    /// <summary>Gets a value indicating whether the PDF version string is available.</summary>
+    public bool HasMetaPdfVersion => !string.IsNullOrWhiteSpace(Metadata?.PdfVersion);
+
+    /// <summary>Gets the non-null PDF version string.</summary>
+    public string MetaPdfVersion => Metadata?.PdfVersion ?? string.Empty;
+
+    /// <summary>Gets a value indicating whether the document title metadata is available.</summary>
+    public bool HasMetaTitle => !string.IsNullOrWhiteSpace(Metadata?.Title);
+
+    /// <summary>Gets the non-null document title metadata string.</summary>
+    public string MetaTitle => Metadata?.Title ?? string.Empty;
+
+    /// <summary>Gets a value indicating whether the document author metadata is available.</summary>
+    public bool HasMetaAuthor => !string.IsNullOrWhiteSpace(Metadata?.Author);
+
+    /// <summary>Gets the non-null document author metadata string.</summary>
+    public string MetaAuthor => Metadata?.Author ?? string.Empty;
+
+    /// <summary>Gets a value indicating whether the document subject metadata is available.</summary>
+    public bool HasMetaSubject => !string.IsNullOrWhiteSpace(Metadata?.Subject);
+
+    /// <summary>Gets the non-null document subject metadata string.</summary>
+    public string MetaSubject => Metadata?.Subject ?? string.Empty;
+
+    /// <summary>Gets a value indicating whether the document keywords metadata is available.</summary>
+    public bool HasMetaKeywords => !string.IsNullOrWhiteSpace(Metadata?.Keywords);
+
+    /// <summary>Gets the non-null document keywords metadata string.</summary>
+    public string MetaKeywords => Metadata?.Keywords ?? string.Empty;
+
+    /// <summary>Gets a value indicating whether the creation application metadata is available.</summary>
+    public bool HasMetaCreator => !string.IsNullOrWhiteSpace(Metadata?.Creator);
+
+    /// <summary>Gets the non-null creation application metadata string.</summary>
+    public string MetaCreator => Metadata?.Creator ?? string.Empty;
+
+    /// <summary>Gets a value indicating whether the PDF producer metadata is available.</summary>
+    public bool HasMetaProducer => !string.IsNullOrWhiteSpace(Metadata?.Producer);
+
+    /// <summary>Gets the non-null PDF producer metadata string.</summary>
+    public string MetaProducer => Metadata?.Producer ?? string.Empty;
+
+    /// <summary>
+    /// Refreshes file system size, dates, and location properties after saving or renaming the document.
+    /// </summary>
+    public void RefreshFileInfo()
+    {
+        if (System.IO.File.Exists(FilePath))
+        {
+            try
+            {
+                FileSizeBytes = new System.IO.FileInfo(FilePath).Length;
+            }
+            catch
+            {
+            }
+        }
+
+        OnPropertyChanged(nameof(FileName));
+        OnPropertyChanged(nameof(FilePath));
+        OnPropertyChanged(nameof(DirectoryPath));
+        OnPropertyChanged(nameof(FolderName));
+        OnPropertyChanged(nameof(FormattedFileSize));
+        OnPropertyChanged(nameof(FileSizeDetailed));
+        OnPropertyChanged(nameof(FileCreationDateFormatted));
+        OnPropertyChanged(nameof(FileModificationDateFormatted));
+        OnPropertyChanged(nameof(FileModificationDateOnlyFormatted));
+        OnPropertyChanged(nameof(FileModificationTimeOnlyFormatted));
+    }
+
     /// <summary>
     /// Gets the full directory path where the document file resides.
     /// </summary>
@@ -166,6 +260,50 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             }
 
             return Metadata?.ModificationDate ?? string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Gets the localized long modification date (e.g. "12 de outubro de 2026") matching Windows Photos style.
+    /// </summary>
+    public string FileModificationDateOnlyFormatted
+    {
+        get
+        {
+            if (System.IO.File.Exists(FilePath))
+            {
+                try
+                {
+                    return System.IO.File.GetLastWriteTime(FilePath).ToString("D");
+                }
+                catch
+                {
+                }
+            }
+
+            return Metadata?.ModificationDate ?? string.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Gets the localized modification time (e.g. "13:48") matching Windows Photos style.
+    /// </summary>
+    public string FileModificationTimeOnlyFormatted
+    {
+        get
+        {
+            if (System.IO.File.Exists(FilePath))
+            {
+                try
+                {
+                    return System.IO.File.GetLastWriteTime(FilePath).ToString("t");
+                }
+                catch
+                {
+                }
+            }
+
+            return string.Empty;
         }
     }
 

@@ -95,6 +95,26 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
             highPriority: true);
 
     /// <inheritdoc/>
+    public Task SaveDocumentAsync(
+        long documentId,
+        string targetFilePath,
+        PdfSaveOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetFilePath);
+        return Enqueue<bool>(
+            new PdfiumJob<bool>(
+                PdfJobPriority.Critical,
+                (engine, token) =>
+                {
+                    engine.SaveDocument(documentId, targetFilePath, options ?? PdfSaveOptions.Default, token);
+                    return true;
+                },
+                cancellationToken),
+            highPriority: true);
+    }
+
+    /// <inheritdoc/>
     public Task<PdfBitmapLease> RenderPageAsync(
         long documentId,
         int pageIndex,

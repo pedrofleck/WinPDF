@@ -51,6 +51,21 @@ public interface IPdfService : IDisposable
     Task<PdfMetadata> GetDocumentMetadataAsync(long documentId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Saves the specified document (including any committed page rotations, ink strokes, text, shapes, or comments)
+    /// to <paramref name="targetFilePath"/> using PDFium's <c>FPDF_SaveAsCopy</c> pipeline with atomic temp-file replacement.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="targetFilePath">Destination file path on disk.</param>
+    /// <param name="options">Optional save options and page edit committers.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>A task that completes when the file has been written and flushed to disk.</returns>
+    Task SaveDocumentAsync(
+        long documentId,
+        string targetFilePath,
+        PdfSaveOptions? options = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Rasterizes an entire page at the specified pixel size.
     /// </summary>
     /// <param name="documentId">Document identifier.</param>

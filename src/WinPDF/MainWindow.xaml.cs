@@ -606,6 +606,11 @@ public sealed partial class MainWindow : Window
             _ => ElementTheme.Default
         };
 
+        if (isStartup && desiredTheme != ElementTheme.Default && RootGrid.ActualTheme == desiredTheme)
+        {
+            return;
+        }
+
         if (RootGrid.RequestedTheme != desiredTheme)
         {
             RootGrid.RequestedTheme = desiredTheme;
