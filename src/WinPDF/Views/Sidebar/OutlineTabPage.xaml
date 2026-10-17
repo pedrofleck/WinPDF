@@ -11,7 +11,7 @@
     mc:Ignorable="d">
 
     <Grid Background="Transparent">
-        <!-- Estado Vazio quando não há tópicos / sumário -->
+        <!-- Empty state when there are no topics / outline -->
         <StackPanel
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
@@ -32,7 +32,7 @@
                 TextWrapping="Wrap" />
         </StackPanel>
 
-        <!-- Árvore de Tópicos do Sumário -->
+        <!-- Table of contents / outline tree -->
         <TreeView
             x:Name="OutlineTreeView"
             Padding="4"

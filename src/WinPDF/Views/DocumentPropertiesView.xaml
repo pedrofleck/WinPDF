@@ -9,7 +9,7 @@
     xmlns:vm="using:WinPDF.ViewModels"
     mc:Ignorable="d">
 
-    <!-- Card Flutuante Estilo Fotos do Windows 11 -->
+    <!-- Floating card Windows 11 Photos style -->
     <Border
         Width="300"
         Margin="0,8,8,8"
@@ -24,7 +24,7 @@
 
         <Grid RowDefinitions="Auto,*">
             <!-- ============================================================= -->
-            <!-- Cabeçalho Superior do Card ("Informação" + Botão Fechar)      -->
+            <!-- Top header of the card ("Information" + Close Button)       -->
             <!-- ============================================================= -->
             <Border
                 Grid.Row="0"
@@ -59,7 +59,7 @@
             </Border>
 
             <!-- ============================================================= -->
-            <!-- Conteúdo com Rolagem (Hierarquia e Espaçamento Windows Photos) -->
+            <!-- Scrollable content (Windows Photos hierarchy and spacing)  -->
             <!-- ============================================================= -->
             <ScrollViewer
                 Grid.Row="1"
@@ -69,7 +69,7 @@
                     Padding="18,16,18,20"
                     Spacing="18">
 
-                    <!-- Seção 1: Nome do Arquivo -->
+                    <!-- Section 1: File Name -->
                     <StackPanel Spacing="4">
                         <TextBlock
                             x:Uid="Properties_FileNameHeading"
@@ -85,7 +85,7 @@
                             TextWrapping="Wrap" />
                     </StackPanel>
 
-                    <!-- Seção 2: Data e Hora -->
+                    <!-- Section 2: Date and Time -->
                     <StackPanel Spacing="3">
                         <TextBlock
                             x:Uid="Properties_DateTimeHeading"
@@ -104,7 +104,7 @@
                             Text="{x:Bind ViewModel.CurrentDocument.FileModificationTimeOnlyFormatted, Mode=OneWay}" />
                     </StackPanel>
 
-                    <!-- Seção 3: Informações de Tamanho -->
+                    <!-- Section 3: Size Information -->
                     <StackPanel Spacing="3">
                         <TextBlock
                             x:Uid="Properties_SizeHeading"
@@ -135,7 +135,7 @@
                         </StackPanel>
                     </StackPanel>
 
-                    <!-- Seção 4: Origem e Local da Pasta (Clicar no link abre a pasta no Explorer) -->
+                    <!-- Section 4: Folder Origin and Location (Clicking link opens folder in Explorer) -->
                     <StackPanel Spacing="3">
                         <TextBlock
                             x:Uid="Properties_FolderLocationHeading"
@@ -165,7 +165,7 @@
                         </HyperlinkButton>
                     </StackPanel>
 
-                    <!-- Seção 5: Informações Adicionais (Metadados Reais do PDF) -->
+                    <!-- Section 5: Additional Information (Actual PDF Metadata) -->
                     <StackPanel
                         Spacing="14"
                         Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasAdditionalMetadata), Mode=OneWay}">
@@ -182,7 +182,7 @@
                             Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                             Text="Informações adicionais" />
 
-                        <!-- Versão do PDF -->
+                        <!-- PDF Version -->
                         <StackPanel
                             Spacing="2"
                             Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasMetaPdfVersion), Mode=OneWay}">
@@ -198,7 +198,7 @@
                                 Text="{x:Bind ViewModel.CurrentDocument.MetaPdfVersion, Mode=OneWay}" />
                         </StackPanel>
 
-                        <!-- Título -->
+                        <!-- Title -->
                         <StackPanel
                             Spacing="2"
                             Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasMetaTitle), Mode=OneWay}">
@@ -216,7 +216,7 @@
                                 TextWrapping="Wrap" />
                         </StackPanel>
 
-                        <!-- Autor -->
+                        <!-- Author -->
                         <StackPanel
                             Spacing="2"
                             Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasMetaAuthor), Mode=OneWay}">
@@ -234,7 +234,7 @@
                                 TextWrapping="Wrap" />
                         </StackPanel>
 
-                        <!-- Assunto -->
+                        <!-- Subject -->
                         <StackPanel
                             Spacing="2"
                             Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasMetaSubject), Mode=OneWay}">
@@ -252,7 +252,7 @@
                                 TextWrapping="Wrap" />
                         </StackPanel>
 
-                        <!-- Palavras-chave -->
+                        <!-- Keywords -->
                         <StackPanel
                             Spacing="2"
                             Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasMetaKeywords), Mode=OneWay}">
@@ -270,7 +270,7 @@
                                 TextWrapping="Wrap" />
                         </StackPanel>
 
-                        <!-- Aplicativo de Criação -->
+                        <!-- Creation Application -->
                         <StackPanel
                             Spacing="2"
                             Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasMetaCreator), Mode=OneWay}">
@@ -288,7 +288,7 @@
                                 TextWrapping="Wrap" />
                         </StackPanel>
 
-                        <!-- Produtor do PDF -->
+                        <!-- PDF Producer -->
                         <StackPanel
                             Spacing="2"
                             Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasMetaProducer), Mode=OneWay}">

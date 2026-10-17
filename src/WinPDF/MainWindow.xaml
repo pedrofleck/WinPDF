@@ -15,7 +15,7 @@
     mc:Ignorable="d">
 
     <Window.SystemBackdrop>
-        <!-- MicaKind.Base: variante sutil e neutra recomendada para WinUI 3 nativo -->
+        <!-- MicaKind.Base: subtle, neutral variant recommended for native WinUI 3 -->
         <MicaBackdrop Kind="Base" />
     </Window.SystemBackdrop>
 
@@ -29,7 +29,7 @@
         PreviewKeyDown="OnRootGridPreviewKeyDown">
 
         <!-- ================================================================= -->
-        <!-- Barra Superior ÚNICA de 48 DIPs (TitleBar + CommandBar Integrada) -->
+        <!-- Unified 48 DIPs top bar (Integrated TitleBar + CommandBar)        -->
         <!-- ================================================================= -->
         <Grid
             x:Name="AppTitleBar"
@@ -44,14 +44,14 @@
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
-            <!-- Esquerda: Modo Documento -->
+            <!-- Left: Document Mode -->
             <StackPanel
                 Grid.Column="0"
                 VerticalAlignment="Center"
                 Orientation="Horizontal"
                 Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.IsSettingsOpen), Mode=OneWay}">
 
-                <!-- Grupo 1: Toggle da Barra Lateral e Logo/Nome do App -->
+                <!-- Group 1: Sidebar Toggle and App Logo/Name -->
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <Button
                         x:Name="SidebarToggleButton"
@@ -96,12 +96,12 @@
                     </StackPanel>
                 </StackPanel>
 
-                <!-- Grupo 2: Espaçamento de 20 DIPs para o botão "Abrir arquivo" e Pesquisa (8 DIPs) -->
+                <!-- Group 2: 20 DIPs spacing for "Open file" button and Search (8 DIPs) -->
                 <StackPanel
                     Margin="20,0,0,0"
                     Orientation="Horizontal"
                     Spacing="8">
-                    <!-- Único botão com borda da barra superior ("Abrir arquivo") -->
+                    <!-- Only bordered button in the top bar ("Open file") -->
                     <Button
                         x:Name="OpenFileBtn"
                         x:Uid="OpenFileButton"
@@ -144,7 +144,7 @@
                 </StackPanel>
             </StackPanel>
 
-            <!-- Esquerda: Modo Configurações (Único Botão Voltar) -->
+            <!-- Left: Settings Mode (Single Back Button) -->
             <StackPanel
                 Grid.Column="0"
                 VerticalAlignment="Center"
@@ -191,14 +191,14 @@
                 </StackPanel>
             </StackPanel>
 
-            <!-- Centro: Área de Arraste da Janela + Nome do Documento -->
+            <!-- Center: Window Drag Region + Document Name -->
             <Grid
                 x:Name="TitleBarDragRegion"
                 Grid.Column="1"
                 HorizontalAlignment="Stretch"
                 VerticalAlignment="Stretch"
                 Background="Transparent">
-                <!-- Nome do arquivo aberto centralizado -->
+                <!-- Centered open file name -->
                 <TextBlock
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
@@ -210,20 +210,20 @@
                     Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}" />
             </Grid>
 
-            <!-- Direita: Toggle Barra Anotações, Menu Documento (...), Configurações, Sair da Tela Cheia -->
+            <!-- Right: Annotation Toolbar Toggle, Document Menu (...), Settings, Exit Full Screen -->
             <StackPanel
                 Grid.Column="2"
                 VerticalAlignment="Center"
                 Orientation="Horizontal"
                 Spacing="4">
 
-                <!-- Grupo de Ferramentas do Modo Documento -->
+                <!-- Document Mode Tools Group -->
                 <StackPanel
                     Orientation="Horizontal"
                     Spacing="4"
                     Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.IsSettingsOpen), Mode=OneWay}">
 
-                <!-- Toggle da barra flutuante de anotações -->
+                <!-- Floating annotation toolbar toggle -->
                 <Button
                     x:Name="AnnotationToolsToggleBtn"
                     x:Uid="AnnotationToolsToggle"
@@ -238,7 +238,7 @@
                     <FontIcon FontSize="16" Glyph="&#xED63;" />
                 </Button>
 
-                <!-- Menu de Opções do Documento (GNOME Papers) -->
+                <!-- Document Options Menu (GNOME Papers) -->
                 <Button
                     x:Name="DocumentMenuBtn"
                     x:Uid="DocumentMenuButton"
@@ -369,7 +369,7 @@
                     </Button.Flyout>
                 </Button>
 
-                <!-- Botão de Configurações Gerais (Engrenagem) -->
+                <!-- General Settings Button (Gear) -->
                 <Button
                     x:Name="SettingsBtn"
                     x:Uid="SettingsButton"
@@ -395,7 +395,7 @@
                 </Button>
                 </StackPanel>
 
-                <!-- Botão Sair da Tela Cheia (F11 / Duas Flechas) -->
+                <!-- Exit Full Screen Button (F11 / Two Arrows) -->
                 <Button
                     x:Name="ExitFullScreenBtn"
                     x:Uid="ExitFullScreenButton"
@@ -413,8 +413,8 @@
 
         <!-- ================================================================= -->
         <!-- ================================================================= -->
-        <!-- Layout Principal: SplitView com Animação Nativa de GPU no Pane    -->
-        <!-- + Splitter Arrastável de 8 DIPs em toda a altura vertical         -->
+        <!-- Main Layout: SplitView with native GPU animation on the Pane      -->
+        <!-- + Draggable 8 DIPs splitter across the full vertical height       -->
         <!-- ================================================================= -->
         <SplitView
             x:Name="MainSplitView"
@@ -431,22 +431,22 @@
             <SplitView.Pane>
                 <Grid Background="Transparent">
                     <Grid.ColumnDefinitions>
-                        <!-- Conteúdo da Barra Lateral (Abas + Rodapé) -->
+                        <!-- Sidebar Content (Tabs + Footer) -->
                         <ColumnDefinition Width="*" />
-                        <!-- Splitter de Redimensionamento acoplado na borda direita do Pane -->
+                        <!-- Resize splitter attached to the right edge of the Pane -->
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
 
-                    <!-- Conteúdo da Barra Lateral (Frame de Conteúdo + Rodapé) -->
+                    <!-- Sidebar Content (Content Frame + Footer) -->
                     <Grid Grid.Column="0" Background="Transparent" RowDefinitions="*,Auto">
-                        <!-- Frame de Conteúdo das Abas da Barra Lateral (Navegação Direcional) -->
+                        <!-- Sidebar Tabs Content Frame (Directional Navigation) -->
                         <Frame
                             x:Name="SidebarContentFrame"
                             Grid.Row="0"
                             Background="Transparent"
                             IsNavigationStackEnabled="False" />
 
-                        <!-- Rodapé com Botões de Abas da Barra Lateral (Ícones de 20px com Alvo Touch Amplo) -->
+                        <!-- Sidebar Tab Buttons Footer (20px icons with large touch target) -->
                         <Border
                             Grid.Row="1"
                             Padding="0,4,0,4"
@@ -458,7 +458,7 @@
                                 Orientation="Horizontal"
                                 HorizontalAlignment="Center"
                                 Spacing="2">
-                                <!-- Aba 1: Miniaturas das Páginas -->
+                                <!-- Tab 1: Page Thumbnails -->
                                 <Button
                                     x:Name="ThumbnailsTabBtn"
                                     x:Uid="Sidebar_Thumbnails"
@@ -488,7 +488,7 @@
                                     </Grid>
                                 </Button>
 
-                                <!-- Aba 2: Sumário / Índice -->
+                                <!-- Tab 2: Table of Contents / Outline -->
                                 <Button
                                     x:Name="OutlineTabBtn"
                                     x:Uid="Sidebar_Outline"
@@ -518,7 +518,7 @@
                                     </Grid>
                                 </Button>
 
-                                <!-- Aba 3: Anotações -->
+                                <!-- Tab 3: Annotations -->
                                 <Button
                                     x:Name="AnnotationsTabBtn"
                                     x:Uid="Sidebar_Annotations"
@@ -548,7 +548,7 @@
                                     </Grid>
                                 </Button>
 
-                                <!-- Aba 4: Marcadores -->
+                                <!-- Tab 4: Bookmarks -->
                                 <Button
                                     x:Name="BookmarksTabBtn"
                                     x:Uid="Sidebar_Bookmarks"
@@ -578,7 +578,7 @@
                                     </Grid>
                                 </Button>
 
-                                <!-- Aba 5: Anexos -->
+                                <!-- Tab 5: Attachments -->
                                 <Button
                                     x:Name="AttachmentsTabBtn"
                                     x:Uid="Sidebar_Attachments"
@@ -611,7 +611,7 @@
                         </Border>
                     </Grid>
 
-                    <!-- Splitter Arrastável (6 DIPs) em TODA a Altura Vertical com Splitter Invisível -->
+                    <!-- Draggable Splitter (6 DIPs) across FULL vertical height with invisible splitter -->
                     <controls:SplitterContainer
                         Grid.Column="1"
                         Width="6"
@@ -641,7 +641,7 @@
                 </Grid>
             </SplitView.Pane>
 
-            <!-- Container Arredondado Principal (Usa ThemeResource Nativo para Troca Instantânea Claro/Escuro) -->
+            <!-- Main Rounded Container (Uses native ThemeResource for instant light/dark switching) -->
             <Grid x:Name="MainContentContainer">
                 <Border
                     x:Name="MainContentBackdropBorder"
@@ -651,7 +651,7 @@
                     CornerRadius="{x:Bind converters:UiHelpers.MainContainerCornerRadius(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}"
                     Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}" />
 
-                <!-- Frame de Conteúdo Principal (DocumentView Sempre Preservado na Árvore Visual) -->
+                <!-- Main Content Frame (DocumentView always preserved in visual tree) -->
                 <Frame
                     x:Name="MainContentFrame"
                     Background="Transparent"
@@ -659,7 +659,7 @@
             </Grid>
         </SplitView>
 
-        <!-- Frame de Configurações em Página Inteira (Sobreposto sem Descarregar DocumentView ou Barra Lateral) -->
+        <!-- Full-page Settings Frame (Overlayed without unloading DocumentView or Sidebar) -->
         <Frame
             x:Name="SettingsContentFrame"
             Grid.Row="1"

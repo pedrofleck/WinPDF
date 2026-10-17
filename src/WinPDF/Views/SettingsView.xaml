@@ -25,7 +25,7 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- Título Principal "Configurações" Grande no Topo -->
+            <!-- Main "Settings" header at the top -->
             <TextBlock
                 Grid.Row="0"
                 Grid.Column="0"
@@ -35,7 +35,7 @@
                 FontWeight="SemiBold"
                 Margin="0,0,0,24" />
 
-            <!-- Coluna 0: Cartões de Configuração (Larga, proporcional) -->
+            <!-- Column 0: Configuration cards (Wide, proportional) -->
             <StackPanel
                 x:Name="CardsPanel"
                 Grid.Row="1"
@@ -44,7 +44,7 @@
                 Spacing="24">
 
                 <!-- ========================================================= -->
-                <!-- Seção 1: APARÊNCIA                                        -->
+                <!-- Section 1: APPEARANCE                                     -->
                 <!-- ========================================================= -->
                 <StackPanel Spacing="10">
                     <TextBlock
@@ -90,7 +90,7 @@
                 </StackPanel>
 
                 <!-- ========================================================= -->
-                <!-- Seção 2: VISUALIZAÇÃO                                     -->
+                <!-- Section 2: VIEWING                                        -->
                 <!-- ========================================================= -->
                 <StackPanel Spacing="10">
                     <TextBlock
@@ -98,7 +98,7 @@
                         FontWeight="SemiBold"
                         Style="{StaticResource SubtitleTextBlockStyle}" />
 
-                    <!-- Cartão: Modo de visualização padrão -->
+                    <!-- Card: Default viewing mode -->
                     <Border
                         Padding="16"
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -134,7 +134,7 @@
                         </Grid>
                     </Border>
 
-                    <!-- Cartão: Preferência de zoom inicial -->
+                    <!-- Card: Default zoom preference -->
                     <Border
                         Padding="16"
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -171,7 +171,7 @@
                         </Grid>
                     </Border>
 
-                    <!-- Cartão: Reabrir último documento ao iniciar -->
+                    <!-- Card: Reopen last document on startup -->
                     <Border
                         Padding="16"
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -205,7 +205,7 @@
                 </StackPanel>
 
                 <!-- ========================================================= -->
-                <!-- Seção 3: ANOTAÇÕES                                        -->
+                <!-- Section 3: ANNOTATIONS                                    -->
                 <!-- ========================================================= -->
                 <StackPanel Spacing="10">
                     <TextBlock
@@ -213,7 +213,7 @@
                         FontWeight="SemiBold"
                         Style="{StaticResource SubtitleTextBlockStyle}" />
 
-                    <!-- Cartão: Desenhar com o toque -->
+                    <!-- Card: Draw with touch -->
                     <Border
                         Padding="16"
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
@@ -248,7 +248,7 @@
             </StackPanel>
 
             <!-- ========================================================= -->
-            <!-- Seção 4: SOBRE O WINPDF (Coluna 2, Estilo MS Paint)       -->
+            <!-- Section 4: ABOUT WINPDF (Column 2, MS Paint style)        -->
             <!-- ========================================================= -->
             <StackPanel
                 x:Name="AboutPanel"

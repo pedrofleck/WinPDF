@@ -11,7 +11,7 @@
     mc:Ignorable="d">
 
     <Grid Background="Transparent" RowDefinitions="Auto,*">
-        <!-- Botão Adicionar/Remover Marcador na Página Atual -->
+        <!-- Add/Remove bookmark button for current page -->
         <Button
             Grid.Row="0"
             HorizontalAlignment="Stretch"
@@ -28,7 +28,7 @@
             </StackPanel>
         </Button>
 
-        <!-- Estado Vazio quando não há favoritos -->
+        <!-- Empty state when there are no bookmarks -->
         <StackPanel
             Grid.Row="1"
             HorizontalAlignment="Center"
@@ -50,7 +50,7 @@
                 TextWrapping="Wrap" />
         </StackPanel>
 
-        <!-- Lista de Marcadores / Favoritos -->
+        <!-- Bookmarks / Favorites list -->
         <ListView
             x:Name="BookmarksList"
             Grid.Row="1"

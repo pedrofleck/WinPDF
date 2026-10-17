@@ -11,7 +11,7 @@
     mc:Ignorable="d">
 
     <Grid Background="Transparent">
-        <!-- Estado Vazio quando não há anexos -->
+        <!-- Empty state when there are no attachments -->
         <StackPanel
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
@@ -32,7 +32,7 @@
                 TextWrapping="Wrap" />
         </StackPanel>
 
-        <!-- Lista de Anexos Incorporados -->
+        <!-- Embedded attachments list -->
         <ListView
             Padding="4"
             ItemsSource="{x:Bind ViewModel.CurrentDocument.Attachments, Mode=OneWay}"
