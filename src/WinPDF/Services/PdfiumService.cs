@@ -182,6 +182,8 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
         long documentId,
         int pageIndex,
         int anchorCharIndex,
+        double anchorPdfX,
+        double anchorPdfY,
         double currentPdfX,
         double currentPdfY,
         int previousEndCharIndex = -2,
@@ -189,7 +191,16 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
         => Enqueue<PdfTextSelection?>(
             new PdfiumJob<PdfTextSelection?>(
                 PdfJobPriority.Critical,
-                (engine, token) => engine.SelectTextByPoint(documentId, pageIndex, anchorCharIndex, currentPdfX, currentPdfY, previousEndCharIndex, token),
+                (engine, token) => engine.SelectTextByPoint(
+                    documentId,
+                    pageIndex,
+                    anchorCharIndex,
+                    anchorPdfX,
+                    anchorPdfY,
+                    currentPdfX,
+                    currentPdfY,
+                    previousEndCharIndex,
+                    token),
                 cancellationToken),
             highPriority: true);
 
@@ -205,6 +216,21 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
             new PdfiumJob<PdfTextSelection?>(
                 PdfJobPriority.Critical,
                 (engine, token) => engine.SelectWordAtPoint(documentId, pageIndex, pdfX, pdfY, tolerancePt, token),
+                cancellationToken),
+            highPriority: true);
+
+    /// <inheritdoc/>
+    public Task<PdfTextSelection?> SelectSentenceAtPointAsync(
+        long documentId,
+        int pageIndex,
+        double pdfX,
+        double pdfY,
+        double tolerancePt = 10.0,
+        CancellationToken cancellationToken = default)
+        => Enqueue<PdfTextSelection?>(
+            new PdfiumJob<PdfTextSelection?>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.SelectSentenceAtPoint(documentId, pageIndex, pdfX, pdfY, tolerancePt, token),
                 cancellationToken),
             highPriority: true);
 

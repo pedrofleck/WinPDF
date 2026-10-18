@@ -34,6 +34,8 @@ public sealed partial class PdfPageCanvas : Grid
     private const double DragStartThresholdDip = 3.0;
     private const double HoverMoveMinDeltaDip = 2.0;
     private const double DragMoveMinDeltaDip = 1.0;
+    private const long MultiClickMaxIntervalMs = 450;
+    private const double MultiClickMaxDistanceDip = 8.0;
 
     private static readonly InputSystemCursor s_arrowCursor = InputSystemCursor.Create(InputSystemCursorShape.Arrow);
     private static readonly InputSystemCursor s_iBeamCursor = InputSystemCursor.Create(InputSystemCursorShape.IBeam);
@@ -125,7 +127,10 @@ public sealed partial class PdfPageCanvas : Grid
     private InputSystemCursorShape _currentCursorShape = InputSystemCursorShape.Arrow;
     private bool _isPointerDown;
     private bool _hasDraggedSelection;
+    private bool _isReleasingCapture;
+    private long _selectionSessionId;
     private Point _pressDipPoint;
+    private Vector2 _pressPdfPoint;
     private Point _lastHoverDipPoint = new(-1000, -1000);
     private Point _lastDragDipPoint = new(-1000, -1000);
     private Point _pendingHoverDipPoint;
@@ -137,7 +142,11 @@ public sealed partial class PdfPageCanvas : Grid
     private int _selectionAnchorCharIndex = -1;
     private int _lastDragEndCharIndex = -2;
     private PdfLinkTarget _pressedLink = PdfLinkTarget.None;
+    private int _clickCount;
+    private long _lastClickTick;
+    private Point _lastClickDipPoint = new(-1000, -1000);
     private long _lastDoubleTapTick;
+    private long _lastTripleTapTick;
 
     /// <summary>
     /// Gets or sets the metadata describing the page to render.
@@ -571,7 +580,7 @@ public sealed partial class PdfPageCanvas : Grid
     }
 
     // ------------------------------------------------------------------------------------------
-    // Interactive Text Selection & Link Hit-Testing (Mouse / Pen in Select Mode)
+    // Interactive Text Selection & Link Hit-Testing (Mouse / Pen / Multi-Tap in Select Mode)
     // ------------------------------------------------------------------------------------------
 
     private bool IsSelectInteractionAllowed()
@@ -619,8 +628,10 @@ public sealed partial class PdfPageCanvas : Grid
 
     private void ResetPointerSelectionState()
     {
+        _selectionSessionId++;
         _isPointerDown = false;
         _hasDraggedSelection = false;
+        _isReleasingCapture = false;
         _selectionAnchorCharIndex = -1;
         _lastDragEndCharIndex = -2;
         _pressedLink = PdfLinkTarget.None;
@@ -629,39 +640,129 @@ public sealed partial class PdfPageCanvas : Grid
         SetCursorShape(InputSystemCursorShape.Arrow);
     }
 
+    private bool IsWithinMultiClickDistance(Point p1, Point p2)
+    {
+        double dx = p1.X - p2.X;
+        double dy = p1.Y - p2.Y;
+        return ((dx * dx) + (dy * dy)) <= (MultiClickMaxDistanceDip * MultiClickMaxDistanceDip);
+    }
+
     private void OnCanvasPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (!IsSelectInteractionAllowed() || e.Pointer.PointerDeviceType == PointerDeviceType.Touch)
+        if (!IsSelectInteractionAllowed() || PageInfo is null)
         {
             return;
         }
 
         PointerPoint pt = e.GetCurrentPoint(this);
-        if (!pt.Properties.IsLeftButtonPressed)
+        bool isTouch = e.Pointer.PointerDeviceType == PointerDeviceType.Touch;
+
+        if (!isTouch && !pt.Properties.IsLeftButtonPressed)
         {
             // Right-click opens the context menu while preserving any existing text selection for "Copy".
             return;
         }
 
-        if (Environment.TickCount64 - _lastDoubleTapTick < 320)
+        SubscribeToActiveDocument();
+        long now = Environment.TickCount64;
+        bool sameSpot = IsWithinMultiClickDistance(pt.Position, _lastClickDipPoint);
+
+        // Detect Triple-Click (3rd click shortly after DoubleTapped or 2 rapid clicks): select full sentence.
+        if (sameSpot &&
+            ((now - _lastDoubleTapTick <= MultiClickMaxIntervalMs) ||
+             (_clickCount >= 2 && now - _lastClickTick <= MultiClickMaxIntervalMs)))
+        {
+            _clickCount = 0;
+            _lastClickTick = now;
+            _lastTripleTapTick = now;
+            _isPointerDown = false;
+            _hasDraggedSelection = false;
+            _pressedLink = PdfLinkTarget.None;
+            e.Handled = true;
+
+            long sessionId = ++_selectionSessionId;
+            Vector2 triplePdfPt = ToPdfPoint(pt.Position);
+            _ = SelectSentenceOnTripleClickAsync(EffectiveDocumentId, PageInfo.Index, triplePdfPt, sessionId);
+            return;
+        }
+
+        if (sameSpot && (now - _lastClickTick <= MultiClickMaxIntervalMs))
+        {
+            _clickCount++;
+        }
+        else
+        {
+            _clickCount = 1;
+        }
+
+        _lastClickTick = now;
+        _lastClickDipPoint = pt.Position;
+
+        // For Touch contacts, leave single-finger press/move unhandled so ScrollViewer DirectManipulation
+        // performs smooth hardware-accelerated pan and pinch-zoom. Double-tap and triple-tap work on Touch too.
+        if (isTouch)
         {
             return;
         }
 
-        SubscribeToActiveDocument();
+        if (_clickCount >= 2)
+        {
+            // Second click is handled by OnCanvasDoubleTapped.
+            return;
+        }
+
+        long dragSession = ++_selectionSessionId;
         _isPointerDown = true;
         _hasDraggedSelection = false;
         _pressDipPoint = pt.Position;
+        _pressPdfPoint = ToPdfPoint(pt.Position);
         _lastDragDipPoint = pt.Position;
         _selectionAnchorCharIndex = -1;
         _lastDragEndCharIndex = -2;
         _pressedLink = PdfLinkTarget.None;
 
-        Vector2 pdfPt = ToPdfPoint(pt.Position);
-        _ = ResolvePressAnchorAsync(EffectiveDocumentId, PageInfo!.Index, pdfPt);
+        // Capture the pointer immediately on PointerPressed so ScrollViewer does not steal the drag gesture.
+        try
+        {
+            _ = CapturePointer(e.Pointer);
+        }
+        catch
+        {
+        }
+
+        e.Handled = true;
+        _ = ResolvePressAnchorAsync(EffectiveDocumentId, PageInfo.Index, _pressPdfPoint, dragSession);
     }
 
-    private async Task ResolvePressAnchorAsync(long docId, int pageIndex, Vector2 pdfPt)
+    private async Task SelectSentenceOnTripleClickAsync(long docId, int pageIndex, Vector2 pdfPt, long sessionId)
+    {
+        try
+        {
+            PdfTextSelection? sentenceSelection = await _pdfService.SelectSentenceAtPointAsync(
+                docId,
+                pageIndex,
+                pdfPt.X,
+                pdfPt.Y,
+                tolerancePt: 12.0);
+
+            if (!_isUnloaded &&
+                _selectionSessionId == sessionId &&
+                PageInfo?.Index == pageIndex &&
+                EffectiveDocumentId == docId)
+            {
+                _observedDocument?.SetSelection(sentenceSelection);
+                if (sentenceSelection is { HasContent: true })
+                {
+                    SetCursorShape(InputSystemCursorShape.IBeam);
+                }
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task ResolvePressAnchorAsync(long docId, int pageIndex, Vector2 pdfPt, long sessionId)
     {
         try
         {
@@ -670,15 +771,22 @@ public sealed partial class PdfPageCanvas : Grid
                 pageIndex,
                 pdfPt.X,
                 pdfPt.Y,
-                tolerancePt: 6.0);
+                tolerancePt: 8.0);
 
-            if (_isUnloaded || PageInfo?.Index != pageIndex || EffectiveDocumentId != docId || !_isPointerDown)
+            if (_isUnloaded ||
+                _selectionSessionId != sessionId ||
+                PageInfo?.Index != pageIndex ||
+                EffectiveDocumentId != docId)
             {
                 return;
             }
 
-            _selectionAnchorCharIndex = hit.CharIndex;
-            if (!_hasDraggedSelection)
+            if (hit.CharIndex >= 0)
+            {
+                _selectionAnchorCharIndex = hit.CharIndex;
+            }
+
+            if (!_hasDraggedSelection && _isPointerDown)
             {
                 _pressedLink = hit.Link;
                 if (hit.Link.IsValid)
@@ -690,9 +798,9 @@ public sealed partial class PdfPageCanvas : Grid
                     SetCursorShape(InputSystemCursorShape.IBeam);
                 }
             }
-            else if (_selectionAnchorCharIndex >= 0)
+            else if (_hasDraggedSelection)
             {
-                RequestDragSelectionUpdate(_lastDragDipPoint, force: true);
+                RequestDragSelectionUpdate(_lastDragDipPoint, force: true, sessionId);
             }
         }
         catch
@@ -718,20 +826,13 @@ public sealed partial class PdfPageCanvas : Grid
             {
                 _hasDraggedSelection = true;
                 _pressedLink = PdfLinkTarget.None;
-                try
-                {
-                    _ = CapturePointer(e.Pointer);
-                }
-                catch
-                {
-                }
             }
 
             if (_hasDraggedSelection)
             {
                 e.Handled = true;
                 SetCursorShape(InputSystemCursorShape.IBeam);
-                RequestDragSelectionUpdate(posDip, force: false);
+                RequestDragSelectionUpdate(posDip, force: false, _selectionSessionId);
             }
 
             return;
@@ -747,7 +848,17 @@ public sealed partial class PdfPageCanvas : Grid
             return;
         }
 
+        // Capture local state BEFORE calling ReleasePointerCapture, because ReleasePointerCapture
+        // synchronously raises OnCanvasPointerCaptureLost in WinUI 3!
+        bool wasDragged = _hasDraggedSelection;
+        PdfLinkTarget pressedLink = _pressedLink;
+        long activeSession = _selectionSessionId;
+        Point releasePosDip = e.GetCurrentPoint(this).Position;
+
         _isPointerDown = false;
+        _pressedLink = PdfLinkTarget.None;
+
+        _isReleasingCapture = true;
         try
         {
             ReleasePointerCapture(e.Pointer);
@@ -755,43 +866,57 @@ public sealed partial class PdfPageCanvas : Grid
         catch
         {
         }
+        finally
+        {
+            _isReleasingCapture = false;
+        }
 
-        if (Environment.TickCount64 - _lastDoubleTapTick < 320)
+        long now = Environment.TickCount64;
+        if (now - _lastDoubleTapTick <= MultiClickMaxIntervalMs ||
+            now - _lastTripleTapTick <= MultiClickMaxIntervalMs)
         {
             return;
         }
 
-        if (!_hasDraggedSelection)
+        if (wasDragged)
         {
-            if (_pressedLink.IsValid)
+            // Ensure the final release coordinate is processed and keep the selection active on screen.
+            e.Handled = true;
+            RequestDragSelectionUpdate(releasePosDip, force: true, activeSession);
+            return;
+        }
+
+        if (pressedLink.IsValid)
+        {
+            e.Handled = true;
+            ShellViewModel? shell = _shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>();
+            if (shell is not null)
             {
-                e.Handled = true;
-                PdfLinkTarget link = _pressedLink;
-                _pressedLink = PdfLinkTarget.None;
-                ShellViewModel? shell = _shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>();
-                if (shell is not null)
-                {
-                    _ = shell.HandleLinkClickedAsync(link);
-                }
+                _ = shell.HandleLinkClickedAsync(pressedLink);
             }
-            else
-            {
-                _observedDocument?.ClearSelection();
-            }
+        }
+        else
+        {
+            _observedDocument?.ClearSelection();
         }
     }
 
     private void OnCanvasPointerCanceled(object sender, PointerRoutedEventArgs e)
     {
         _isPointerDown = false;
-        _hasDraggedSelection = false;
         _pressedLink = PdfLinkTarget.None;
     }
 
     private void OnCanvasPointerCaptureLost(object sender, PointerRoutedEventArgs e)
     {
+        if (_isReleasingCapture)
+        {
+            return;
+        }
+
+        // Do NOT clear _hasDraggedSelection or _observedDocument.ActiveSelection here so any selection
+        // already made by the user remains intact.
         _isPointerDown = false;
-        _hasDraggedSelection = false;
     }
 
     private void OnCanvasPointerExited(object sender, PointerRoutedEventArgs e)
@@ -804,12 +929,20 @@ public sealed partial class PdfPageCanvas : Grid
 
     private async void OnCanvasDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
-        if (!IsSelectInteractionAllowed() || e.PointerDeviceType == PointerDeviceType.Touch || PageInfo is null)
+        if (!IsSelectInteractionAllowed() || PageInfo is null)
         {
             return;
         }
 
-        _lastDoubleTapTick = Environment.TickCount64;
+        long now = Environment.TickCount64;
+        if (now - _lastTripleTapTick <= MultiClickMaxIntervalMs)
+        {
+            return;
+        }
+
+        _lastDoubleTapTick = now;
+        _lastClickTick = now;
+        _clickCount = 2;
         _isPointerDown = false;
         _hasDraggedSelection = false;
         _pressedLink = PdfLinkTarget.None;
@@ -817,9 +950,11 @@ public sealed partial class PdfPageCanvas : Grid
 
         SubscribeToActiveDocument();
         Point posDip = e.GetPosition(this);
+        _lastClickDipPoint = posDip;
         Vector2 pdfPt = ToPdfPoint(posDip);
         long docId = EffectiveDocumentId;
         int pageIndex = PageInfo.Index;
+        long sessionId = ++_selectionSessionId;
 
         try
         {
@@ -828,9 +963,12 @@ public sealed partial class PdfPageCanvas : Grid
                 pageIndex,
                 pdfPt.X,
                 pdfPt.Y,
-                tolerancePt: 8.0);
+                tolerancePt: 10.0);
 
-            if (!_isUnloaded && PageInfo?.Index == pageIndex && EffectiveDocumentId == docId)
+            if (!_isUnloaded &&
+                _selectionSessionId == sessionId &&
+                PageInfo?.Index == pageIndex &&
+                EffectiveDocumentId == docId)
             {
                 _observedDocument?.SetSelection(wordSelection);
                 if (wordSelection is { HasContent: true })
@@ -923,7 +1061,7 @@ public sealed partial class PdfPageCanvas : Grid
         }
     }
 
-    private void RequestDragSelectionUpdate(Point posDip, bool force)
+    private void RequestDragSelectionUpdate(Point posDip, bool force, long sessionId)
     {
         double clampedX = Math.Clamp(posDip.X, 0.0, Math.Max(1.0, ActualWidth > 0 ? ActualWidth : Width));
         double clampedY = Math.Clamp(posDip.Y, 0.0, Math.Max(1.0, ActualHeight > 0 ? ActualHeight : Height));
@@ -940,10 +1078,6 @@ public sealed partial class PdfPageCanvas : Grid
         }
 
         _lastDragDipPoint = clampedDip;
-        if (_selectionAnchorCharIndex < 0)
-        {
-            return;
-        }
 
         if (_isDragSelectionInFlight)
         {
@@ -952,43 +1086,60 @@ public sealed partial class PdfPageCanvas : Grid
             return;
         }
 
-        _ = RunDragSelectionLoopAsync(clampedDip);
+        _ = RunDragSelectionLoopAsync(clampedDip, sessionId);
     }
 
-    private async Task RunDragSelectionLoopAsync(Point initialPointDip)
+    private async Task RunDragSelectionLoopAsync(Point initialPointDip, long sessionId)
     {
         _isDragSelectionInFlight = true;
         Point currentDip = initialPointDip;
 
         try
         {
-            while (!_isUnloaded && _isPointerDown && _selectionAnchorCharIndex >= 0 && PageInfo is { } pageInfo && EffectiveDocumentId > 0)
+            while (!_isUnloaded &&
+                   _selectionSessionId == sessionId &&
+                   _hasDraggedSelection &&
+                   PageInfo is { } pageInfo &&
+                   EffectiveDocumentId > 0)
             {
                 long docId = EffectiveDocumentId;
                 int pageIndex = pageInfo.Index;
                 int anchor = _selectionAnchorCharIndex;
+                Vector2 anchorPdf = _pressPdfPoint;
                 Vector2 pdfPt = ToPdfPoint(currentDip);
 
                 PdfTextSelection? updated = await _pdfService.SelectTextByPointAsync(
                     docId,
                     pageIndex,
                     anchor,
+                    anchorPdf.X,
+                    anchorPdf.Y,
                     pdfPt.X,
                     pdfPt.Y,
                     _lastDragEndCharIndex);
 
-                if (_isUnloaded || PageInfo?.Index != pageIndex || EffectiveDocumentId != docId)
+                if (_isUnloaded ||
+                    _selectionSessionId != sessionId ||
+                    PageInfo?.Index != pageIndex ||
+                    EffectiveDocumentId != docId)
                 {
                     break;
                 }
 
-                if (updated is not null)
+                if (updated is { HasContent: true })
                 {
-                    _lastDragEndCharIndex = updated.StartCharIndex == anchor ? updated.EndCharIndex : updated.StartCharIndex;
+                    if (updated.AnchorCharIndex >= 0)
+                    {
+                        _selectionAnchorCharIndex = updated.AnchorCharIndex;
+                    }
+
+                    _lastDragEndCharIndex = updated.ActiveCharIndex >= 0
+                        ? updated.ActiveCharIndex
+                        : updated.EndCharIndex;
                     _observedDocument?.SetSelection(updated);
                 }
 
-                if (_hasPendingDragPoint)
+                if (_hasPendingDragPoint && _selectionSessionId == sessionId)
                 {
                     currentDip = _pendingDragDipPoint;
                     _hasPendingDragPoint = false;

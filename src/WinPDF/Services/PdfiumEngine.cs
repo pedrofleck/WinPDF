@@ -787,12 +787,14 @@ internal sealed unsafe class PdfiumEngine : IDisposable
 
     /// <summary>
     /// Computes the updated <see cref="PdfTextSelection"/> while dragging from <paramref name="anchorCharIndex"/>
-    /// to <c>(currentPdfX, currentPdfY)</c>.
+    /// (or <c>(anchorPdfX, anchorPdfY)</c> if <paramref name="anchorCharIndex"/> is negative) to <c>(currentPdfX, currentPdfY)</c>.
     /// </summary>
     internal PdfTextSelection? SelectTextByPoint(
         long documentId,
         int pageIndex,
         int anchorCharIndex,
+        double anchorPdfX,
+        double anchorPdfY,
         double currentPdfX,
         double currentPdfY,
         int previousEndCharIndex,
@@ -808,9 +810,19 @@ internal sealed unsafe class PdfiumEngine : IDisposable
         }
 
         int totalChars = PdfiumNative.FPDFText_CountChars(textPage);
-        if (totalChars <= 0 || anchorCharIndex < 0 || anchorCharIndex >= totalChars)
+        if (totalChars <= 0)
         {
             return null;
+        }
+
+        int resolvedAnchor = anchorCharIndex;
+        if (resolvedAnchor < 0 || resolvedAnchor >= totalChars)
+        {
+            resolvedAnchor = FindCharIndexForDrag(textPage, totalChars, anchorPdfX, anchorPdfY);
+            if (resolvedAnchor < 0 || resolvedAnchor >= totalChars)
+            {
+                return null;
+            }
         }
 
         int endCharIndex = FindCharIndexForDrag(textPage, totalChars, currentPdfX, currentPdfY);
@@ -819,13 +831,13 @@ internal sealed unsafe class PdfiumEngine : IDisposable
             return null;
         }
 
-        int startChar = Math.Min(anchorCharIndex, endCharIndex);
-        int endChar = Math.Max(anchorCharIndex, endCharIndex);
+        int startChar = Math.Min(resolvedAnchor, endCharIndex);
+        int endChar = Math.Max(resolvedAnchor, endCharIndex);
         int count = endChar - startChar + 1;
 
         IReadOnlyList<PdfRect> rects = ExtractTextRects(textPage, startChar, count);
         string selectedText = ExtractTextString(textPage, startChar, count);
-        return new PdfTextSelection(pageIndex, startChar, endChar, rects, selectedText);
+        return new PdfTextSelection(pageIndex, startChar, endChar, rects, selectedText, resolvedAnchor, endCharIndex);
     }
 
     /// <summary>
@@ -856,6 +868,11 @@ internal sealed unsafe class PdfiumEngine : IDisposable
 
         double tol = Math.Max(2.0, tolerancePt);
         int hitIndex = PdfiumNative.FPDFText_GetCharIndexAtPos(textPage, pdfX, pdfY, tol, tol);
+        if (hitIndex < 0)
+        {
+            hitIndex = PdfiumNative.FPDFText_GetCharIndexAtPos(textPage, pdfX, pdfY, tol * 2.0, tol * 1.5);
+        }
+
         if (hitIndex < 0 || hitIndex >= totalChars)
         {
             return null;
@@ -895,7 +912,231 @@ internal sealed unsafe class PdfiumEngine : IDisposable
         int count = end - start + 1;
         IReadOnlyList<PdfRect> rects = ExtractTextRects(textPage, start, count);
         string selectedText = ExtractTextString(textPage, start, count);
-        return new PdfTextSelection(pageIndex, start, end, rects, selectedText);
+        return new PdfTextSelection(pageIndex, start, end, rects, selectedText, start, end);
+    }
+
+    /// <summary>
+    /// Selects the entire sentence (or paragraph/heading line if unpunctuated) at <c>(pdfX, pdfY)</c> on <paramref name="pageIndex"/>.
+    /// </summary>
+    internal PdfTextSelection? SelectSentenceAtPoint(
+        long documentId,
+        int pageIndex,
+        double pdfX,
+        double pdfY,
+        double tolerancePt,
+        CancellationToken cancellationToken)
+    {
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        PdfiumTextPageHandle? textPage = _pageCache.GetOrLoadTextPage(document, documentId, pageIndex);
+        if (textPage is null || textPage.IsInvalid)
+        {
+            return null;
+        }
+
+        int totalChars = PdfiumNative.FPDFText_CountChars(textPage);
+        if (totalChars <= 0)
+        {
+            return null;
+        }
+
+        double tol = Math.Max(4.0, tolerancePt);
+        int hitIndex = PdfiumNative.FPDFText_GetCharIndexAtPos(textPage, pdfX, pdfY, tol, tol);
+        if (hitIndex < 0)
+        {
+            hitIndex = FindCharIndexForDrag(textPage, totalChars, pdfX, pdfY);
+        }
+
+        if (hitIndex < 0 || hitIndex >= totalChars)
+        {
+            return null;
+        }
+
+        // If the user triple-clicked on a space between two words on a line, nudge to the nearest non-whitespace char.
+        if (char.IsWhiteSpace((char)PdfiumNative.FPDFText_GetUnicode(textPage, hitIndex)))
+        {
+            if (hitIndex > 0 && !char.IsWhiteSpace((char)PdfiumNative.FPDFText_GetUnicode(textPage, hitIndex - 1)))
+            {
+                hitIndex--;
+            }
+            else if (hitIndex + 1 < totalChars && !char.IsWhiteSpace((char)PdfiumNative.FPDFText_GetUnicode(textPage, hitIndex + 1)))
+            {
+                hitIndex++;
+            }
+            else
+            {
+                return null;
+            }
+        }
+
+        double lineHeight = 12.0;
+        if (TryGetCharVerticalBounds(textPage, hitIndex, out double hitBottom, out double hitTop))
+        {
+            lineHeight = Math.Clamp(hitTop - hitBottom, 6.0, 48.0);
+        }
+
+        double maxParagraphGapPt = lineHeight * 1.85;
+
+        // 1. Expand backwards to the start of the sentence or text block.
+        int start = hitIndex;
+        double currentRefBottom = hitBottom;
+        while (start > 0)
+        {
+            int prevIdx = start - 1;
+            char prevChar = (char)PdfiumNative.FPDFText_GetUnicode(textPage, prevIdx);
+            if (prevChar == '\0')
+            {
+                break;
+            }
+
+            char curChar = (char)PdfiumNative.FPDFText_GetUnicode(textPage, start);
+
+            // Stop at double newline (paragraph break).
+            if ((prevChar == '\n' || prevChar == '\r') && prevIdx > 0)
+            {
+                char prevPrev = (char)PdfiumNative.FPDFText_GetUnicode(textPage, prevIdx - 1);
+                if (prevPrev == '\n' && prevChar == '\n')
+                {
+                    break;
+                }
+
+                if (prevIdx >= 2 &&
+                    prevChar == '\n' &&
+                    prevPrev == '\r' &&
+                    (char)PdfiumNative.FPDFText_GetUnicode(textPage, prevIdx - 2) == '\n')
+                {
+                    break;
+                }
+            }
+
+            // Stop after sentence-ending punctuation followed by whitespace (ignoring decimal points like 3.14).
+            if (IsSentenceTerminator(prevChar) && char.IsWhiteSpace(curChar))
+            {
+                break;
+            }
+
+            if (IsClosingDelimiter(prevChar) && prevIdx > 0 &&
+                IsSentenceTerminator((char)PdfiumNative.FPDFText_GetUnicode(textPage, prevIdx - 1)) &&
+                char.IsWhiteSpace(curChar))
+            {
+                break;
+            }
+
+            if (!char.IsWhiteSpace(prevChar) && TryGetCharVerticalBounds(textPage, prevIdx, out double prevBottom, out double prevTop))
+            {
+                double prevHeight = Math.Clamp(prevTop - prevBottom, 6.0, 64.0);
+                // Stop if there is a large vertical gap or a significant font-size change (e.g. heading vs body).
+                if (Math.Abs(prevBottom - currentRefBottom) > Math.Max(maxParagraphGapPt, prevHeight * 1.85) ||
+                    Math.Abs(prevHeight - lineHeight) > lineHeight * 0.45)
+                {
+                    break;
+                }
+
+                currentRefBottom = prevBottom;
+            }
+
+            start--;
+        }
+
+        // 2. Expand forwards to the end of the sentence or text block.
+        int end = hitIndex;
+        currentRefBottom = hitBottom;
+        while (end + 1 < totalChars)
+        {
+            char curChar = (char)PdfiumNative.FPDFText_GetUnicode(textPage, end);
+            int nextIdx = end + 1;
+            char nextChar = (char)PdfiumNative.FPDFText_GetUnicode(textPage, nextIdx);
+            if (nextChar == '\0')
+            {
+                break;
+            }
+
+            // Check if current character terminates the sentence.
+            if (IsSentenceTerminator(curChar))
+            {
+                if (char.IsWhiteSpace(nextChar))
+                {
+                    break;
+                }
+
+                if (IsClosingDelimiter(nextChar) &&
+                    (nextIdx + 1 >= totalChars || char.IsWhiteSpace((char)PdfiumNative.FPDFText_GetUnicode(textPage, nextIdx + 1))))
+                {
+                    end = nextIdx;
+                    break;
+                }
+            }
+
+            // Stop at double newline.
+            if (curChar == '\n' && (nextChar == '\n' || nextChar == '\r'))
+            {
+                break;
+            }
+
+            if (!char.IsWhiteSpace(nextChar) && TryGetCharVerticalBounds(textPage, nextIdx, out double nextBottom, out double nextTop))
+            {
+                double nextHeight = Math.Clamp(nextTop - nextBottom, 6.0, 64.0);
+                if (Math.Abs(nextBottom - currentRefBottom) > Math.Max(maxParagraphGapPt, nextHeight * 1.85) ||
+                    Math.Abs(nextHeight - lineHeight) > lineHeight * 0.45)
+                {
+                    break;
+                }
+
+                currentRefBottom = nextBottom;
+            }
+
+            end++;
+        }
+
+        // Trim leading and trailing whitespace/newlines.
+        while (start < end && char.IsWhiteSpace((char)PdfiumNative.FPDFText_GetUnicode(textPage, start)))
+        {
+            start++;
+        }
+
+        while (end > start && char.IsWhiteSpace((char)PdfiumNative.FPDFText_GetUnicode(textPage, end)))
+        {
+            end--;
+        }
+
+        int count = end - start + 1;
+        IReadOnlyList<PdfRect> rects = ExtractTextRects(textPage, start, count);
+        string selectedText = ExtractTextString(textPage, start, count);
+        return new PdfTextSelection(pageIndex, start, end, rects, selectedText, start, end);
+    }
+
+    private static bool IsSentenceTerminator(char c) =>
+        c is '.' or '!' or '?' or '…';
+
+    private static bool IsClosingDelimiter(char c) =>
+        c is '"' or '\'' or '”' or '’' or ')' or ']' or '»';
+
+    private static bool TryGetCharVerticalBounds(PdfiumTextPageHandle textPage, int charIndex, out double bottom, out double top)
+    {
+        if (PdfiumNative.FPDFText_GetLooseCharBox(textPage, charIndex, out FsRectF box) != 0)
+        {
+            bottom = Math.Min(box.Bottom, box.Top);
+            top = Math.Max(box.Bottom, box.Top);
+            if (top > bottom)
+            {
+                return true;
+            }
+        }
+
+        if (PdfiumNative.FPDFText_GetCharBox(textPage, charIndex, out _, out _, out double b, out double t) != 0)
+        {
+            bottom = Math.Min(b, t);
+            top = Math.Max(b, t);
+            if (top > bottom)
+            {
+                return true;
+            }
+        }
+
+        bottom = 0.0;
+        top = 0.0;
+        return false;
     }
 
     /// <summary>
@@ -932,7 +1173,7 @@ internal sealed unsafe class PdfiumEngine : IDisposable
         int endCharIndex = startCharIndex + clampedCount - 1;
         IReadOnlyList<PdfRect> rects = ExtractTextRects(textPage, startCharIndex, clampedCount);
         string selectedText = ExtractTextString(textPage, startCharIndex, clampedCount);
-        return new PdfTextSelection(pageIndex, startCharIndex, endCharIndex, rects, selectedText);
+        return new PdfTextSelection(pageIndex, startCharIndex, endCharIndex, rects, selectedText, startCharIndex, endCharIndex);
     }
 
     /// <summary>

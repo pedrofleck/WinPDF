@@ -80,12 +80,16 @@ public sealed record PdfSearchMatch(
 /// <param name="EndCharIndex">The ending character index of the selection range.</param>
 /// <param name="Rects">The visual bounding rectangles in PDF user space.</param>
 /// <param name="SelectedText">The extracted UTF-16 text string.</param>
+/// <param name="AnchorCharIndex">The initial anchor character index where the drag selection started (-1 if unspecified).</param>
+/// <param name="ActiveCharIndex">The active end character index currently under the pointer (-1 if unspecified).</param>
 public sealed record PdfTextSelection(
     int PageIndex,
     int StartCharIndex,
     int EndCharIndex,
     IReadOnlyList<PdfRect> Rects,
-    string SelectedText)
+    string SelectedText,
+    int AnchorCharIndex = -1,
+    int ActiveCharIndex = -1)
 {
     /// <summary>
     /// Gets a value indicating whether the selection contains non-empty text and at least one bounding rectangle.

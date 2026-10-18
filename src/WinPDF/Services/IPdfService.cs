@@ -130,14 +130,17 @@ public interface IPdfService : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Updates an interactive text drag selection anchored at <paramref name="anchorCharIndex"/> to the character nearest
+    /// Updates an interactive text drag selection anchored at <paramref name="anchorCharIndex"/> (or resolved from
+    /// <c>(anchorPdfX, anchorPdfY)</c> when <paramref name="anchorCharIndex"/> is negative) to the character nearest
     /// <c>(currentPdfX, currentPdfY)</c> on <paramref name="pageIndex"/>.
     /// Returns <see langword="null"/> if the resolved end character index matches <paramref name="previousEndCharIndex"/>
     /// (allowing the caller to skip redundant redraws) or if no character could be resolved.
     /// </summary>
     /// <param name="documentId">Document identifier.</param>
     /// <param name="pageIndex">Zero-based page index.</param>
-    /// <param name="anchorCharIndex">Zero-based character index where the drag started.</param>
+    /// <param name="anchorCharIndex">Zero-based character index where the drag started, or -1 to resolve from <c>(anchorPdfX, anchorPdfY)</c>.</param>
+    /// <param name="anchorPdfX">Anchor pointer X coordinate in PDF user space (points).</param>
+    /// <param name="anchorPdfY">Anchor pointer Y coordinate in PDF user space (points).</param>
     /// <param name="currentPdfX">Current pointer X coordinate in PDF user space (points).</param>
     /// <param name="currentPdfY">Current pointer Y coordinate in PDF user space (points).</param>
     /// <param name="previousEndCharIndex">Last resolved end character index, or -2 to force computation.</param>
@@ -147,6 +150,8 @@ public interface IPdfService : IDisposable
         long documentId,
         int pageIndex,
         int anchorCharIndex,
+        double anchorPdfX,
+        double anchorPdfY,
         double currentPdfX,
         double currentPdfY,
         int previousEndCharIndex = -2,
@@ -170,6 +175,25 @@ public interface IPdfService : IDisposable
         double pdfX,
         double pdfY,
         double tolerancePt = 8.0,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Selects the entire sentence (or text block/line if unpunctuated) located at <c>(pdfX, pdfY)</c> in PDF user space
+    /// on <paramref name="pageIndex"/> (triggered on triple-click).
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="pdfX">X coordinate in PDF user space (points).</param>
+    /// <param name="pdfY">Y coordinate in PDF user space (points).</param>
+    /// <param name="tolerancePt">Hit-test tolerance in points.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The sentence <see cref="PdfTextSelection"/>, or <see langword="null"/> if no text is at the point.</returns>
+    Task<PdfTextSelection?> SelectSentenceAtPointAsync(
+        long documentId,
+        int pageIndex,
+        double pdfX,
+        double pdfY,
+        double tolerancePt = 10.0,
         CancellationToken cancellationToken = default);
 
     /// <summary>
