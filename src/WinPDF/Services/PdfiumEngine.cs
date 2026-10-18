@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 using WinPDF.Interop.Pdfium;
 using WinPDF.Interop.Printing;
 using WinPDF.Models;
@@ -8,7 +9,7 @@ using WinPDF.Rendering;
 namespace WinPDF.Services;
 
 /// <summary>
-/// All <c>FPDF_*</c> work: library lifetime, documents, page geometry, rendering, outline and attachments.
+/// All <c>FPDF_*</c> work: library lifetime, documents, page geometry, rendering, text, search, links, outline and attachments.
 /// </summary>
 /// <remarks>
 /// <b>Not thread-safe by design.</b> One instance is created on, and used exclusively from, the dedicated PDFium
@@ -20,6 +21,7 @@ internal sealed unsafe class PdfiumEngine : IDisposable
     private const int MaxSiblingsPerLevel = 2000;
     private const int MaxOutlineNodes = 50_000;
     private const int MaxWideStringBytes = 4096;
+    private const int MaxStackAllocChars = 1024;
     private const double DefaultPageWidthPt = 612;
     private const double DefaultPageHeightPt = 792;
 
@@ -462,6 +464,695 @@ internal sealed unsafe class PdfiumEngine : IDisposable
                 _ = Win32PrintInterop.DeleteDC(hdc);
             }
         }
+    }
+
+    // ------------------------------------------------------------------------------------------
+    // Text Search, Interactive Selection, and Clickable Links
+    // ------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// Scans all pages of <paramref name="documentId"/> for <paramref name="query"/> using <c>FPDFText_FindStart</c>
+    /// and <c>FPDFText_FindNext</c>. Pages not currently in <see cref="_pageCache"/> are loaded and released
+    /// transiently so visible page caches are never evicted and memory stays flat.
+    /// </summary>
+    internal IReadOnlyList<PdfSearchMatch> SearchDocument(
+        long documentId,
+        string query,
+        bool matchCase,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(query))
+        {
+            return Array.Empty<PdfSearchMatch>();
+        }
+
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        int pageCount = Math.Max(0, PdfiumNative.FPDF_GetPageCount(document));
+        if (pageCount == 0)
+        {
+            return Array.Empty<PdfSearchMatch>();
+        }
+
+        uint searchFlags = matchCase ? PdfiumConstants.MatchCase : 0u;
+        List<PdfSearchMatch>? matches = null;
+
+        int queryLen = query.Length;
+        char[]? rentedQuery = null;
+        Span<char> querySpan = queryLen + 1 <= MaxStackAllocChars
+            ? stackalloc char[queryLen + 1]
+            : (rentedQuery = System.Buffers.ArrayPool<char>.Shared.Rent(queryLen + 1)).AsSpan(0, queryLen + 1);
+
+        try
+        {
+            query.AsSpan().CopyTo(querySpan);
+            querySpan[queryLen] = '\0';
+
+            fixed (char* queryPtr = querySpan)
+            {
+                for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    if (_pageCache.TryGetCached(documentId, pageIndex, out PdfiumPageHandle? cachedPage, out PdfiumTextPageHandle? cachedTextPage)
+                        && cachedPage is { IsInvalid: false })
+                    {
+                        PdfiumTextPageHandle? textPage = cachedTextPage is { IsInvalid: false }
+                            ? cachedTextPage
+                            : _pageCache.GetOrLoadTextPage(document, documentId, pageIndex);
+
+                        if (textPage is { IsInvalid: false })
+                        {
+                            SearchSingleTextPage(textPage, pageIndex, queryPtr, searchFlags, ref matches, cancellationToken);
+                        }
+                    }
+                    else
+                    {
+                        using PdfiumPageHandle transientPage = PdfiumNative.FPDF_LoadPage(document, pageIndex);
+                        if (transientPage.IsInvalid)
+                        {
+                            continue;
+                        }
+
+                        using PdfiumTextPageHandle transientTextPage = PdfiumNative.FPDFText_LoadPage(transientPage);
+                        if (transientTextPage.IsInvalid)
+                        {
+                            continue;
+                        }
+
+                        SearchSingleTextPage(transientTextPage, pageIndex, queryPtr, searchFlags, ref matches, cancellationToken);
+                    }
+                }
+            }
+        }
+        finally
+        {
+            if (rentedQuery is not null)
+            {
+                System.Buffers.ArrayPool<char>.Shared.Return(rentedQuery);
+            }
+        }
+
+        return matches is null ? Array.Empty<PdfSearchMatch>() : matches;
+    }
+
+    private static void SearchSingleTextPage(
+        PdfiumTextPageHandle textPage,
+        int pageIndex,
+        char* queryPtr,
+        uint searchFlags,
+        ref List<PdfSearchMatch>? matches,
+        CancellationToken cancellationToken)
+    {
+        using PdfiumSearchHandle searchHandle = PdfiumNative.FPDFText_FindStart(textPage, queryPtr, searchFlags, 0);
+        if (searchHandle.IsInvalid)
+        {
+            return;
+        }
+
+        int matchIndexOnPage = 0;
+        while (PdfiumNative.FPDFText_FindNext(searchHandle) != 0)
+        {
+            if ((matchIndexOnPage & 0x1F) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+            }
+
+            int startCharIndex = PdfiumNative.FPDFText_GetSchResultIndex(searchHandle);
+            int charCount = PdfiumNative.FPDFText_GetSchCount(searchHandle);
+            if (startCharIndex < 0 || charCount <= 0)
+            {
+                continue;
+            }
+
+            IReadOnlyList<PdfRect> rects = ExtractTextRects(textPage, startCharIndex, charCount);
+            if (rects.Count > 0)
+            {
+                (matches ??= new List<PdfSearchMatch>()).Add(
+                    new PdfSearchMatch(pageIndex, matchIndexOnPage++, startCharIndex, charCount, rects));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Hit-tests a point in PDF user space for both clickable links and selectable text characters.
+    /// </summary>
+    internal PdfPointerHitResult HitTestPagePoint(
+        long documentId,
+        int pageIndex,
+        double pdfX,
+        double pdfY,
+        double tolerancePt,
+        CancellationToken cancellationToken)
+    {
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        PdfiumPageHandle? page = _pageCache.GetOrLoad(document, documentId, pageIndex);
+        if (page is null || page.IsInvalid)
+        {
+            return PdfPointerHitResult.Empty;
+        }
+
+        PdfLinkTarget link = ResolveLinkAtPoint(document, documentId, pageIndex, page, pdfX, pdfY);
+
+        PdfiumTextPageHandle? textPage = _pageCache.GetOrLoadTextPage(document, documentId, pageIndex);
+        int charIndex = -1;
+        if (textPage is { IsInvalid: false })
+        {
+            double tol = Math.Max(1.0, tolerancePt);
+            int hit = PdfiumNative.FPDFText_GetCharIndexAtPos(textPage, pdfX, pdfY, tol, tol);
+            if (hit >= 0)
+            {
+                charIndex = hit;
+            }
+        }
+
+        return new PdfPointerHitResult(charIndex, link);
+    }
+
+    /// <summary>
+    /// Resolves any clickable internal or external link at <c>(pdfX, pdfY)</c> on <paramref name="pageIndex"/>.
+    /// </summary>
+    internal PdfLinkTarget GetLinkAtPoint(
+        long documentId,
+        int pageIndex,
+        double pdfX,
+        double pdfY,
+        CancellationToken cancellationToken)
+    {
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        PdfiumPageHandle? page = _pageCache.GetOrLoad(document, documentId, pageIndex);
+        if (page is null || page.IsInvalid)
+        {
+            return PdfLinkTarget.None;
+        }
+
+        return ResolveLinkAtPoint(document, documentId, pageIndex, page, pdfX, pdfY);
+    }
+
+    private PdfLinkTarget ResolveLinkAtPoint(
+        PdfiumDocumentHandle document,
+        long documentId,
+        int pageIndex,
+        PdfiumPageHandle page,
+        double pdfX,
+        double pdfY)
+    {
+        nint link = PdfiumNative.FPDFLink_GetLinkAtPoint(page, pdfX, pdfY);
+        if (link != nint.Zero)
+        {
+            PdfLinkTarget resolved = ResolveNativeLinkHandle(document, link);
+            if (resolved.IsValid)
+            {
+                return resolved;
+            }
+        }
+
+        // Also check auto-detected web links in the page text stream (FPDFLink_LoadWebLinks).
+        PdfiumPageLinkHandle? webLinks = _pageCache.GetOrLoadWebLinks(document, documentId, pageIndex);
+        if (webLinks is { IsInvalid: false })
+        {
+            int count = PdfiumNative.FPDFLink_CountWebLinks(webLinks);
+            for (int i = 0; i < count; i++)
+            {
+                int rectCount = PdfiumNative.FPDFLink_CountRects(webLinks, i);
+                for (int r = 0; r < rectCount; r++)
+                {
+                    if (PdfiumNative.FPDFLink_GetRect(webLinks, i, r, out double left, out double top, out double right, out double bottom) != 0)
+                    {
+                        PdfRect rect = PdfRect.FromCorners(left, bottom, right, top);
+                        if (rect.Contains(pdfX, pdfY, tolerancePt: 2.0))
+                        {
+                            string url = ReadWebLinkUrl(webLinks, i);
+                            if (!string.IsNullOrWhiteSpace(url))
+                            {
+                                return new PdfLinkTarget(PdfLinkKind.ExternalUri, -1, url);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return PdfLinkTarget.None;
+    }
+
+    private static PdfLinkTarget ResolveNativeLinkHandle(PdfiumDocumentHandle document, nint link)
+    {
+        nint dest = PdfiumNative.FPDFLink_GetDest(document, link);
+        if (dest != nint.Zero)
+        {
+            int targetPage = PdfiumNative.FPDFDest_GetDestPageIndex(document, dest);
+            if (targetPage >= 0)
+            {
+                return new PdfLinkTarget(PdfLinkKind.InternalPage, targetPage, null);
+            }
+        }
+
+        nint action = PdfiumNative.FPDFLink_GetAction(link);
+        if (action != nint.Zero)
+        {
+            uint actionType = PdfiumNative.FPDFAction_GetType(action);
+            if (actionType == PdfiumConstants.ActionGoto)
+            {
+                nint actionDest = PdfiumNative.FPDFAction_GetDest(document, action);
+                if (actionDest != nint.Zero)
+                {
+                    int targetPage = PdfiumNative.FPDFDest_GetDestPageIndex(document, actionDest);
+                    if (targetPage >= 0)
+                    {
+                        return new PdfLinkTarget(PdfLinkKind.InternalPage, targetPage, null);
+                    }
+                }
+            }
+            else if (actionType == PdfiumConstants.ActionUri)
+            {
+                string? uri = ReadActionUri(document, action);
+                if (!string.IsNullOrWhiteSpace(uri))
+                {
+                    return new PdfLinkTarget(PdfLinkKind.ExternalUri, -1, uri);
+                }
+            }
+        }
+
+        return PdfLinkTarget.None;
+    }
+
+    private static string? ReadActionUri(PdfiumDocumentHandle document, nint action)
+    {
+        uint required = PdfiumNative.FPDFAction_GetURIPath(document, action, null, 0);
+        if (required <= 1)
+        {
+            return null;
+        }
+
+        int capacity = (int)Math.Min(required, 2048u);
+        byte* buffer = stackalloc byte[2048];
+        uint written = PdfiumNative.FPDFAction_GetURIPath(document, action, buffer, (uint)capacity);
+        int byteCount = (int)Math.Min(written, (uint)capacity);
+        ReadOnlySpan<byte> bytes = new(buffer, byteCount);
+        int nullIdx = bytes.IndexOf((byte)0);
+        if (nullIdx >= 0)
+        {
+            bytes = bytes[..nullIdx];
+        }
+
+        string uri = Encoding.UTF8.GetString(bytes).Trim();
+        return string.IsNullOrWhiteSpace(uri) ? null : uri;
+    }
+
+    private static string ReadWebLinkUrl(PdfiumPageLinkHandle webLinks, int linkIndex)
+    {
+        int requiredChars = PdfiumNative.FPDFLink_GetURL(webLinks, linkIndex, null, 0);
+        if (requiredChars <= 1)
+        {
+            return string.Empty;
+        }
+
+        int capacity = Math.Min(requiredChars, MaxStackAllocChars);
+        char* buffer = stackalloc char[MaxStackAllocChars];
+        int written = PdfiumNative.FPDFLink_GetURL(webLinks, linkIndex, buffer, capacity);
+        int charCount = Math.Clamp(written, 0, capacity);
+        ReadOnlySpan<char> chars = new(buffer, charCount);
+        int nullIdx = chars.IndexOf('\0');
+        if (nullIdx >= 0)
+        {
+            chars = chars[..nullIdx];
+        }
+
+        return new string(chars).Trim();
+    }
+
+    /// <summary>
+    /// Computes the updated <see cref="PdfTextSelection"/> while dragging from <paramref name="anchorCharIndex"/>
+    /// to <c>(currentPdfX, currentPdfY)</c>.
+    /// </summary>
+    internal PdfTextSelection? SelectTextByPoint(
+        long documentId,
+        int pageIndex,
+        int anchorCharIndex,
+        double currentPdfX,
+        double currentPdfY,
+        int previousEndCharIndex,
+        CancellationToken cancellationToken)
+    {
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        PdfiumTextPageHandle? textPage = _pageCache.GetOrLoadTextPage(document, documentId, pageIndex);
+        if (textPage is null || textPage.IsInvalid)
+        {
+            return null;
+        }
+
+        int totalChars = PdfiumNative.FPDFText_CountChars(textPage);
+        if (totalChars <= 0 || anchorCharIndex < 0 || anchorCharIndex >= totalChars)
+        {
+            return null;
+        }
+
+        int endCharIndex = FindCharIndexForDrag(textPage, totalChars, currentPdfX, currentPdfY);
+        if (endCharIndex < 0 || endCharIndex == previousEndCharIndex)
+        {
+            return null;
+        }
+
+        int startChar = Math.Min(anchorCharIndex, endCharIndex);
+        int endChar = Math.Max(anchorCharIndex, endCharIndex);
+        int count = endChar - startChar + 1;
+
+        IReadOnlyList<PdfRect> rects = ExtractTextRects(textPage, startChar, count);
+        string selectedText = ExtractTextString(textPage, startChar, count);
+        return new PdfTextSelection(pageIndex, startChar, endChar, rects, selectedText);
+    }
+
+    /// <summary>
+    /// Selects the entire word at <c>(pdfX, pdfY)</c> on <paramref name="pageIndex"/>.
+    /// </summary>
+    internal PdfTextSelection? SelectWordAtPoint(
+        long documentId,
+        int pageIndex,
+        double pdfX,
+        double pdfY,
+        double tolerancePt,
+        CancellationToken cancellationToken)
+    {
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        PdfiumTextPageHandle? textPage = _pageCache.GetOrLoadTextPage(document, documentId, pageIndex);
+        if (textPage is null || textPage.IsInvalid)
+        {
+            return null;
+        }
+
+        int totalChars = PdfiumNative.FPDFText_CountChars(textPage);
+        if (totalChars <= 0)
+        {
+            return null;
+        }
+
+        double tol = Math.Max(2.0, tolerancePt);
+        int hitIndex = PdfiumNative.FPDFText_GetCharIndexAtPos(textPage, pdfX, pdfY, tol, tol);
+        if (hitIndex < 0 || hitIndex >= totalChars)
+        {
+            return null;
+        }
+
+        char hitChar = (char)PdfiumNative.FPDFText_GetUnicode(textPage, hitIndex);
+        if (char.IsWhiteSpace(hitChar) || hitChar == '\0')
+        {
+            return null;
+        }
+
+        bool isWordChar = IsWordCharacter(hitChar);
+        int start = hitIndex;
+        while (start > 0)
+        {
+            char prev = (char)PdfiumNative.FPDFText_GetUnicode(textPage, start - 1);
+            if (prev == '\0' || char.IsWhiteSpace(prev) || IsWordCharacter(prev) != isWordChar)
+            {
+                break;
+            }
+
+            start--;
+        }
+
+        int end = hitIndex;
+        while (end + 1 < totalChars)
+        {
+            char next = (char)PdfiumNative.FPDFText_GetUnicode(textPage, end + 1);
+            if (next == '\0' || char.IsWhiteSpace(next) || IsWordCharacter(next) != isWordChar)
+            {
+                break;
+            }
+
+            end++;
+        }
+
+        int count = end - start + 1;
+        IReadOnlyList<PdfRect> rects = ExtractTextRects(textPage, start, count);
+        string selectedText = ExtractTextString(textPage, start, count);
+        return new PdfTextSelection(pageIndex, start, end, rects, selectedText);
+    }
+
+    /// <summary>
+    /// Selects an explicit character range <c>[startCharIndex, startCharIndex + charCount - 1]</c> on <paramref name="pageIndex"/>.
+    /// </summary>
+    internal PdfTextSelection? SelectTextRange(
+        long documentId,
+        int pageIndex,
+        int startCharIndex,
+        int charCount,
+        CancellationToken cancellationToken)
+    {
+        if (startCharIndex < 0 || charCount <= 0)
+        {
+            return null;
+        }
+
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        PdfiumTextPageHandle? textPage = _pageCache.GetOrLoadTextPage(document, documentId, pageIndex);
+        if (textPage is null || textPage.IsInvalid)
+        {
+            return null;
+        }
+
+        int totalChars = PdfiumNative.FPDFText_CountChars(textPage);
+        if (totalChars <= 0 || startCharIndex >= totalChars)
+        {
+            return null;
+        }
+
+        int clampedCount = Math.Min(charCount, totalChars - startCharIndex);
+        int endCharIndex = startCharIndex + clampedCount - 1;
+        IReadOnlyList<PdfRect> rects = ExtractTextRects(textPage, startCharIndex, clampedCount);
+        string selectedText = ExtractTextString(textPage, startCharIndex, clampedCount);
+        return new PdfTextSelection(pageIndex, startCharIndex, endCharIndex, rects, selectedText);
+    }
+
+    /// <summary>
+    /// Extracts the text bounded by <paramref name="bounds"/> in PDF user space via <c>FPDFText_GetBoundedText</c>.
+    /// </summary>
+    internal string GetBoundedText(
+        long documentId,
+        int pageIndex,
+        PdfRect bounds,
+        CancellationToken cancellationToken)
+    {
+        if (bounds.IsEmpty)
+        {
+            return string.Empty;
+        }
+
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        PdfiumTextPageHandle? textPage = _pageCache.GetOrLoadTextPage(document, documentId, pageIndex);
+        if (textPage is null || textPage.IsInvalid)
+        {
+            return string.Empty;
+        }
+
+        int required = PdfiumNative.FPDFText_GetBoundedText(
+            textPage,
+            bounds.Left,
+            bounds.Top,
+            bounds.Right,
+            bounds.Bottom,
+            null,
+            0);
+
+        if (required <= 1)
+        {
+            return string.Empty;
+        }
+
+        if (required <= MaxStackAllocChars)
+        {
+            char* buf = stackalloc char[MaxStackAllocChars];
+            int written = PdfiumNative.FPDFText_GetBoundedText(
+                textPage,
+                bounds.Left,
+                bounds.Top,
+                bounds.Right,
+                bounds.Bottom,
+                buf,
+                required);
+            return TrimNullTerminatedSpan(new ReadOnlySpan<char>(buf, Math.Clamp(written, 0, required)));
+        }
+
+        char* heapBuf = (char*)NativeMemory.Alloc((nuint)required, sizeof(char));
+        try
+        {
+            int written = PdfiumNative.FPDFText_GetBoundedText(
+                textPage,
+                bounds.Left,
+                bounds.Top,
+                bounds.Right,
+                bounds.Bottom,
+                heapBuf,
+                required);
+            return TrimNullTerminatedSpan(new ReadOnlySpan<char>(heapBuf, Math.Clamp(written, 0, required)));
+        }
+        finally
+        {
+            NativeMemory.Free(heapBuf);
+        }
+    }
+
+    private static bool IsWordCharacter(char c) =>
+        char.IsLetterOrDigit(c) || c is '_' or '-' or '\'' or '’';
+
+    private static int FindCharIndexForDrag(PdfiumTextPageHandle textPage, int totalChars, double pdfX, double pdfY)
+    {
+        int hit = PdfiumNative.FPDFText_GetCharIndexAtPos(textPage, pdfX, pdfY, 6.0, 6.0);
+        if (hit >= 0)
+        {
+            return hit;
+        }
+
+        hit = PdfiumNative.FPDFText_GetCharIndexAtPos(textPage, pdfX, pdfY, 18.0, 14.0);
+        if (hit >= 0)
+        {
+            return hit;
+        }
+
+        hit = PdfiumNative.FPDFText_GetCharIndexAtPos(textPage, pdfX, pdfY, 64.0, 20.0);
+        if (hit >= 0)
+        {
+            return hit;
+        }
+
+        // Fallback when dragging into page margins or inter-paragraph whitespace: snap to the closest character box.
+        int bestIndex = -1;
+        double bestScore = double.MaxValue;
+        int limit = Math.Min(totalChars, 8000);
+
+        for (int i = 0; i < limit; i++)
+        {
+            if (PdfiumNative.FPDFText_GetLooseCharBox(textPage, i, out FsRectF box) == 0)
+            {
+                continue;
+            }
+
+            double left = Math.Min(box.Left, box.Right);
+            double right = Math.Max(box.Left, box.Right);
+            double bottom = Math.Min(box.Bottom, box.Top);
+            double top = Math.Max(box.Bottom, box.Top);
+
+            double dy = pdfY < bottom ? (bottom - pdfY) : (pdfY > top ? (pdfY - top) : 0.0);
+            double dx = pdfX < left ? (left - pdfX) : (pdfX > right ? (pdfX - right) : 0.0);
+
+            // Weight vertical distance heavily so dragging horizontally in a line's margin stays on that line.
+            double score = (dy * 12.0) + dx;
+            if (score < bestScore)
+            {
+                bestScore = score;
+                bestIndex = i;
+            }
+        }
+
+        return bestIndex;
+    }
+
+    private static IReadOnlyList<PdfRect> ExtractTextRects(PdfiumTextPageHandle textPage, int startCharIndex, int charCount)
+    {
+        if (charCount <= 0)
+        {
+            return Array.Empty<PdfRect>();
+        }
+
+        int rectCount = PdfiumNative.FPDFText_CountRects(textPage, startCharIndex, charCount);
+        if (rectCount <= 0)
+        {
+            return Array.Empty<PdfRect>();
+        }
+
+        List<PdfRect> rects = new(rectCount);
+        for (int r = 0; r < rectCount; r++)
+        {
+            if (PdfiumNative.FPDFText_GetRect(textPage, r, out double left, out double top, out double right, out double bottom) == 0)
+            {
+                continue;
+            }
+
+            PdfRect candidate = PdfRect.FromCorners(left, bottom, right, top);
+            if (candidate.IsEmpty)
+            {
+                continue;
+            }
+
+            // Coalesce horizontally adjacent segments on the same text baseline to eliminate overlapping alpha seams.
+            if (rects.Count > 0)
+            {
+                PdfRect prev = rects[^1];
+                if (Math.Abs(prev.Top - candidate.Top) <= 2.5f &&
+                    Math.Abs(prev.Bottom - candidate.Bottom) <= 2.5f &&
+                    candidate.Left >= prev.Left - 2.0f &&
+                    candidate.Left - prev.Right <= 4.0f)
+                {
+                    rects[^1] = new PdfRect(
+                        Math.Min(prev.Left, candidate.Left),
+                        Math.Min(prev.Bottom, candidate.Bottom),
+                        Math.Max(prev.Right, candidate.Right),
+                        Math.Max(prev.Top, candidate.Top));
+                    continue;
+                }
+            }
+
+            rects.Add(candidate);
+        }
+
+        return rects;
+    }
+
+    private static string ExtractTextString(PdfiumTextPageHandle textPage, int startCharIndex, int charCount)
+    {
+        if (charCount <= 0)
+        {
+            return string.Empty;
+        }
+
+        int bufferLength = charCount + 1;
+        if (bufferLength <= MaxStackAllocChars)
+        {
+            char* buf = stackalloc char[MaxStackAllocChars];
+            int written = PdfiumNative.FPDFText_GetText(textPage, startCharIndex, charCount, buf);
+            return TrimNullTerminatedSpan(new ReadOnlySpan<char>(buf, Math.Clamp(written, 0, bufferLength)));
+        }
+
+        // Zero-LOH: use unmanaged memory for large selections so >= 85 KB strings never allocate temporary arrays on the LOH.
+        char* nativeBuf = (char*)NativeMemory.Alloc((nuint)bufferLength, sizeof(char));
+        try
+        {
+            int written = PdfiumNative.FPDFText_GetText(textPage, startCharIndex, charCount, nativeBuf);
+            return TrimNullTerminatedSpan(new ReadOnlySpan<char>(nativeBuf, Math.Clamp(written, 0, bufferLength)));
+        }
+        finally
+        {
+            NativeMemory.Free(nativeBuf);
+        }
+    }
+
+    private static string TrimNullTerminatedSpan(ReadOnlySpan<char> span)
+    {
+        if (span.IsEmpty)
+        {
+            return string.Empty;
+        }
+
+        int nullIdx = span.IndexOf('\0');
+        if (nullIdx >= 0)
+        {
+            span = span[..nullIdx];
+        }
+
+        return span.IsEmpty ? string.Empty : new string(span);
     }
 
     // ------------------------------------------------------------------------------------------

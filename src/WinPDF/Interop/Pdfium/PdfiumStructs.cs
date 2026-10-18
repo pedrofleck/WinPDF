@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace WinPDF.Interop.Pdfium;
 
 /// <summary>
-/// Compile-time constants mirrored from the PDFium public headers (<c>fpdfview.h</c>, <c>fpdf_doc.h</c>).
+/// Compile-time constants mirrored from the PDFium public headers (<c>fpdfview.h</c>, <c>fpdf_doc.h</c>, <c>fpdf_text.h</c>).
 /// </summary>
 internal static class PdfiumConstants
 {
@@ -34,8 +34,29 @@ internal static class PdfiumConstants
     /// <summary><c>FPDF_ERR_PAGE</c>: page not found or content error.</summary>
     internal const uint ErrPage = 6;
 
+    /// <summary><c>PDFACTION_UNSUPPORTED</c>: unsupported action type.</summary>
+    internal const uint ActionUnsupported = 0;
+
     /// <summary><c>PDFACTION_GOTO</c>: go to a destination within the current document.</summary>
     internal const uint ActionGoto = 1;
+
+    /// <summary><c>PDFACTION_REMOTEGOTO</c>: go to a destination within another document.</summary>
+    internal const uint ActionRemoteGoto = 2;
+
+    /// <summary><c>PDFACTION_URI</c>: universal resource identifier, including web pages and other internet resources.</summary>
+    internal const uint ActionUri = 3;
+
+    /// <summary><c>PDFACTION_LAUNCH</c>: launch an application or open a file.</summary>
+    internal const uint ActionLaunch = 4;
+
+    /// <summary><c>FPDF_MATCHCASE</c>: if not set, it will not match case by default.</summary>
+    internal const uint MatchCase = 0x00000001;
+
+    /// <summary><c>FPDF_MATCHWHOLEWORD</c>: if not set, it will not match the whole word by default.</summary>
+    internal const uint MatchWholeWord = 0x00000002;
+
+    /// <summary><c>FPDF_CONSECUTIVE</c>: if not set, it will skip past the current match to look for the next match.</summary>
+    internal const uint MatchConsecutive = 0x00000004;
 
     /// <summary>Opaque white in the 0xAARRGGBB layout expected by <c>FPDFBitmap_FillRect</c>.</summary>
     internal const uint OpaqueWhite = 0xFFFFFFFF;
@@ -90,6 +111,23 @@ internal struct FsSizeF
 
     /// <summary>Height in points.</summary>
     public float Height;
+}
+
+/// <summary>Managed mirror of <c>FS_RECTF</c> (<c>fpdfview.h</c>: left, top, right, bottom in PDF user space points).</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct FsRectF
+{
+    /// <summary>The x-coordinate of the left-top corner.</summary>
+    public float Left;
+
+    /// <summary>The y-coordinate of the left-top corner.</summary>
+    public float Top;
+
+    /// <summary>The x-coordinate of the right-bottom corner.</summary>
+    public float Right;
+
+    /// <summary>The y-coordinate of the right-bottom corner.</summary>
+    public float Bottom;
 }
 
 /// <summary>

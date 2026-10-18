@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using WinPDF.Helpers;
 using WinPDF.Models;
 using WinPDF.Rendering;
 using WinPDF.Services;
@@ -9,7 +10,7 @@ using WinPDF.Services;
 namespace WinPDF.ViewModels;
 
 /// <summary>
-/// View model representing the active PDF document state, navigation, rotation, and collections.
+/// View model representing the active PDF document state, navigation, rotation, text selection, search, and collections.
 /// </summary>
 public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 {
@@ -539,6 +540,329 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     /// </summary>
     [ObservableProperty]
     public partial bool IsCurrentPageBookmarked { get; set; }
+
+    // ------------------------------------------------------------------------------------------
+    // Text Selection & Document Search State
+    // ------------------------------------------------------------------------------------------
+
+    private readonly Dictionary<int, List<PdfSearchMatch>> _searchMatchesByPage = new();
+    private IReadOnlyList<PdfSearchMatch> _searchMatches = Array.Empty<PdfSearchMatch>();
+    private CancellationTokenSource? _searchCts;
+    private string _lastSearchedQuery = string.Empty;
+    private bool _lastSearchedMatchCase;
+    private bool _hasCompletedSearchForCurrentQuery;
+
+    /// <summary>
+    /// Event raised when GPU highlight overlays (selection or search matches) should be redrawn.
+    /// Passes <c>-1</c> to invalidate all realized pages, or a zero-based page index for a single page.
+    /// </summary>
+    public event Action<int>? PageOverlaysInvalidated;
+
+    /// <summary>
+    /// Event raised when the viewport should scroll to center the active search match.
+    /// </summary>
+    public event Action<PdfSearchMatch>? ActiveSearchMatchScrollRequested;
+
+    /// <summary>
+    /// Gets or sets the active interactive text selection on the document.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasTextSelection))]
+    public partial PdfTextSelection? ActiveSelection { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether non-empty text is currently selected on a page.
+    /// </summary>
+    public bool HasTextSelection => ActiveSelection is { HasContent: true };
+
+    partial void OnActiveSelectionChanged(PdfTextSelection? oldValue, PdfTextSelection? newValue)
+    {
+        if (oldValue is not null)
+        {
+            PageOverlaysInvalidated?.Invoke(oldValue.PageIndex);
+        }
+
+        if (newValue is not null && newValue.PageIndex != oldValue?.PageIndex)
+        {
+            PageOverlaysInvalidated?.Invoke(newValue.PageIndex);
+        }
+    }
+
+    /// <summary>
+    /// Updates the active text selection, or clears it if <paramref name="selection"/> is null or empty.
+    /// </summary>
+    /// <param name="selection">The new selection.</param>
+    public void SetSelection(PdfTextSelection? selection)
+    {
+        ActiveSelection = selection is { HasContent: true } ? selection : null;
+    }
+
+    /// <summary>
+    /// Clears any active text selection on the document.
+    /// </summary>
+    public void ClearSelection()
+    {
+        if (ActiveSelection is not null)
+        {
+            ActiveSelection = null;
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the current search query string for this document.
+    /// </summary>
+    [ObservableProperty]
+    public partial string SearchQuery { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether document search is case-sensitive.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsSearchMatchCase { get; set; }
+
+    /// <summary>
+    /// Gets or sets the zero-based index of the currently focused search match in <see cref="SearchMatches"/>, or -1 if none.
+    /// </summary>
+    [ObservableProperty]
+    public partial int ActiveSearchMatchIndex { get; set; } = -1;
+
+    /// <summary>
+    /// Gets or sets the total number of search matches found across the document.
+    /// </summary>
+    [ObservableProperty]
+    public partial int TotalSearchMatches { get; set; }
+
+    /// <summary>
+    /// Gets or sets the formatted match counter text (e.g. "1 of 12" or "0 of 0").
+    /// </summary>
+    [ObservableProperty]
+    public partial string SearchStatusText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets the list of all search matches found in the document for the latest completed search.
+    /// </summary>
+    public IReadOnlyList<PdfSearchMatch> SearchMatches => _searchMatches;
+
+    /// <summary>
+    /// Gets the currently active search match, or <see langword="null"/> if none is active.
+    /// </summary>
+    public PdfSearchMatch? ActiveSearchMatch =>
+        (ActiveSearchMatchIndex >= 0 && ActiveSearchMatchIndex < _searchMatches.Count)
+            ? _searchMatches[ActiveSearchMatchIndex]
+            : null;
+
+    /// <summary>
+    /// Returns the search matches located on <paramref name="pageIndex"/> in O(1) time.
+    /// </summary>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <returns>The matches on that page, or an empty list if none.</returns>
+    public IReadOnlyList<PdfSearchMatch> GetPageSearchMatches(int pageIndex)
+    {
+        return _searchMatchesByPage.TryGetValue(pageIndex, out List<PdfSearchMatch>? list)
+            ? list
+            : Array.Empty<PdfSearchMatch>();
+    }
+
+    /// <summary>
+    /// Executes a background full-document text search on the PDFium thread and updates GPU highlight overlays.
+    /// </summary>
+    /// <param name="query">Query string to search for.</param>
+    /// <param name="matchCase">Whether the search should be case-sensitive.</param>
+    /// <param name="jumpToNearestMatch">Whether to automatically scroll the viewport to the nearest match.</param>
+    /// <returns>A task representing the asynchronous search operation.</returns>
+    public async Task ExecuteSearchAsync(string query, bool matchCase, bool jumpToNearestMatch = true)
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        SearchQuery = query;
+        IsSearchMatchCase = matchCase;
+
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
+        _searchCts = null;
+
+        if (string.IsNullOrEmpty(query))
+        {
+            ClearSearchResults();
+            return;
+        }
+
+        CancellationTokenSource cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        _searchCts = cts;
+
+        try
+        {
+            IReadOnlyList<PdfSearchMatch> results = await _pdfService.SearchDocumentAsync(
+                DocumentId,
+                query,
+                matchCase,
+                cts.Token);
+
+            if (_isDisposed || cts.IsCancellationRequested)
+            {
+                return;
+            }
+
+            _searchMatches = results;
+            _searchMatchesByPage.Clear();
+
+            for (int i = 0; i < results.Count; i++)
+            {
+                PdfSearchMatch match = results[i];
+                if (!_searchMatchesByPage.TryGetValue(match.PageIndex, out List<PdfSearchMatch>? pageList))
+                {
+                    pageList = new List<PdfSearchMatch>(4);
+                    _searchMatchesByPage[match.PageIndex] = pageList;
+                }
+
+                pageList.Add(match);
+            }
+
+            _lastSearchedQuery = query;
+            _lastSearchedMatchCase = matchCase;
+            _hasCompletedSearchForCurrentQuery = true;
+            TotalSearchMatches = results.Count;
+
+            if (results.Count > 0)
+            {
+                int targetIndex = 0;
+                int curPage = CurrentPageIndex;
+                for (int i = 0; i < results.Count; i++)
+                {
+                    if (results[i].PageIndex >= curPage)
+                    {
+                        targetIndex = i;
+                        break;
+                    }
+                }
+
+                ActiveSearchMatchIndex = targetIndex;
+                SearchStatusText = ResourceStrings.Format(ResourceKeys.SearchMatchCountFormat, targetIndex + 1, results.Count);
+            }
+            else
+            {
+                ActiveSearchMatchIndex = -1;
+                SearchStatusText = ResourceStrings.Format(ResourceKeys.SearchMatchCountFormat, 0, 0);
+            }
+
+            PageOverlaysInvalidated?.Invoke(-1);
+
+            if (jumpToNearestMatch && ActiveSearchMatch is { } activeMatch)
+            {
+                ActiveSearchMatchScrollRequested?.Invoke(activeMatch);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Document search failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Advances to the next search match (wrapping around to the first match) and scrolls it into view.
+    /// </summary>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    public async Task FindNextMatchAsync()
+    {
+        if (_isDisposed || string.IsNullOrEmpty(SearchQuery))
+        {
+            return;
+        }
+
+        if (!_hasCompletedSearchForCurrentQuery ||
+            !string.Equals(_lastSearchedQuery, SearchQuery, StringComparison.Ordinal) ||
+            _lastSearchedMatchCase != IsSearchMatchCase)
+        {
+            await ExecuteSearchAsync(SearchQuery, IsSearchMatchCase, jumpToNearestMatch: true);
+            return;
+        }
+
+        if (_searchMatches.Count == 0)
+        {
+            return;
+        }
+
+        int oldPage = ActiveSearchMatch?.PageIndex ?? -1;
+        ActiveSearchMatchIndex = (ActiveSearchMatchIndex + 1) % _searchMatches.Count;
+        SearchStatusText = ResourceStrings.Format(ResourceKeys.SearchMatchCountFormat, ActiveSearchMatchIndex + 1, _searchMatches.Count);
+
+        PdfSearchMatch active = _searchMatches[ActiveSearchMatchIndex];
+        if (oldPage >= 0 && oldPage != active.PageIndex)
+        {
+            PageOverlaysInvalidated?.Invoke(oldPage);
+        }
+
+        PageOverlaysInvalidated?.Invoke(active.PageIndex);
+        ActiveSearchMatchScrollRequested?.Invoke(active);
+    }
+
+    /// <summary>
+    /// Moves to the previous search match (wrapping around to the last match) and scrolls it into view.
+    /// </summary>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    public async Task FindPreviousMatchAsync()
+    {
+        if (_isDisposed || string.IsNullOrEmpty(SearchQuery))
+        {
+            return;
+        }
+
+        if (!_hasCompletedSearchForCurrentQuery ||
+            !string.Equals(_lastSearchedQuery, SearchQuery, StringComparison.Ordinal) ||
+            _lastSearchedMatchCase != IsSearchMatchCase)
+        {
+            await ExecuteSearchAsync(SearchQuery, IsSearchMatchCase, jumpToNearestMatch: true);
+            return;
+        }
+
+        if (_searchMatches.Count == 0)
+        {
+            return;
+        }
+
+        int oldPage = ActiveSearchMatch?.PageIndex ?? -1;
+        ActiveSearchMatchIndex = (ActiveSearchMatchIndex - 1 + _searchMatches.Count) % _searchMatches.Count;
+        SearchStatusText = ResourceStrings.Format(ResourceKeys.SearchMatchCountFormat, ActiveSearchMatchIndex + 1, _searchMatches.Count);
+
+        PdfSearchMatch active = _searchMatches[ActiveSearchMatchIndex];
+        if (oldPage >= 0 && oldPage != active.PageIndex)
+        {
+            PageOverlaysInvalidated?.Invoke(oldPage);
+        }
+
+        PageOverlaysInvalidated?.Invoke(active.PageIndex);
+        ActiveSearchMatchScrollRequested?.Invoke(active);
+    }
+
+    /// <summary>
+    /// Cancels any active search and clears all search match highlights from the document.
+    /// </summary>
+    public void ClearSearchResults()
+    {
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
+        _searchCts = null;
+
+        bool hadMatches = _searchMatches.Count > 0;
+        _searchMatches = Array.Empty<PdfSearchMatch>();
+        _searchMatchesByPage.Clear();
+        _lastSearchedQuery = string.Empty;
+        _hasCompletedSearchForCurrentQuery = false;
+        ActiveSearchMatchIndex = -1;
+        TotalSearchMatches = 0;
+        SearchStatusText = string.Empty;
+
+        if (hadMatches)
+        {
+            PageOverlaysInvalidated?.Invoke(-1);
+        }
+    }
 
     /// <summary>
     /// Gets the collection of page thumbnail items for sidebar gallery binding.
@@ -1261,6 +1585,10 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         }
 
         _isDisposed = true;
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
+        _searchCts = null;
+
         _lifetime.Cancel();
         _lifetime.Dispose();
 

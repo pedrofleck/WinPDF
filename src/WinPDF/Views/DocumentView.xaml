@@ -97,6 +97,18 @@
                 <Grid.ContextFlyout>
                     <MenuFlyout>
                         <MenuFlyoutItem
+                            x:Uid="Context_Copy"
+                            Command="{x:Bind ViewModel.CopySelectedTextCommand}"
+                            IsEnabled="{x:Bind ViewModel.HasTextSelection, Mode=OneWay}"
+                            KeyboardAcceleratorTextOverride="Ctrl+C">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE8C8;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutSeparator />
+
+                        <MenuFlyoutItem
                             x:Uid="Context_PrevPage"
                             Command="{x:Bind ViewModel.PreviousPageCommand}"
                             KeyboardAcceleratorTextOverride="PgUp">
@@ -470,6 +482,8 @@
                                     VerticalAlignment="Center"
                                     VerticalContentAlignment="Center"
                                     CornerRadius="4"
+                                    Text="{x:Bind ViewModel.SearchQuery, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                    TextChanged="OnDocumentSearchBoxTextChanged"
                                     KeyDown="OnDocumentSearchBoxKeyDown">
                                     <TextBox.Resources>
                                         <x:Double x:Key="TextControlThemeMinHeight">30</x:Double>
@@ -484,6 +498,17 @@
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                     IsHitTestVisible="False" />
                             </Grid>
+
+                            <TextBlock
+                                x:Name="SearchStatusTextBlock"
+                                Margin="6,0,4,0"
+                                MinWidth="44"
+                                FontSize="12"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextAlignment="Center"
+                                VerticalAlignment="Center"
+                                Text="{x:Bind ViewModel.SearchStatusText, Mode=OneWay}"
+                                Visibility="{x:Bind converters:UiHelpers.VisibleIfNotNullOrEmpty(ViewModel.SearchStatusText), Mode=OneWay}" />
 
                             <Button
                                 x:Name="SearchPrevButton"
@@ -521,7 +546,9 @@
                                 Padding="0"
                                 CornerRadius="4"
                                 IsTabStop="False"
-                                BorderThickness="0">
+                                BorderThickness="0"
+                                IsChecked="{x:Bind ViewModel.IsSearchMatchCase, Mode=TwoWay}"
+                                Click="OnSearchMatchCaseToggleClick">
                                 <ToggleButton.Resources>
                                     <StaticResource x:Key="ToggleButtonBackground" ResourceKey="SubtleFillColorTransparentBrush" />
                                     <StaticResource x:Key="ToggleButtonBackgroundPointerOver" ResourceKey="SubtleFillColorSecondaryBrush" />

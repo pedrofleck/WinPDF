@@ -192,4 +192,16 @@ public static class ResourceKeys
 
     /// <summary>Message format for the top InfoBar notification when the last document is missing on startup. {0} = file name.</summary>
     public const string MissingLastDocInfoBarMessageFormat = "MissingLastDocInfoBar_MessageFormat";
+
+    /// <summary>Search match counter format in the floating search bar. {0} = current match (1-based), {1} = total matches.</summary>
+    public const string SearchMatchCountFormat = "Search_MatchCountFormat";
+
+    /// <summary>Confirmation dialog title when clicking an external URI link inside a PDF.</summary>
+    public const string DialogOpenExternalLinkTitle = "Dialog_OpenExternalLink_Title";
+
+    /// <summary>Confirmation dialog body when clicking an external URI link inside a PDF. {0} = target URI.</summary>
+    public const string DialogOpenExternalLinkContent = "Dialog_OpenExternalLink_Content";
+
+    /// <summary>Primary button text to confirm opening an external URI link.</summary>
+    public const string DialogOpenExternalLinkConfirm = "Dialog_OpenExternalLink_Confirm";
 }

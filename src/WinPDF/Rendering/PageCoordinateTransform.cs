@@ -1,4 +1,5 @@
 using System.Numerics;
+using Windows.Foundation;
 using WinPDF.Models;
 
 namespace WinPDF.Rendering;
@@ -126,6 +127,36 @@ public readonly struct PageCoordinateTransform
     /// <param name="pagePoint">Point in page DIP space (as reported by pointer events on the page element).</param>
     /// <returns>Point in PDF user space.</returns>
     public Vector2 ToPdf(Vector2 pagePoint) => Vector2.Transform(pagePoint, _pageToPdf);
+
+    /// <summary>
+    /// Converts a normalized rectangle from PDF user space (points) to an axis-aligned rectangle in page DIP space.
+    /// </summary>
+    /// <param name="pdfRect">Rectangle in PDF user space.</param>
+    /// <returns>Rectangle in page DIP space.</returns>
+    public Rect ToPageRect(PdfRect pdfRect)
+    {
+        Vector2 p0 = ToPage(new Vector2(pdfRect.Left, pdfRect.Bottom));
+        Vector2 p1 = ToPage(new Vector2(pdfRect.Right, pdfRect.Top));
+
+        double left = Math.Min(p0.X, p1.X);
+        double top = Math.Min(p0.Y, p1.Y);
+        double right = Math.Max(p0.X, p1.X);
+        double bottom = Math.Max(p0.Y, p1.Y);
+
+        return new Rect(left, top, Math.Max(0.0, right - left), Math.Max(0.0, bottom - top));
+    }
+
+    /// <summary>
+    /// Converts an axis-aligned rectangle in page DIP space to a normalized <see cref="PdfRect"/> in PDF user space.
+    /// </summary>
+    /// <param name="pageDipRect">Rectangle in page DIP space.</param>
+    /// <returns>Normalized rectangle in PDF user space (points).</returns>
+    public PdfRect ToPdfRect(Rect pageDipRect)
+    {
+        Vector2 p0 = ToPdf(new Vector2((float)pageDipRect.X, (float)pageDipRect.Y));
+        Vector2 p1 = ToPdf(new Vector2((float)(pageDipRect.X + pageDipRect.Width), (float)(pageDipRect.Y + pageDipRect.Height)));
+        return PdfRect.FromCorners(p0.X, p0.Y, p1.X, p1.Y);
+    }
 
     /// <summary>Builds <c>M_page→content = Translate(ox, oy)</c>.</summary>
     /// <param name="originX">Page origin X in content DIP space.</param>

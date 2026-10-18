@@ -11,8 +11,9 @@ namespace WinPDF.Services;
 /// <remarks>
 /// <para>
 /// PDFium is not thread-safe, so every <c>FPDF_*</c> call runs on <b>one dedicated thread</b>. Callers enqueue
-/// jobs through dual priority channels: <c>_highPriorityChannel</c> (document loading, outline, metadata and
-/// main visible renders) and <c>_lowPriorityChannel</c> (background sidebar thumbnails).
+/// jobs through dual priority channels: <c>_highPriorityChannel</c> (document loading, outline, metadata,
+/// interactive text/link hit-testing, search, and main visible renders) and <c>_lowPriorityChannel</c>
+/// (background sidebar thumbnails).
 /// </para>
 /// <para>
 /// <b>Zero idle cost:</b> when no job is pending the thread blocks on <see cref="SemaphoreSlim.Wait(CancellationToken)"/>
@@ -126,6 +127,113 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
             new PrintDocumentJob(documentId, options, cancellationToken),
             highPriority: true);
     }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<PdfSearchMatch>> SearchDocumentAsync(
+        long documentId,
+        string query,
+        bool matchCase = false,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(query))
+        {
+            return Task.FromResult<IReadOnlyList<PdfSearchMatch>>(Array.Empty<PdfSearchMatch>());
+        }
+
+        return Enqueue<IReadOnlyList<PdfSearchMatch>>(
+            new PdfiumJob<IReadOnlyList<PdfSearchMatch>>(
+                PdfJobPriority.Visible,
+                (engine, token) => engine.SearchDocument(documentId, query, matchCase, token),
+                cancellationToken),
+            highPriority: true);
+    }
+
+    /// <inheritdoc/>
+    public Task<PdfPointerHitResult> HitTestPagePointAsync(
+        long documentId,
+        int pageIndex,
+        double pdfX,
+        double pdfY,
+        double tolerancePt = 5.0,
+        CancellationToken cancellationToken = default)
+        => Enqueue<PdfPointerHitResult>(
+            new PdfiumJob<PdfPointerHitResult>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.HitTestPagePoint(documentId, pageIndex, pdfX, pdfY, tolerancePt, token),
+                cancellationToken),
+            highPriority: true);
+
+    /// <inheritdoc/>
+    public Task<PdfLinkTarget> GetLinkAtPointAsync(
+        long documentId,
+        int pageIndex,
+        double pdfX,
+        double pdfY,
+        CancellationToken cancellationToken = default)
+        => Enqueue<PdfLinkTarget>(
+            new PdfiumJob<PdfLinkTarget>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.GetLinkAtPoint(documentId, pageIndex, pdfX, pdfY, token),
+                cancellationToken),
+            highPriority: true);
+
+    /// <inheritdoc/>
+    public Task<PdfTextSelection?> SelectTextByPointAsync(
+        long documentId,
+        int pageIndex,
+        int anchorCharIndex,
+        double currentPdfX,
+        double currentPdfY,
+        int previousEndCharIndex = -2,
+        CancellationToken cancellationToken = default)
+        => Enqueue<PdfTextSelection?>(
+            new PdfiumJob<PdfTextSelection?>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.SelectTextByPoint(documentId, pageIndex, anchorCharIndex, currentPdfX, currentPdfY, previousEndCharIndex, token),
+                cancellationToken),
+            highPriority: true);
+
+    /// <inheritdoc/>
+    public Task<PdfTextSelection?> SelectWordAtPointAsync(
+        long documentId,
+        int pageIndex,
+        double pdfX,
+        double pdfY,
+        double tolerancePt = 8.0,
+        CancellationToken cancellationToken = default)
+        => Enqueue<PdfTextSelection?>(
+            new PdfiumJob<PdfTextSelection?>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.SelectWordAtPoint(documentId, pageIndex, pdfX, pdfY, tolerancePt, token),
+                cancellationToken),
+            highPriority: true);
+
+    /// <inheritdoc/>
+    public Task<PdfTextSelection?> SelectTextRangeAsync(
+        long documentId,
+        int pageIndex,
+        int startCharIndex,
+        int charCount,
+        CancellationToken cancellationToken = default)
+        => Enqueue<PdfTextSelection?>(
+            new PdfiumJob<PdfTextSelection?>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.SelectTextRange(documentId, pageIndex, startCharIndex, charCount, token),
+                cancellationToken),
+            highPriority: true);
+
+    /// <inheritdoc/>
+    public Task<string> GetBoundedTextAsync(
+        long documentId,
+        int pageIndex,
+        PdfRect bounds,
+        CancellationToken cancellationToken = default)
+        => Enqueue<string>(
+            new PdfiumJob<string>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.GetBoundedText(documentId, pageIndex, bounds, token),
+                cancellationToken),
+            highPriority: true);
 
     /// <inheritdoc/>
     public Task<PdfBitmapLease> RenderPageAsync(

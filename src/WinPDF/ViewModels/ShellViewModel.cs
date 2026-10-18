@@ -123,6 +123,28 @@ public sealed partial class ShellViewModel : ObservableObject
     public partial bool IsSearchOpen { get; set; }
 
     /// <summary>
+    /// Gets or sets the search query text bound to the floating search box.
+    /// </summary>
+    [ObservableProperty]
+    public partial string SearchQuery { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the floating search bar is matching case (<c>Aa</c>).
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsSearchMatchCase { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether non-empty text is currently selected in the active document.
+    /// </summary>
+    public bool HasTextSelection => CurrentDocument?.HasTextSelection ?? false;
+
+    /// <summary>
+    /// Gets the formatted search match counter string (e.g. "1 of 12") for the active document.
+    /// </summary>
+    public string SearchStatusText => CurrentDocument?.SearchStatusText ?? string.Empty;
+
+    /// <summary>
     /// Event raised when the floating search bar should receive keyboard focus and select its query text.
     /// </summary>
     public event Action? SearchFocusRequested;
@@ -208,7 +230,10 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasDocument))]
+    [NotifyPropertyChangedFor(nameof(HasTextSelection))]
+    [NotifyPropertyChangedFor(nameof(SearchStatusText))]
     [NotifyCanExecuteChangedFor(nameof(PrintCommand))]
+    [NotifyCanExecuteChangedFor(nameof(CopySelectedTextCommand))]
     public partial DocumentViewModel? CurrentDocument { get; set; }
 
     /// <summary>
@@ -402,6 +427,11 @@ public sealed partial class ShellViewModel : ObservableObject
             newValue.IsPresentationMode = IsPresentationMode;
             newValue.PropertyChanged += OnDocumentPropertyChanged;
             newValue.SetThumbnailsActive(IsSidebarOpen && SidebarTab == SidebarTab.Thumbnails);
+
+            if (IsSearchOpen && !string.IsNullOrEmpty(SearchQuery))
+            {
+                _ = newValue.ExecuteSearchAsync(SearchQuery, IsSearchMatchCase, jumpToNearestMatch: false);
+            }
         }
         else
         {
@@ -412,6 +442,9 @@ public sealed partial class ShellViewModel : ObservableObject
         UpdateTitle();
         UpdateFormattedStrings();
         OnPropertyChanged(nameof(HasDocument));
+        OnPropertyChanged(nameof(HasTextSelection));
+        OnPropertyChanged(nameof(SearchStatusText));
+        CopySelectedTextCommand.NotifyCanExecuteChanged();
     }
 
     private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -444,6 +477,15 @@ public sealed partial class ShellViewModel : ObservableObject
             {
                 _settingsService.Settings.LastOpenedPageIndex = CurrentDocument.CurrentPageIndex;
             }
+        }
+        else if (e.PropertyName is nameof(DocumentViewModel.ActiveSelection) or nameof(DocumentViewModel.HasTextSelection))
+        {
+            OnPropertyChanged(nameof(HasTextSelection));
+            CopySelectedTextCommand.NotifyCanExecuteChanged();
+        }
+        else if (e.PropertyName == nameof(DocumentViewModel.SearchStatusText))
+        {
+            OnPropertyChanged(nameof(SearchStatusText));
         }
     }
 
@@ -989,16 +1031,30 @@ public sealed partial class ShellViewModel : ObservableObject
             return;
         }
 
+        if (CurrentDocument.ActiveSelection is { HasContent: true } selection)
+        {
+            string candidate = selection.SelectedText.Trim();
+            if (candidate.Length is > 0 and <= 120 && !candidate.Contains('\n') && !candidate.Contains('\r'))
+            {
+                SearchQuery = candidate;
+            }
+        }
+
         if (!IsSearchOpen)
         {
             IsSearchOpen = true;
+        }
+
+        if (!string.IsNullOrEmpty(SearchQuery))
+        {
+            _ = CurrentDocument.ExecuteSearchAsync(SearchQuery, IsSearchMatchCase, jumpToNearestMatch: false);
         }
 
         SearchFocusRequested?.Invoke();
     }
 
     /// <summary>
-    /// Closes the floating search bar.
+    /// Closes the floating search bar and clears search highlights on the active document.
     /// </summary>
     [RelayCommand]
     public void CloseSearch()
@@ -1007,6 +1063,8 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             IsSearchOpen = false;
         }
+
+        CurrentDocument?.ClearSearchResults();
     }
 
     /// <summary>
@@ -1021,10 +1079,126 @@ public sealed partial class ShellViewModel : ObservableObject
             return;
         }
 
-        IsSearchOpen = !IsSearchOpen;
         if (IsSearchOpen)
         {
-            SearchFocusRequested?.Invoke();
+            CloseSearch();
+        }
+        else
+        {
+            OpenSearch();
+        }
+    }
+
+    /// <summary>
+    /// Advances to the next search match in the active document (F3 / Enter).
+    /// </summary>
+    [RelayCommand]
+    public Task FindNextMatchAsync()
+    {
+        if (CurrentDocument is null || string.IsNullOrEmpty(SearchQuery))
+        {
+            return Task.CompletedTask;
+        }
+
+        CurrentDocument.SearchQuery = SearchQuery;
+        CurrentDocument.IsSearchMatchCase = IsSearchMatchCase;
+        return CurrentDocument.FindNextMatchAsync();
+    }
+
+    /// <summary>
+    /// Moves to the previous search match in the active document (Shift+F3 / Shift+Enter).
+    /// </summary>
+    [RelayCommand]
+    public Task FindPreviousMatchAsync()
+    {
+        if (CurrentDocument is null || string.IsNullOrEmpty(SearchQuery))
+        {
+            return Task.CompletedTask;
+        }
+
+        CurrentDocument.SearchQuery = SearchQuery;
+        CurrentDocument.IsSearchMatchCase = IsSearchMatchCase;
+        return CurrentDocument.FindPreviousMatchAsync();
+    }
+
+    /// <summary>
+    /// Copies the currently selected PDF text (UTF-16) to the Windows Clipboard (Ctrl+C).
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(HasTextSelection))]
+    public void CopySelectedText()
+    {
+        if (CurrentDocument?.ActiveSelection is not { HasContent: true } selection)
+        {
+            return;
+        }
+
+        try
+        {
+            var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage
+            {
+                RequestedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Copy
+            };
+            dataPackage.SetText(selection.SelectedText);
+            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+            Windows.ApplicationModel.DataTransfer.Clipboard.Flush();
+        }
+        catch
+        {
+            // Ignore transient clipboard lock errors
+        }
+    }
+
+    /// <summary>
+    /// Executes an interactive link clicked inside a PDF page (navigating to an internal page destination
+    /// or prompting the user before opening an external URI in the browser).
+    /// </summary>
+    /// <param name="link">The resolved link target.</param>
+    /// <returns>A task representing the asynchronous operation.</returns>
+    public async Task HandleLinkClickedAsync(PdfLinkTarget link)
+    {
+        if (!link.IsValid || CurrentDocument is null)
+        {
+            return;
+        }
+
+        if (link.Kind == PdfLinkKind.InternalPage)
+        {
+            CurrentDocument.GoToPage(link.TargetPageIndex);
+            return;
+        }
+
+        if (link.Kind == PdfLinkKind.ExternalUri && !string.IsNullOrWhiteSpace(link.Uri))
+        {
+            string rawUri = link.Uri.Trim();
+            if (rawUri.StartsWith("www.", StringComparison.OrdinalIgnoreCase))
+            {
+                rawUri = "https://" + rawUri;
+            }
+
+            if (!Uri.TryCreate(rawUri, UriKind.Absolute, out Uri? parsedUri) ||
+                (parsedUri.Scheme != Uri.UriSchemeHttp &&
+                 parsedUri.Scheme != Uri.UriSchemeHttps &&
+                 parsedUri.Scheme != Uri.UriSchemeMailto))
+            {
+                return;
+            }
+
+            string title = ResourceStrings.Get(ResourceKeys.DialogOpenExternalLinkTitle);
+            string content = ResourceStrings.Format(ResourceKeys.DialogOpenExternalLinkContent, parsedUri.AbsoluteUri);
+            string confirm = ResourceStrings.Get(ResourceKeys.DialogOpenExternalLinkConfirm);
+            string cancel = ResourceStrings.Get(ResourceKeys.DialogCancel);
+
+            bool confirmed = await _dialogService.ShowConfirmationAsync(title, content, confirm, cancel);
+            if (confirmed)
+            {
+                try
+                {
+                    _ = await Windows.System.Launcher.LaunchUriAsync(parsedUri);
+                }
+                catch
+                {
+                }
+            }
         }
     }
 

@@ -10,7 +10,7 @@ namespace WinPDF.Interop.Pdfium;
 /// <remarks>
 /// PDFium is not thread-safe: every function here must be called from the single dedicated PDFium thread
 /// owned by <c>PdfiumService</c>. Raw <see cref="nint"/> parameters are borrowed handles owned by their
-/// document (bookmarks, destinations, actions, attachments) and must never be closed.
+/// document (bookmarks, destinations, actions, links, attachments) and must never be closed.
 /// </remarks>
 internal static unsafe partial class PdfiumNative
 {
@@ -153,7 +153,7 @@ internal static unsafe partial class PdfiumNative
         int flags);
 
     // ------------------------------------------------------------------------------------------
-    // Bookmarks (document outline)
+    // Bookmarks (document outline), actions and destinations
     // ------------------------------------------------------------------------------------------
 
     [LibraryImport(Lib)]
@@ -186,7 +186,184 @@ internal static unsafe partial class PdfiumNative
 
     [LibraryImport(Lib)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint FPDFAction_GetFilePath(nint action, void* buffer, uint buflen);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint FPDFAction_GetURIPath(PdfiumDocumentHandle document, nint action, void* buffer, uint buflen);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial int FPDFDest_GetDestPageIndex(PdfiumDocumentHandle document, nint dest);
+
+    // ------------------------------------------------------------------------------------------
+    // Text extraction, geometry and search (fpdf_text.h)
+    // ------------------------------------------------------------------------------------------
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial PdfiumTextPageHandle FPDFText_LoadPage(PdfiumPageHandle page);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial void FPDFText_ClosePage(nint textPage);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFText_CountChars(PdfiumTextPageHandle textPage);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint FPDFText_GetUnicode(PdfiumTextPageHandle textPage, int index);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFText_GetCharBox(
+        PdfiumTextPageHandle textPage,
+        int index,
+        out double left,
+        out double right,
+        out double bottom,
+        out double top);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFText_GetLooseCharBox(
+        PdfiumTextPageHandle textPage,
+        int index,
+        out FsRectF rect);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFText_GetCharIndexAtPos(
+        PdfiumTextPageHandle textPage,
+        double x,
+        double y,
+        double xTolerance,
+        double yTolerance);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFText_GetText(
+        PdfiumTextPageHandle textPage,
+        int startIndex,
+        int count,
+        char* result);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFText_CountRects(
+        PdfiumTextPageHandle textPage,
+        int startIndex,
+        int count);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFText_GetRect(
+        PdfiumTextPageHandle textPage,
+        int rectIndex,
+        out double left,
+        out double top,
+        out double right,
+        out double bottom);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFText_GetBoundedText(
+        PdfiumTextPageHandle textPage,
+        double left,
+        double top,
+        double right,
+        double bottom,
+        char* buffer,
+        int buflen);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial PdfiumSearchHandle FPDFText_FindStart(
+        PdfiumTextPageHandle textPage,
+        char* findwhat,
+        uint flags,
+        int startIndex);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFText_FindNext(PdfiumSearchHandle handle);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFText_FindPrev(PdfiumSearchHandle handle);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFText_GetSchResultIndex(PdfiumSearchHandle handle);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFText_GetSchCount(PdfiumSearchHandle handle);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial void FPDFText_FindClose(nint handle);
+
+    // ------------------------------------------------------------------------------------------
+    // Links (fpdf_doc.h and fpdf_text.h)
+    // ------------------------------------------------------------------------------------------
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial nint FPDFLink_GetLinkAtPoint(PdfiumPageHandle page, double x, double y);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFLink_GetLinkZOrderAtPoint(PdfiumPageHandle page, double x, double y);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial nint FPDFLink_GetDest(PdfiumDocumentHandle document, nint link);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial nint FPDFLink_GetAction(nint link);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFLink_Enumerate(PdfiumPageHandle page, ref int startPos, out nint linkAnnot);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFLink_GetAnnotRect(nint linkAnnot, out FsRectF rect);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial PdfiumPageLinkHandle FPDFLink_LoadWebLinks(PdfiumTextPageHandle textPage);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFLink_CountWebLinks(PdfiumPageLinkHandle linkPage);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFLink_GetURL(PdfiumPageLinkHandle linkPage, int linkIndex, char* buffer, int buflen);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFLink_CountRects(PdfiumPageLinkHandle linkPage, int linkIndex);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFLink_GetRect(
+        PdfiumPageLinkHandle linkPage,
+        int linkIndex,
+        int rectIndex,
+        out double left,
+        out double top,
+        out double right,
+        out double bottom);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial void FPDFLink_CloseWebLinks(nint linkPage);
 
     // ------------------------------------------------------------------------------------------
     // Embedded file attachments

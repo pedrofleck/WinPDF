@@ -66,20 +66,20 @@ Checklist de melhorias de usabilidade, ergonomia visual (Fluent 2 / Grid de 4px)
 ---
 
 ## 📦 Seleção e Pesquisa de Texto (PDFium Text APIs + Highlight na GPU)
-- [ ] **Interop Nativo de Texto e Busca (`PdfiumNative.cs`):**
+- [x] **Interop Nativo de Texto e Busca (`PdfiumNative.cs`):**
   - Mapear as APIs de página de texto do PDFium: `FPDFText_LoadPage`, `FPDFText_ClosePage`, `FPDFText_CountChars`, `FPDFText_GetCharIndexAtPos`, `FPDFText_GetText`, `FPDFText_CountRects`, `FPDFText_GetRect` e `FPDFText_GetBoundedText`.
   - Mapear as APIs de busca: `FPDFText_FindStart`, `FPDFText_FindNext`, `FPDFText_FindPrev`, `FPDFText_GetSchResultIndex`, `FPDFText_GetSchCount` e `FPDFText_FindClose`.
-- [ ] **Motor de Busca Real no Documento (`Ctrl + F` / `F3` / `Shift + F3`):**
+- [x] **Motor de Busca Real no Documento (`Ctrl + F` / `F3` / `Shift + F3`):**
   - Executar a varredura de texto de todas as páginas em background na thread dedicada do `PdfiumEngine` sem bloquear a UI Thread.
   - Extrair os retângulos delimitadores (`Rect` em coordenadas PDF convertidos para DIPs via `PageCoordinateTransform`) de cada ocorrência encontrada.
   - Renderizar o destaque (*highlight*) das ocorrências no `PdfPageCanvas` via Win2D (amarelo translúcido para ocorrências na página e laranja/azul de destaque para a ocorrência ativa).
   - Exibir o contador real (`X de Y`) na barra flutuante de pesquisa (`FloatingSearchBar`) e rolar automaticamente a página/viewport até centralizar a ocorrência ativa ao clicar em Anterior/Próximo (`Enter` / `Shift+Enter`).
-- [ ] **Seleção Interativa de Texto com o Mouse e Cópia (`Ctrl + C`):**
+- [x] **Seleção Interativa de Texto com o Mouse e Cópia (`Ctrl + C`):**
   - Detectar quando o cursor passa sobre caracteres de texto (`FPDFText_GetCharIndexAtPos`) e alternar o cursor do mouse para `IBeam` (quando `ViewModel.ActiveTool == AnnotationTool.Select`).
   - Permitir clicar e arrastar na página (e duplo clique para selecionar palavra inteira) calculando os retângulos selecionados via `FPDFText_CountRects` e `FPDFText_GetRect`.
   - Desenhar a camada de seleção azul translúcida com cantos suaves sobre o texto no `PdfPageCanvas`.
   - Habilitar `Ctrl + C` e a opção **"Copiar"** no menu de contexto do botão direito, extraindo a string UTF-16 selecionada via `FPDFText_GetText` e enviando para o `Clipboard` do Windows.
-- [ ] **Links Clicáveis Internos e Externos (`FPDFLink_*`):**
+- [x] **Links Clicáveis Internos e Externos (`FPDFLink_*`):**
   - Mapear `FPDFLink_GetLinkAtPoint`, `FPDFLink_GetDest` e `FPDFLink_GetAction` para permitir clicar em links de sumário/rodapé dentro da página (navegando para a página destino) ou abrir URLs externas no navegador com confirmação.
 
 ---

@@ -80,6 +80,130 @@ public interface IPdfService : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Searches all pages of the specified document for <paramref name="query"/> on the dedicated PDFium worker thread,
+    /// extracting the bounding PDF user-space rectangles for every match.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="query">Text string to search for.</param>
+    /// <param name="matchCase">Whether the search should be case-sensitive (<c>FPDF_MATCHCASE</c>).</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>Ordered list of all matches found across the document.</returns>
+    Task<IReadOnlyList<PdfSearchMatch>> SearchDocumentAsync(
+        long documentId,
+        string query,
+        bool matchCase = false,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Hit-tests a point in PDF user space (points) on <paramref name="pageIndex"/> for both clickable links
+    /// (<c>FPDFLink_GetLinkAtPoint</c> and web links) and selectable text characters (<c>FPDFText_GetCharIndexAtPos</c>).
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="pdfX">X coordinate in PDF user space (points).</param>
+    /// <param name="pdfY">Y coordinate in PDF user space (points).</param>
+    /// <param name="tolerancePt">Character hit-test tolerance in points.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The combined character index and link target at the point.</returns>
+    Task<PdfPointerHitResult> HitTestPagePointAsync(
+        long documentId,
+        int pageIndex,
+        double pdfX,
+        double pdfY,
+        double tolerancePt = 5.0,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resolves any clickable internal or external link at the specified point in PDF user space (points).
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="pdfX">X coordinate in PDF user space (points).</param>
+    /// <param name="pdfY">Y coordinate in PDF user space (points).</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The resolved link target, or <see cref="PdfLinkTarget.None"/> if no link is present.</returns>
+    Task<PdfLinkTarget> GetLinkAtPointAsync(
+        long documentId,
+        int pageIndex,
+        double pdfX,
+        double pdfY,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Updates an interactive text drag selection anchored at <paramref name="anchorCharIndex"/> to the character nearest
+    /// <c>(currentPdfX, currentPdfY)</c> on <paramref name="pageIndex"/>.
+    /// Returns <see langword="null"/> if the resolved end character index matches <paramref name="previousEndCharIndex"/>
+    /// (allowing the caller to skip redundant redraws) or if no character could be resolved.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="anchorCharIndex">Zero-based character index where the drag started.</param>
+    /// <param name="currentPdfX">Current pointer X coordinate in PDF user space (points).</param>
+    /// <param name="currentPdfY">Current pointer Y coordinate in PDF user space (points).</param>
+    /// <param name="previousEndCharIndex">Last resolved end character index, or -2 to force computation.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The updated <see cref="PdfTextSelection"/>, or <see langword="null"/> if unchanged.</returns>
+    Task<PdfTextSelection?> SelectTextByPointAsync(
+        long documentId,
+        int pageIndex,
+        int anchorCharIndex,
+        double currentPdfX,
+        double currentPdfY,
+        int previousEndCharIndex = -2,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Selects the whole word located at <c>(pdfX, pdfY)</c> in PDF user space on <paramref name="pageIndex"/>,
+    /// computing its bounding rectangles (<c>FPDFText_CountRects</c> / <c>FPDFText_GetRect</c>) and UTF-16 string
+    /// (<c>FPDFText_GetText</c>).
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="pdfX">X coordinate in PDF user space (points).</param>
+    /// <param name="pdfY">Y coordinate in PDF user space (points).</param>
+    /// <param name="tolerancePt">Hit-test tolerance in points.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The word <see cref="PdfTextSelection"/>, or <see langword="null"/> if no word is at the point.</returns>
+    Task<PdfTextSelection?> SelectWordAtPointAsync(
+        long documentId,
+        int pageIndex,
+        double pdfX,
+        double pdfY,
+        double tolerancePt = 8.0,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Selects an explicit character range on <paramref name="pageIndex"/>, returning its bounding rectangles
+    /// and extracted UTF-16 text.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="startCharIndex">Zero-based start character index.</param>
+    /// <param name="charCount">Number of characters to select.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The resulting <see cref="PdfTextSelection"/>, or <see langword="null"/> if invalid.</returns>
+    Task<PdfTextSelection?> SelectTextRangeAsync(
+        long documentId,
+        int pageIndex,
+        int startCharIndex,
+        int charCount,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Extracts the UTF-16 text contained within a rectangular region in PDF user space via <c>FPDFText_GetBoundedText</c>.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="bounds">Rectangle in PDF user space (points).</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The extracted text string (empty if no text lies within the rectangle).</returns>
+    Task<string> GetBoundedTextAsync(
+        long documentId,
+        int pageIndex,
+        PdfRect bounds,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Rasterizes an entire page at the specified pixel size.
     /// </summary>
     /// <param name="documentId">Document identifier.</param>

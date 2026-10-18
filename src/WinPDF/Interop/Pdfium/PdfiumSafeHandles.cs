@@ -70,3 +70,63 @@ internal sealed class PdfiumBitmapHandle : SafeHandleZeroOrMinusOneIsInvalid
         return true;
     }
 }
+
+/// <summary>
+/// Owns an <c>FPDF_TEXTPAGE</c> returned by <c>FPDFText_LoadPage</c>. Must be released before its owning
+/// <see cref="PdfiumPageHandle"/> is closed.
+/// </summary>
+internal sealed class PdfiumTextPageHandle : SafeHandleZeroOrMinusOneIsInvalid
+{
+    /// <summary>Initializes a new, invalid handle (required by the LibraryImport marshaller).</summary>
+    public PdfiumTextPageHandle()
+        : base(ownsHandle: true)
+    {
+    }
+
+    /// <inheritdoc/>
+    protected override bool ReleaseHandle()
+    {
+        PdfiumNative.FPDFText_ClosePage(handle);
+        return true;
+    }
+}
+
+/// <summary>
+/// Owns an <c>FPDF_SCHHANDLE</c> returned by <c>FPDFText_FindStart</c>. Must be released before its owning
+/// <see cref="PdfiumTextPageHandle"/> is closed.
+/// </summary>
+internal sealed class PdfiumSearchHandle : SafeHandleZeroOrMinusOneIsInvalid
+{
+    /// <summary>Initializes a new, invalid handle (required by the LibraryImport marshaller).</summary>
+    public PdfiumSearchHandle()
+        : base(ownsHandle: true)
+    {
+    }
+
+    /// <inheritdoc/>
+    protected override bool ReleaseHandle()
+    {
+        PdfiumNative.FPDFText_FindClose(handle);
+        return true;
+    }
+}
+
+/// <summary>
+/// Owns an <c>FPDF_PAGELINK</c> returned by <c>FPDFLink_LoadWebLinks</c>. Must be released before its owning
+/// <see cref="PdfiumTextPageHandle"/> is closed.
+/// </summary>
+internal sealed class PdfiumPageLinkHandle : SafeHandleZeroOrMinusOneIsInvalid
+{
+    /// <summary>Initializes a new, invalid handle (required by the LibraryImport marshaller).</summary>
+    public PdfiumPageLinkHandle()
+        : base(ownsHandle: true)
+    {
+    }
+
+    /// <inheritdoc/>
+    protected override bool ReleaseHandle()
+    {
+        PdfiumNative.FPDFLink_CloseWebLinks(handle);
+        return true;
+    }
+}

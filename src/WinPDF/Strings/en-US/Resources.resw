@@ -211,6 +211,7 @@
   <data name="ExitFullScreenButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Exit full screen (F11)</value></data>
   <!-- ===================== QoL 4: Search Bar, Context Menu & Close Document ===================== -->
   <data name="Menu_CloseDocument.Text" xml:space="preserve"><value>Close document</value></data>
+  <data name="Context_Copy.Text" xml:space="preserve"><value>Copy</value></data>
   <data name="Context_PrevPage.Text" xml:space="preserve"><value>Previous page</value></data>
   <data name="Context_NextPage.Text" xml:space="preserve"><value>Next page</value></data>
   <data name="Context_FitPage.Text" xml:space="preserve"><value>Fit to page</value></data>
@@ -234,6 +235,10 @@
   <data name="SearchMatchCaseToggle.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Match case</value></data>
   <data name="SearchCloseButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Close search</value></data>
   <data name="SearchCloseButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Close search (Esc)</value></data>
+  <data name="Search_MatchCountFormat" xml:space="preserve"><value>{0} of {1}</value></data>
+  <data name="Dialog_OpenExternalLink_Title" xml:space="preserve"><value>Open external link?</value></data>
+  <data name="Dialog_OpenExternalLink_Content" xml:space="preserve"><value>Do you want to open the following link in your web browser?&#10;&#10;{0}</value></data>
+  <data name="Dialog_OpenExternalLink_Confirm" xml:space="preserve"><value>Open link</value></data>
   <data name="RemoveBookmarkItemButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Remove bookmark</value></data>
   <data name="RemoveBookmarkItemButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Remove bookmark</value></data>
   <data name="Settings_Viewing_ReopenHeader.Text" xml:space="preserve"><value>Reopen last document on startup</value></data>

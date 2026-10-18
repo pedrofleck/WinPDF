@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -186,6 +187,7 @@ public static partial class AutoTestRunner
     private static async Task<bool> ExecuteSuiteAsync(MainWindow window, string? pdfPath)
     {
         ShellViewModel shell = window.ViewModel;
+        IPdfService pdfService = App.CurrentApp.Services.GetRequiredService<IPdfService>();
         MemoryMetrics initialMem = MemoryMetrics.Capture();
         LogLive($"[AUTOTEST] Initial Memory: {initialMem}");
 
@@ -440,15 +442,48 @@ public static partial class AutoTestRunner
         s_steps.Add(new StepResult("Phase 9: Transforms & Night Mode", true, "Rotation, Night Mode, and Fit commands tested under zoom", MemoryMetrics.Capture()));
         LogLive("[AUTOTEST] Phase 9 PASS");
 
-        // Phase 10: Final Memory Reclamation & LOH Check
-        LogLive("[AUTOTEST] Phase 10: Final memory stabilization and reclamation check...");
+        // Phase 10: PDFium Text Selection, Full-Document Search & GPU Highlight Stress
+        LogLive("[AUTOTEST] Phase 10: Testing PDFium Text Selection, Full-Document Search & GPU Highlights...");
+        doc.GoToPage(0);
+        shell.SetZoom(1.25);
+        await Task.Delay(250);
+
+        shell.OpenSearch();
+        await doc.ExecuteSearchAsync("WinPDF", matchCase: false, jumpToNearestMatch: true);
+        await Task.Delay(200);
+
+        int matchCount = doc.TotalSearchMatches;
+        await shell.FindNextMatchAsync();
+        await Task.Delay(150);
+        await shell.FindPreviousMatchAsync();
+        await Task.Delay(150);
+
+        PdfTextSelection? rangeSel = await pdfService.SelectTextRangeAsync(doc.DocumentId, 0, 0, 6);
+        doc.SetSelection(rangeSel);
+        await Task.Delay(150);
+
+        string boundedText = await pdfService.GetBoundedTextAsync(doc.DocumentId, 0, new PdfRect(0, 0, 600, 842));
+        doc.ClearSelection();
+        shell.CloseSearch();
+        await Task.Delay(150);
+
+        bool textPass = matchCount > 0 && rangeSel is { HasContent: true } && !string.IsNullOrEmpty(boundedText);
+        s_steps.Add(new StepResult(
+            "Phase 10: Text Search & Selection",
+            textPass,
+            $"Matches: {matchCount}, Selected: '{rangeSel?.SelectedText}', BoundedChars: {boundedText.Length}",
+            MemoryMetrics.Capture()));
+        LogLive($"[AUTOTEST] Phase 10 {(textPass ? "PASS" : "FAIL")}: Matches={matchCount}, Selected='{rangeSel?.SelectedText}'");
+
+        // Phase 11: Final Memory Reclamation & LOH Check
+        LogLive("[AUTOTEST] Phase 11: Final memory stabilization and reclamation check...");
         shell.SetZoom(1.0);
         doc.GoToPage(0);
         await Task.Delay(400);
 
         MemoryMetrics finalReclaimedMem = MemoryMetrics.Capture();
-        s_steps.Add(new StepResult("Phase 10: Final Reclamation", true, $"Final Memory: {finalReclaimedMem}", finalReclaimedMem));
-        LogLive($"[AUTOTEST] Phase 10 PASS: Final Memory = {finalReclaimedMem}");
+        s_steps.Add(new StepResult("Phase 11: Final Reclamation", true, $"Final Memory: {finalReclaimedMem}", finalReclaimedMem));
+        LogLive($"[AUTOTEST] Phase 11 PASS: Final Memory = {finalReclaimedMem}");
 
         return true;
     }
