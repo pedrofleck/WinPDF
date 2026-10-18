@@ -390,6 +390,11 @@ public sealed partial class DocumentView : Page
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsSearchOpen))
         {
+            if (!_isHorizontalPushAnimating && FloatingTopTransform is not null)
+            {
+                FloatingTopTransform.TranslateX = GetTargetFloatingTopOffsetDip();
+            }
+
             if (ViewModel.IsSearchOpen)
             {
                 PlaySearchBarOpenAnimation();
@@ -399,6 +404,13 @@ public sealed partial class DocumentView : Page
             {
                 _searchDebounceTimer.Stop();
                 ReturnFocusToViewer();
+            }
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.IsAnnotationToolbarOpen))
+        {
+            if (!_isHorizontalPushAnimating && FloatingTopTransform is not null)
+            {
+                FloatingTopTransform.TranslateX = GetTargetFloatingTopOffsetDip();
             }
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsNightMode))
@@ -872,7 +884,12 @@ public sealed partial class DocumentView : Page
 
         if (!_isHorizontalPushAnimating && PagesRepeaterPushTransform is not null && e.NextView.ZoomFactor > 0.05)
         {
-            PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip() / e.NextView.ZoomFactor;
+            PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip(e.NextView.ZoomFactor) / e.NextView.ZoomFactor;
+        }
+
+        if (!_isHorizontalPushAnimating && FloatingTopTransform is not null)
+        {
+            FloatingTopTransform.TranslateX = GetTargetFloatingTopOffsetDip();
         }
 
         if (!_isProgrammaticPageScroll && ViewModel.CurrentDocument is { IsContinuous: true } && Math.Abs(e.NextView.ZoomFactor - ContinuousScrollViewer.ZoomFactor) < 0.001)
@@ -897,7 +914,12 @@ public sealed partial class DocumentView : Page
             double activeZoom = ContinuousScrollViewer.ZoomFactor;
             if (!_isHorizontalPushAnimating && PagesRepeaterPushTransform is not null && activeZoom > 0.05)
             {
-                PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip() / activeZoom;
+                PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip(activeZoom) / activeZoom;
+            }
+
+            if (!_isHorizontalPushAnimating && FloatingTopTransform is not null)
+            {
+                FloatingTopTransform.TranslateX = GetTargetFloatingTopOffsetDip();
             }
 
             if (_isApplyingFitZoom)
@@ -1219,17 +1241,32 @@ public sealed partial class DocumentView : Page
         try
         {
             double oldZoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor);
-            double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
-            double docCenterDip = (ContinuousScrollViewer.ViewportWidth + leftW) / 2.0;
-            double viewportCenterX = (ContinuousScrollViewer.HorizontalOffset + docCenterDip) / oldZoom;
-            double viewportCenterY = (ContinuousScrollViewer.VerticalOffset + ContinuousScrollViewer.ViewportHeight / 2.0) / oldZoom;
+            double halfViewportW = ContinuousScrollViewer.ViewportWidth / 2.0;
+            double halfViewportH = ContinuousScrollViewer.ViewportHeight / 2.0;
 
-            double newOffsetX = Math.Max(0, viewportCenterX * newZoom - docCenterDip);
-            double newOffsetY = Math.Max(0, viewportCenterY * newZoom - ContinuousScrollViewer.ViewportHeight / 2.0);
+            double newOffsetX;
+            if (ContinuousScrollViewer.ScrollableWidth > 0.5)
+            {
+                double viewportCenterX = (ContinuousScrollViewer.HorizontalOffset + halfViewportW) / oldZoom;
+                newOffsetX = Math.Max(0, viewportCenterX * newZoom - halfViewportW);
+            }
+            else
+            {
+                double unzoomedW = ContinuousPagesRepeater.ActualWidth + ContinuousPagesRepeater.Margin.Left + ContinuousPagesRepeater.Margin.Right;
+                newOffsetX = Math.Max(0, (unzoomedW * newZoom - ContinuousScrollViewer.ViewportWidth) / 2.0);
+            }
+
+            double viewportCenterY = (ContinuousScrollViewer.VerticalOffset + halfViewportH) / oldZoom;
+            double newOffsetY = Math.Max(0, viewportCenterY * newZoom - halfViewportH);
 
             if (!_isHorizontalPushAnimating && PagesRepeaterPushTransform is not null && newZoom > 0.05f)
             {
-                PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip() / newZoom;
+                PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip(newZoom) / newZoom;
+            }
+
+            if (!_isHorizontalPushAnimating && FloatingTopTransform is not null)
+            {
+                FloatingTopTransform.TranslateX = GetTargetFloatingTopOffsetDip();
             }
 
             ContinuousScrollViewer.ChangeView(newOffsetX, newOffsetY, newZoom, disableAnimation: true);
@@ -2557,7 +2594,9 @@ public sealed partial class DocumentView : Page
         }
 
         double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen) ? _currentSidebarWidthDip : 0.0;
-        return Math.Max(120.0, rawViewerWidth - leftW);
+        double appliedMarginLeft = ContinuousScrollViewer?.Margin.Left ?? 0.0;
+        double unsubtractedLeftW = Math.Max(0.0, leftW - appliedMarginLeft);
+        return Math.Max(120.0, rawViewerWidth - unsubtractedLeftW);
     }
 
     private void OnNightModeMenuItemLoaded(object sender, RoutedEventArgs e)
@@ -2593,26 +2632,20 @@ public sealed partial class DocumentView : Page
         }
 
         double leftW = (ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
-        double centeredOffset = leftW / 2.0;
+        double appliedMarginLeft = ContinuousScrollViewer?.Margin.Left ?? 0.0;
+        double unappliedLeftW = Math.Max(0.0, leftW - appliedMarginLeft);
+        return unappliedLeftW / 2.0;
+    }
 
-        if (leftW > 0.0 && ContinuousScrollViewer is not null && ContinuousPagesRepeater is not null)
+    private double GetTargetFloatingTopOffsetDip()
+    {
+        if (ViewModel is null || !ViewModel.HasDocument || ViewModel.IsPresentationMode)
         {
-            double zoom = explicitZoom ?? (ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0));
-            double viewerW = ContinuousScrollViewer.ActualWidth > 0 ? ContinuousScrollViewer.ActualWidth : _lastHandledScrollViewerSize.Width;
-            double repW = ContinuousPagesRepeater.ActualWidth;
-            if (viewerW > 0 && repW > 0)
-            {
-                double zoomedPageW = repW * zoom;
-                double unshiftedLeft = Math.Max(24.0, (viewerW - zoomedPageW) / 2.0);
-                double minClearanceOffset = (leftW + 24.0) - unshiftedLeft;
-                if (minClearanceOffset > centeredOffset)
-                {
-                    return minClearanceOffset;
-                }
-            }
+            return 0.0;
         }
 
-        return centeredOffset;
+        double leftW = (ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
+        return leftW / 2.0;
     }
 
     /// <summary>
@@ -2636,6 +2669,11 @@ public sealed partial class DocumentView : Page
         _isHorizontalPushAnimating = false;
 
         double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
+        if (ContinuousScrollViewer is not null && Math.Abs(ContinuousScrollViewer.Margin.Left - leftW) > 0.5)
+        {
+            ContinuousScrollViewer.Margin = new Thickness(leftW, 0, 0, 0);
+        }
+
         double zoom = ContinuousScrollViewer?.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
         double targetDocOffsetDip = GetTargetDocumentOffsetDip(zoom);
 
@@ -2646,7 +2684,7 @@ public sealed partial class DocumentView : Page
 
         if (FloatingTopTransform is not null)
         {
-            FloatingTopTransform.TranslateX = targetDocOffsetDip;
+            FloatingTopTransform.TranslateX = GetTargetFloatingTopOffsetDip();
         }
 
         if (StatusBarBackdropTransform is not null)
@@ -2698,8 +2736,17 @@ public sealed partial class DocumentView : Page
 
         double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
         double zoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
+
+        if (ContinuousScrollViewer is not null && ContinuousScrollViewer.Margin.Left > 0.5)
+        {
+            double prevMarginLeft = ContinuousScrollViewer.Margin.Left;
+            ContinuousScrollViewer.Margin = new Thickness(0);
+            PagesRepeaterPushTransform.TranslateX += (prevMarginLeft / 2.0) / Math.Max(0.05, zoom);
+        }
+
         double targetDocOffsetDip = GetTargetDocumentOffsetDip(zoom);
         double targetRepeaterX = targetDocOffsetDip / Math.Max(0.05, zoom);
+        double targetTopOffsetDip = GetTargetFloatingTopOffsetDip();
 
         var sb = new Storyboard();
         var ease = new ExponentialEase { Exponent = 4.5, EasingMode = EasingMode.EaseOut };
@@ -2719,7 +2766,7 @@ public sealed partial class DocumentView : Page
         {
             var topAnim = new DoubleAnimation
             {
-                To = targetDocOffsetDip,
+                To = targetTopOffsetDip,
                 Duration = duration,
                 EasingFunction = ease
             };
@@ -2782,10 +2829,7 @@ public sealed partial class DocumentView : Page
 
         sb.Completed += (_, _) =>
         {
-            _isHorizontalPushAnimating = false;
-            double currentZoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
-            double finalDocOffset = GetTargetDocumentOffsetDip();
-            PagesRepeaterPushTransform.TranslateX = finalDocOffset / Math.Max(0.05, currentZoom);
+            SyncPaneOffsetsImmediate();
         };
 
         _horizontalPushStoryboard = sb;
@@ -3132,6 +3176,11 @@ public sealed partial class DocumentView : Page
         if (FloatingSearchBar is null || FloatingSearchBarTransform is null)
         {
             return;
+        }
+
+        if (!_isHorizontalPushAnimating && FloatingTopTransform is not null)
+        {
+            FloatingTopTransform.TranslateX = GetTargetFloatingTopOffsetDip();
         }
 
         _searchBarStoryboard?.Stop();
