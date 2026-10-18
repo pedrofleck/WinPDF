@@ -191,7 +191,7 @@
 
   <!-- ===================== Status Bar ===================== -->
   <data name="StatusBar_PagePrefix" xml:space="preserve"><value>Page</value></data>
-  <data name="StatusBar_PageBoxToolTip" xml:space="preserve"><value>Current page (Ctrl+G to jump)</value></data>
+  <data name="StatusBar_PageBoxToolTip" xml:space="preserve"><value>Current page</value></data>
   <data name="StatusBar_FormatToolTip" xml:space="preserve"><value>Document format</value></data>
   <data name="StatusBar_PropertiesToolTip" xml:space="preserve"><value>Document properties (Alt+Enter)</value></data>
   <data name="StatusBar_DoublePageToolTip" xml:space="preserve"><value>Two pages</value></data>

@@ -10,10 +10,10 @@
     xmlns:models="using:WinPDF.Models"
     xmlns:vm="using:WinPDF.ViewModels"
     Background="Transparent"
+    KeyboardAcceleratorPlacementMode="Hidden"
     mc:Ignorable="d">
 
     <Page.KeyboardAccelerators>
-        <KeyboardAccelerator Key="G" Modifiers="Control" Invoked="OnPageBoxAcceleratorInvoked" />
         <KeyboardAccelerator Key="Escape" Invoked="OnEscapeAcceleratorInvoked" />
     </Page.KeyboardAccelerators>
 
@@ -260,6 +260,8 @@
 
                 <ScrollViewer
                     x:Name="ContinuousScrollViewer"
+                    IsTabStop="True"
+                    UseSystemFocusVisuals="False"
                     HorizontalScrollBarVisibility="Auto"
                     HorizontalScrollMode="Enabled"
                     VerticalScrollMode="Enabled"

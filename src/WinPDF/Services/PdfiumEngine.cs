@@ -1360,24 +1360,49 @@ internal sealed unsafe class PdfiumEngine : IDisposable
         }
 
         int bufferLength = charCount + 1;
+        string result;
         if (bufferLength <= MaxStackAllocChars)
         {
             char* buf = stackalloc char[MaxStackAllocChars];
             int written = PdfiumNative.FPDFText_GetText(textPage, startCharIndex, charCount, buf);
-            return TrimNullTerminatedSpan(new ReadOnlySpan<char>(buf, Math.Clamp(written, 0, bufferLength)));
+            result = TrimNullTerminatedSpan(new ReadOnlySpan<char>(buf, Math.Clamp(written, 0, bufferLength)));
+        }
+        else
+        {
+            // Zero-LOH: use unmanaged memory for large selections so >= 85 KB strings never allocate temporary arrays on the LOH.
+            char* nativeBuf = (char*)NativeMemory.Alloc((nuint)bufferLength, sizeof(char));
+            try
+            {
+                int written = PdfiumNative.FPDFText_GetText(textPage, startCharIndex, charCount, nativeBuf);
+                result = TrimNullTerminatedSpan(new ReadOnlySpan<char>(nativeBuf, Math.Clamp(written, 0, bufferLength)));
+            }
+            finally
+            {
+                NativeMemory.Free(nativeBuf);
+            }
         }
 
-        // Zero-LOH: use unmanaged memory for large selections so >= 85 KB strings never allocate temporary arrays on the LOH.
-        char* nativeBuf = (char*)NativeMemory.Alloc((nuint)bufferLength, sizeof(char));
-        try
+        if (!string.IsNullOrEmpty(result))
         {
-            int written = PdfiumNative.FPDFText_GetText(textPage, startCharIndex, charCount, nativeBuf);
-            return TrimNullTerminatedSpan(new ReadOnlySpan<char>(nativeBuf, Math.Clamp(written, 0, bufferLength)));
+            return result;
         }
-        finally
+
+        // Fallback via per-character FPDFText_GetUnicode in case FPDFText_GetText encountered an embedded NUL or unmapped glyph prefix.
+        System.Text.StringBuilder sb = new(charCount);
+        for (int i = 0; i < charCount; i++)
         {
-            NativeMemory.Free(nativeBuf);
+            uint u = PdfiumNative.FPDFText_GetUnicode(textPage, startCharIndex + i);
+            if (u is > 0 and <= 0xFFFF)
+            {
+                sb.Append((char)u);
+            }
+            else if (u > 0xFFFF && u <= 0x10FFFF)
+            {
+                sb.Append(char.ConvertFromUtf32((int)u));
+            }
         }
+
+        return sb.ToString();
     }
 
     private static string TrimNullTerminatedSpan(ReadOnlySpan<char> span)

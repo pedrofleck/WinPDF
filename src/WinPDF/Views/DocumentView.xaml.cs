@@ -1911,6 +1911,16 @@ public sealed partial class DocumentView : Page
             }
         }
 
+        if (isCtrl && !isAlt && !isShift && e.Key == Windows.System.VirtualKey.C && ViewModel.HasTextSelection)
+        {
+            if (focusedObj is not TextBox focusedTextBox || focusedTextBox.SelectionLength == 0)
+            {
+                e.Handled = true;
+                ViewModel.CopySelectedText();
+                return;
+            }
+        }
+
         // If a TextBox or PasswordBox has focus, let it handle its own text editing and caret navigation.
         if (focusedObj is TextBox or PasswordBox)
         {
@@ -1971,12 +1981,6 @@ public sealed partial class DocumentView : Page
                         e.Handled = true;
                         ViewModel.CopySelectedText();
                     }
-                    return;
-
-                case Windows.System.VirtualKey.G:
-                    e.Handled = true;
-                    StatusBarPageBox.Focus(FocusState.Programmatic);
-                    StatusBarPageBox.SelectAll();
                     return;
 
                 case Windows.System.VirtualKey.S:
@@ -3363,13 +3367,6 @@ public sealed partial class DocumentView : Page
         {
             StatusBarPageBox.Text = ViewModel.CurrentDocument.CurrentPageNumber.ToString();
         }
-    }
-
-    private void OnPageBoxAcceleratorInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
-    {
-        args.Handled = true;
-        StatusBarPageBox.Focus(FocusState.Programmatic);
-        StatusBarPageBox.SelectAll();
     }
 
     private void ReturnFocusToViewer()

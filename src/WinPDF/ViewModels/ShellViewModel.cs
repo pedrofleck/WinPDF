@@ -1132,19 +1132,33 @@ public sealed partial class ShellViewModel : ObservableObject
             return;
         }
 
-        try
+        var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage
         {
-            var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage
+            RequestedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Copy
+        };
+        dataPackage.SetText(selection.SelectedText);
+
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            try
             {
-                RequestedOperation = Windows.ApplicationModel.DataTransfer.DataPackageOperation.Copy
-            };
-            dataPackage.SetText(selection.SelectedText);
-            Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
-            Windows.ApplicationModel.DataTransfer.Clipboard.Flush();
-        }
-        catch
-        {
-            // Ignore transient clipboard lock errors
+                Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
+                try
+                {
+                    Windows.ApplicationModel.DataTransfer.Clipboard.Flush();
+                }
+                catch
+                {
+                }
+                break;
+            }
+            catch
+            {
+                if (attempt < 2)
+                {
+                    System.Threading.Thread.Sleep(15);
+                }
+            }
         }
     }
 

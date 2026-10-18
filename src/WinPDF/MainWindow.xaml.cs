@@ -44,6 +44,9 @@ public sealed partial class MainWindow : Window
     [LibraryImport("user32.dll", EntryPoint = "LoadImageW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
     private static partial IntPtr LoadImage(IntPtr hInst, string name, uint type, int cx, int cy, uint fuLoad);
 
+    [LibraryImport("user32.dll")]
+    private static partial uint GetDpiForWindow(IntPtr hwnd);
+
     /// <summary>
     /// Gets the shell view model orchestrating window state, documents, and navigation.
     /// </summary>
@@ -123,6 +126,10 @@ public sealed partial class MainWindow : Window
 
         AppWindow.Changed += OnAppWindowChanged;
 
+        // Position and size the window while it is still hidden (before Activate() is called)
+        // so it never flashes at the default Win32 cascade position before centering.
+        SetInitialWindowBounds();
+
         if (Content is FrameworkElement root)
         {
             root.Loaded += (_, _) =>
@@ -169,7 +176,21 @@ public sealed partial class MainWindow : Window
         }
 
         _hasSetInitialBounds = true;
-        double scale = Content?.XamlRoot?.RasterizationScale ?? 1.0;
+        double scale = Content?.XamlRoot?.RasterizationScale ?? 0.0;
+        if (scale <= 0.0)
+        {
+            try
+            {
+                IntPtr hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                uint dpi = hwnd != IntPtr.Zero ? GetDpiForWindow(hwnd) : 96u;
+                scale = dpi > 0 ? dpi / 96.0 : 1.0;
+            }
+            catch
+            {
+                scale = 1.0;
+            }
+        }
+
         var displayArea = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary);
 
         int targetWidthDip = 1280;

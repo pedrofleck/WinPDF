@@ -599,6 +599,18 @@ public sealed partial class PdfPageCanvas : Grid
         return shell.ActiveTool == AnnotationTool.Select;
     }
 
+    private void FocusParentViewerIfNeeded()
+    {
+        try
+        {
+            var sv = _cachedScrollViewer ??= FindAncestor<ScrollViewer>(this);
+            sv?.Focus(FocusState.Programmatic);
+        }
+        catch
+        {
+        }
+    }
+
     private void SetCursorShape(InputSystemCursorShape shape)
     {
         if (_currentCursorShape == shape)
@@ -705,12 +717,6 @@ public sealed partial class PdfPageCanvas : Grid
             return;
         }
 
-        if (_clickCount >= 2)
-        {
-            // Second click is handled by OnCanvasDoubleTapped.
-            return;
-        }
-
         long dragSession = ++_selectionSessionId;
         _isPointerDown = true;
         _hasDraggedSelection = false;
@@ -754,6 +760,7 @@ public sealed partial class PdfPageCanvas : Grid
                 if (sentenceSelection is { HasContent: true })
                 {
                     SetCursorShape(InputSystemCursorShape.IBeam);
+                    FocusParentViewerIfNeeded();
                 }
             }
         }
@@ -882,6 +889,7 @@ public sealed partial class PdfPageCanvas : Grid
         {
             // Ensure the final release coordinate is processed and keep the selection active on screen.
             e.Handled = true;
+            FocusParentViewerIfNeeded();
             RequestDragSelectionUpdate(releasePosDip, force: true, activeSession);
             return;
         }
@@ -974,6 +982,7 @@ public sealed partial class PdfPageCanvas : Grid
                 if (wordSelection is { HasContent: true })
                 {
                     SetCursorShape(InputSystemCursorShape.IBeam);
+                    FocusParentViewerIfNeeded();
                 }
             }
         }
