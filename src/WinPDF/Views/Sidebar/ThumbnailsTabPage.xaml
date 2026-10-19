@@ -21,11 +21,6 @@
             SizeChanged="OnThumbnailsScrollViewerSizeChanged"
             PointerEntered="OnThumbnailsPointerEntered"
             PointerExited="OnThumbnailsPointerExited"
-            PointerPressed="OnThumbnailsPointerPressed"
-            PointerReleased="OnThumbnailsPointerReleased"
-            PointerCanceled="OnThumbnailsPointerCanceled"
-            PointerCaptureLost="OnThumbnailsPointerCaptureLost"
-            PointerWheelChanged="OnThumbnailsPointerWheelChanged"
             ViewChanging="OnThumbnailsScrollViewerViewChanging"
             ViewChanged="OnThumbnailsScrollViewerViewChanged">
             <ItemsRepeater

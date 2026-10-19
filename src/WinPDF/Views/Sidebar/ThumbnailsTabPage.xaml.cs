@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Navigation;
 using WinPDF.ViewModels;
 
@@ -17,13 +18,18 @@ public sealed partial class ThumbnailsTabPage : Page
 {
     private const double TwoColumnThresholdDip = 300.0;
 
-    private readonly DispatcherTimer _userScrollDebounceTimer = new() { Interval = TimeSpan.FromMilliseconds(700) };
+    private readonly DispatcherTimer _userScrollDebounceTimer = new() { Interval = TimeSpan.FromMilliseconds(350) };
     private DocumentViewModel? _observedDocument;
+    private bool _isPointerDownOnSidebar;
     private bool _isUserInteractingWithSidebar;
     private bool _isRenderingHooked;
+    private bool _isCatchingUp;
+    private double _springVelocity;
+    private long _lastSpringTimestamp;
     private double _targetThumbScrollY;
     private double _currentRowHeight = 182.0;
     private double _lastHandledWidth;
+    private double _lastProgrammaticScrollY = -1;
     private long _lastSizedDocumentId = -1;
     private int _lastSizedRotation = -1;
 
@@ -50,6 +56,7 @@ public sealed partial class ThumbnailsTabPage : Page
         ThumbnailsScrollViewer.AddHandler(UIElement.PointerReleasedEvent, new PointerEventHandler(OnThumbnailsPointerReleased), handledEventsToo: true);
         ThumbnailsScrollViewer.AddHandler(UIElement.PointerCanceledEvent, new PointerEventHandler(OnThumbnailsPointerCanceled), handledEventsToo: true);
         ThumbnailsScrollViewer.AddHandler(UIElement.PointerCaptureLostEvent, new PointerEventHandler(OnThumbnailsPointerCaptureLost), handledEventsToo: true);
+        ThumbnailsScrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, new PointerEventHandler(OnThumbnailsPointerWheelChanged), handledEventsToo: true);
     }
 
     /// <inheritdoc/>
@@ -104,6 +111,8 @@ public sealed partial class ThumbnailsTabPage : Page
     {
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         UnsubscribeFromDocument();
+        _springVelocity = 0.0;
+        _isCatchingUp = false;
         StopSmoothScrollLoop();
         _userScrollDebounceTimer.Stop();
     }
@@ -113,6 +122,8 @@ public sealed partial class ThumbnailsTabPage : Page
         if (e.PropertyName == nameof(ShellViewModel.CurrentDocument))
         {
             SubscribeToDocument(ViewModel.CurrentDocument);
+            _springVelocity = 0.0;
+            _isCatchingUp = false;
             _isUserInteractingWithSidebar = false;
             _userScrollDebounceTimer.Stop();
             _lastSizedDocumentId = -1;
@@ -148,6 +159,7 @@ public sealed partial class ThumbnailsTabPage : Page
         {
             _observedDocument = doc;
             _observedDocument.PropertyChanged += OnDocumentPropertyChanged;
+            _observedDocument.UserDocumentScrollInitiated += OnUserDocumentScrollInitiated;
         }
     }
 
@@ -156,7 +168,17 @@ public sealed partial class ThumbnailsTabPage : Page
         if (_observedDocument is not null)
         {
             _observedDocument.PropertyChanged -= OnDocumentPropertyChanged;
+            _observedDocument.UserDocumentScrollInitiated -= OnUserDocumentScrollInitiated;
             _observedDocument = null;
+        }
+    }
+
+    private void OnUserDocumentScrollInitiated()
+    {
+        if (!_isPointerDownOnSidebar)
+        {
+            _isUserInteractingWithSidebar = false;
+            _userScrollDebounceTimer.Stop();
         }
     }
 
@@ -281,7 +303,8 @@ public sealed partial class ThumbnailsTabPage : Page
 
     private void UpdateTargetScrollPosition(bool allowAnimation = false, bool useCurrentPageIndex = false)
     {
-        if (_isUserInteractingWithSidebar ||
+        if (_isPointerDownOnSidebar ||
+            _isUserInteractingWithSidebar ||
             !ViewModel.IsSidebarOpen ||
             ViewModel.SidebarTab != Models.SidebarTab.Thumbnails ||
             ViewModel.CurrentDocument is not { PageCount: > 0 } doc ||
@@ -297,8 +320,8 @@ public sealed partial class ThumbnailsTabPage : Page
             pageProgress,
             _currentRowHeight,
             out double rowCenterY,
-            out double _,
-            out double _);
+            out double rowTop,
+            out double rowHeight);
 
         // 8.0 DIPs is the top padding of ThumbnailsScrollViewer (Padding="16,8,16,8")
         double targetCenterY = 8.0 + rowCenterY;
@@ -315,6 +338,8 @@ public sealed partial class ThumbnailsTabPage : Page
 
         if (!allowAnimation)
         {
+            _springVelocity = 0.0;
+            _isCatchingUp = false;
             StopSmoothScrollLoop();
             try
             {
@@ -322,6 +347,19 @@ public sealed partial class ThumbnailsTabPage : Page
             }
             catch { }
             return;
+        }
+
+        double curY = ThumbnailsScrollViewer.VerticalOffset;
+        double viewportH = ThumbnailsScrollViewer.ViewportHeight;
+
+        double cardTop = 8.0 + rowTop;
+        double cardBottom = cardTop + rowHeight;
+        bool isCardVisible = (cardBottom >= curY && cardTop <= curY + viewportH);
+        double scrollDistance = Math.Abs(targetScrollY - curY);
+
+        if (!isCardVisible || scrollDistance > 50.0)
+        {
+            _isCatchingUp = true;
         }
 
         StartSmoothScrollLoop();
@@ -332,6 +370,7 @@ public sealed partial class ThumbnailsTabPage : Page
         if (!_isRenderingHooked)
         {
             _isRenderingHooked = true;
+            _lastSpringTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
             CompositionTarget.Rendering += OnCompositionTargetRendering;
         }
     }
@@ -348,20 +387,30 @@ public sealed partial class ThumbnailsTabPage : Page
     private void OnCompositionTargetRendering(object? sender, object e)
     {
         if (ThumbnailsScrollViewer is null ||
+            _isPointerDownOnSidebar ||
             _isUserInteractingWithSidebar ||
             !ViewModel.IsSidebarOpen ||
             ViewModel.SidebarTab != Models.SidebarTab.Thumbnails)
         {
+            _springVelocity = 0.0;
+            _isCatchingUp = false;
             StopSmoothScrollLoop();
             return;
         }
+
+        long currentTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+        double dt = (double)(currentTimestamp - _lastSpringTimestamp) / System.Diagnostics.Stopwatch.Frequency;
+        _lastSpringTimestamp = currentTimestamp;
+        dt = Math.Clamp(dt, 0.001, 0.050);
 
         double curY = ThumbnailsScrollViewer.VerticalOffset;
         double diff = _targetThumbScrollY - curY;
 
         // When within snapping threshold, place at target and unhook rendering to guarantee 0.0% idle CPU and PSR
-        if (Math.Abs(diff) < 0.75)
+        if (Math.Abs(diff) < 0.75 && Math.Abs(_springVelocity) < 2.0)
         {
+            _springVelocity = 0.0;
+            _isCatchingUp = false;
             try
             {
                 ThumbnailsScrollViewer.ChangeView(null, _targetThumbScrollY, null, disableAnimation: true);
@@ -371,17 +420,32 @@ public sealed partial class ThumbnailsTabPage : Page
             return;
         }
 
-        // Critically damped spring follower with minimum speed threshold to eliminate tail sluggishness
-        double step = diff * 0.22;
-        if (Math.Abs(step) < 1.5)
+        // Underdamped spring with subtle bounce (~4.6% overshoot) when catching up from distance (~410ms duration);
+        // critically damped when continuously following during normal document reading.
+        double omega = _isCatchingUp ? 13.8 : 19.0;
+        double zeta = _isCatchingUp ? 0.70 : 1.0;
+
+        double accel = (omega * omega * diff) - (2.0 * zeta * omega * _springVelocity);
+        _springVelocity += accel * dt;
+        _springVelocity = Math.Clamp(_springVelocity, -8000.0, 8000.0);
+
+        double nextY = curY + (_springVelocity * dt);
+
+        if (_isCatchingUp && Math.Abs(diff) < 1.0 && Math.Abs(_springVelocity) < 5.0)
         {
-            step = Math.Sign(diff) * Math.Min(Math.Abs(diff), 1.5);
+            _isCatchingUp = false;
         }
 
-        double nextY = curY + step;
+        double totalH = ThumbnailsLayout?.TotalContentHeight ?? 0.0;
+        double maxScroll = Math.Max(ThumbnailsScrollViewer.ScrollableHeight,
+            totalH > 0 ? (totalH + 16.0 - ThumbnailsScrollViewer.ViewportHeight) : 0.0);
+        double clampedY = maxScroll > 0 ? Math.Clamp(nextY, 0.0, maxScroll) : Math.Max(0.0, nextY);
+
+        _lastProgrammaticScrollY = clampedY;
+
         try
         {
-            ThumbnailsScrollViewer.ChangeView(null, nextY, null, disableAnimation: true);
+            ThumbnailsScrollViewer.ChangeView(null, clampedY, null, disableAnimation: true);
         }
         catch
         {
@@ -399,13 +463,17 @@ public sealed partial class ThumbnailsTabPage : Page
 
     private void OnThumbnailsPointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        _isPointerDownOnSidebar = true;
         _isUserInteractingWithSidebar = true;
+        _springVelocity = 0.0;
+        _isCatchingUp = false;
         _userScrollDebounceTimer.Stop();
         StopSmoothScrollLoop();
     }
 
     private void OnThumbnailsPointerReleased(object sender, PointerRoutedEventArgs e)
     {
+        _isPointerDownOnSidebar = false;
         if (_isUserInteractingWithSidebar)
         {
             _userScrollDebounceTimer.Stop();
@@ -415,6 +483,7 @@ public sealed partial class ThumbnailsTabPage : Page
 
     private void OnThumbnailsPointerCanceled(object sender, PointerRoutedEventArgs e)
     {
+        _isPointerDownOnSidebar = false;
         if (_isUserInteractingWithSidebar)
         {
             _userScrollDebounceTimer.Stop();
@@ -424,6 +493,7 @@ public sealed partial class ThumbnailsTabPage : Page
 
     private void OnThumbnailsPointerCaptureLost(object sender, PointerRoutedEventArgs e)
     {
+        _isPointerDownOnSidebar = false;
         if (_isUserInteractingWithSidebar)
         {
             _userScrollDebounceTimer.Stop();
@@ -434,6 +504,8 @@ public sealed partial class ThumbnailsTabPage : Page
     private void OnThumbnailsPointerWheelChanged(object sender, PointerRoutedEventArgs e)
     {
         _isUserInteractingWithSidebar = true;
+        _springVelocity = 0.0;
+        _isCatchingUp = false;
         StopSmoothScrollLoop();
         _userScrollDebounceTimer.Stop();
         _userScrollDebounceTimer.Start();
@@ -441,9 +513,13 @@ public sealed partial class ThumbnailsTabPage : Page
 
     private void OnThumbnailsScrollViewerViewChanging(object? sender, ScrollViewerViewChangingEventArgs e)
     {
-        if (!_isRenderingHooked)
+        // If the new offset differs from what we programmatically asked for, the user is scrolling the sidebar directly
+        if (!_isRenderingHooked || Math.Abs(e.NextView.VerticalOffset - _lastProgrammaticScrollY) > 1.5)
         {
             _isUserInteractingWithSidebar = true;
+            _springVelocity = 0.0;
+            _isCatchingUp = false;
+            StopSmoothScrollLoop();
             _userScrollDebounceTimer.Stop();
             _userScrollDebounceTimer.Start();
         }
@@ -497,8 +573,12 @@ public sealed partial class ThumbnailsTabPage : Page
 
         if (targetItem is not null)
         {
+            _isPointerDownOnSidebar = false;
             _isUserInteractingWithSidebar = false;
+            _springVelocity = 0.0;
+            _isCatchingUp = false;
             _userScrollDebounceTimer.Stop();
+            StopSmoothScrollLoop();
             ViewModel.CurrentDocument.GoToPage(targetItem.PageIndex);
             UpdateTargetScrollPosition(allowAnimation: true, useCurrentPageIndex: true);
         }

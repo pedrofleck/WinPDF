@@ -38,6 +38,19 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     public partial int PageCount { get; set; }
 
     /// <summary>
+    /// Event raised when the user initiates a scroll or navigation interaction directly on the document viewport.
+    /// </summary>
+    public event Action? UserDocumentScrollInitiated;
+
+    /// <summary>
+    /// Notifies listeners that the user has started scrolling the document viewport directly.
+    /// </summary>
+    public void NotifyUserDocumentScrollInitiated()
+    {
+        UserDocumentScrollInitiated?.Invoke();
+    }
+
+    /// <summary>
     /// Gets or sets the zero-based index of the currently viewed page.
     /// </summary>
     [ObservableProperty]

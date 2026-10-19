@@ -922,9 +922,13 @@ public sealed partial class DocumentView : Page
             FloatingTopTransform.TranslateX = GetTargetFloatingTopOffsetDip();
         }
 
-        if (!_isProgrammaticPageScroll && ViewModel.CurrentDocument is { IsContinuous: true } && Math.Abs(e.NextView.ZoomFactor - ContinuousScrollViewer.ZoomFactor) < 0.001)
+        if (!_isProgrammaticPageScroll && ViewModel.CurrentDocument is { IsContinuous: true })
         {
-            UpdatePageProgressFromScroll(e.NextView.VerticalOffset);
+            ViewModel.CurrentDocument.NotifyUserDocumentScrollInitiated();
+            if (Math.Abs(e.NextView.ZoomFactor - ContinuousScrollViewer.ZoomFactor) < 0.001)
+            {
+                UpdatePageProgressFromScroll(e.NextView.VerticalOffset);
+            }
         }
     }
 
@@ -1566,6 +1570,8 @@ public sealed partial class DocumentView : Page
         {
             return;
         }
+
+        doc.NotifyUserDocumentScrollInitiated();
 
         var props = e.GetCurrentPoint(ContinuousScrollViewer).Properties;
         bool isCtrlPressed = (e.KeyModifiers & Windows.System.VirtualKeyModifiers.Control) != 0
@@ -3429,6 +3435,8 @@ public sealed partial class DocumentView : Page
         {
             return;
         }
+
+        ViewModel.CurrentDocument.NotifyUserDocumentScrollInitiated();
 
         var point = e.GetCurrentPoint(ScrollViewerContentRoot);
         var props = point.Properties;
