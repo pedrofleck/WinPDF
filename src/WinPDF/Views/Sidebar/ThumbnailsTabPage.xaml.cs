@@ -175,10 +175,14 @@ public sealed partial class ThumbnailsTabPage : Page
         }
         else if (e.PropertyName == nameof(DocumentViewModel.CurrentPageIndex))
         {
-            // Selected page changed. Clear any interaction lock and smoothly center on the chosen page.
-            _isUserInteractingWithSidebar = false;
-            _userScrollDebounceTimer.Stop();
-            UpdateTargetScrollPosition(allowAnimation: true, useCurrentPageIndex: true);
+            // Selected page changed. In non-continuous mode (e.g. paged or presentation mode), center on the chosen page.
+            // In continuous mode, FractionalPageIndex drives smooth, uninterrupted scrolling without boundary stutters.
+            if (_observedDocument is not { IsContinuous: true })
+            {
+                _isUserInteractingWithSidebar = false;
+                _userScrollDebounceTimer.Stop();
+                UpdateTargetScrollPosition(allowAnimation: true, useCurrentPageIndex: true);
+            }
         }
         else if (e.PropertyName == nameof(DocumentViewModel.FractionalPageIndex))
         {
@@ -287,7 +291,7 @@ public sealed partial class ThumbnailsTabPage : Page
             return;
         }
 
-        double pageProgress = useCurrentPageIndex ? doc.CurrentPageIndex : doc.FractionalPageIndex;
+        double pageProgress = useCurrentPageIndex ? (doc.CurrentPageIndex + 0.5) : doc.FractionalPageIndex;
 
         ThumbnailsLayout.GetRowVerticalBounds(
             pageProgress,

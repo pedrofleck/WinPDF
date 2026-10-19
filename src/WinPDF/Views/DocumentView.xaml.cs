@@ -924,7 +924,7 @@ public sealed partial class DocumentView : Page
 
         if (!_isProgrammaticPageScroll && ViewModel.CurrentDocument is { IsContinuous: true } && Math.Abs(e.NextView.ZoomFactor - ContinuousScrollViewer.ZoomFactor) < 0.001)
         {
-            UpdatePageProgressFromScroll();
+            UpdatePageProgressFromScroll(e.NextView.VerticalOffset);
         }
     }
 
@@ -1053,14 +1053,14 @@ public sealed partial class DocumentView : Page
         UpdateViewportPages(activeZoom);
     }
 
-    private void UpdatePageProgressFromScroll()
+    private void UpdatePageProgressFromScroll(double? explicitVerticalOffset = null)
     {
         if (_isProgrammaticPageScroll || ViewModel.CurrentDocument is not { IsContinuous: true, Pages.Count: > 0 } doc || ContinuousScrollViewer.ViewportHeight <= 0)
         {
             return;
         }
 
-        double vOffset = ContinuousScrollViewer.VerticalOffset;
+        double vOffset = explicitVerticalOffset ?? ContinuousScrollViewer.VerticalOffset;
         double zoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor);
         double centerY = (vOffset + (ContinuousScrollViewer.ViewportHeight / 2.0)) / zoom;
 
@@ -1104,7 +1104,7 @@ public sealed partial class DocumentView : Page
             }
         }
 
-        if (Math.Abs(doc.FractionalPageIndex - fractionalIndex) > 0.004)
+        if (Math.Abs(doc.FractionalPageIndex - fractionalIndex) > 0.0005)
         {
             doc.FractionalPageIndex = fractionalIndex;
         }
@@ -1197,7 +1197,7 @@ public sealed partial class DocumentView : Page
 
             if (centerY <= currentY + pageHeight + 8.0)
             {
-                double fraction = (centerY - currentY) / Math.Max(1.0, pageHeight);
+                double fraction = Math.Clamp((centerY - currentY) / Math.Max(1.0, pageHeight), 0.0, 1.0);
                 return i + (fraction * step);
             }
 

@@ -19,6 +19,7 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
 
     private readonly List<double> _rowTops = new();
     private readonly List<double> _rowHeights = new();
+    private readonly List<double> _cardHeights = new();
     private readonly List<RealizedItem> _realizedItems = new();
     private readonly HashSet<int> _activeRealizedIndices = new();
     private readonly HashSet<int> _currentPassIndices = new();
@@ -78,6 +79,7 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
     {
         _rowTops.Clear();
         _rowHeights.Clear();
+        _cardHeights.Clear();
 
         if (items is { Count: > 0 })
         {
@@ -91,18 +93,21 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
                 int firstIdx = r * cols;
                 int lastIdx = Math.Min(items.Count - 1, firstIdx + cols - 1);
                 double rowH = Math.Max(36.0, MinItemHeight);
+                double maxCardH = Math.Max(32.0, MinItemHeight);
 
                 for (int i = firstIdx; i <= lastIdx; i++)
                 {
                     double h = items[i].HeightDip;
                     if (h > 0)
                     {
+                        maxCardH = Math.Max(maxCardH, h);
                         rowH = Math.Max(rowH, Math.Ceiling(h + CaptionAndPaddingHeight));
                     }
                 }
 
                 _rowTops.Add(currentY);
                 _rowHeights.Add(rowH);
+                _cardHeights.Add(maxCardH);
                 currentY += rowH + (r < rowCount - 1 ? rowSpacing : 0.0);
             }
         }
@@ -116,11 +121,12 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
     public void InvalidateLayout() => InvalidateMeasure();
 
     /// <summary>
-    /// Computes the vertical bounds (<c>rowTop</c>, <c>rowHeight</c>, and <c>centerY</c>) for a fractional item index.
+    /// Computes the vertical coordinate (<c>centerY</c>) in repeater coordinates for a fractional item index,
+    /// precisely mapping the document center progress to the corresponding point on the thumbnail card.
     /// </summary>
     /// <param name="fractionalItemIndex">Fractional zero-based page index.</param>
     /// <param name="fallbackRowHeight">Fallback row height if layout has not yet measured.</param>
-    /// <param name="centerY">Computed vertical center coordinate in repeater space.</param>
+    /// <param name="centerY">Computed vertical coordinate in repeater space corresponding to the exact fractional point.</param>
     /// <param name="rowTop">Computed top coordinate of the target row.</param>
     /// <param name="rowHeight">Computed height of the target row.</param>
     public void GetRowVerticalBounds(
@@ -140,19 +146,24 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
             int clampedRow = Math.Clamp(rowIdx, 0, _rowTops.Count - 1);
             rowTop = _rowTops[clampedRow];
             rowHeight = _rowHeights[clampedRow];
+            double cardH = (_cardHeights.Count > clampedRow && _cardHeights[clampedRow] > 0)
+                ? _cardHeights[clampedRow]
+                : Math.Max(32.0, rowHeight - CaptionAndPaddingHeight);
 
-            double currentCenterY = rowTop + (rowHeight * 0.5);
-            double nextCenterY = (clampedRow < _rowTops.Count - 1)
-                ? _rowTops[clampedRow + 1] + (_rowHeights[clampedRow + 1] * 0.5)
-                : rowTop + rowHeight + MinRowSpacing + (rowHeight * 0.5);
+            if (rowIdx >= _rowTops.Count)
+            {
+                centerY = rowTop + cardH + (rowFraction * (rowHeight + MinRowSpacing));
+                return;
+            }
 
-            centerY = currentCenterY + (rowFraction * (nextCenterY - currentCenterY));
+            centerY = rowTop + (rowFraction * cardH);
             return;
         }
 
         rowHeight = fallbackRowHeight > 40.0 ? fallbackRowHeight : 180.0;
         rowTop = rowIdx * (rowHeight + MinRowSpacing);
-        centerY = rowTop + (rowHeight * 0.5) + (rowFraction * (rowHeight + MinRowSpacing));
+        double fallbackCardH = Math.Max(32.0, rowHeight - CaptionAndPaddingHeight);
+        centerY = rowTop + (rowFraction * fallbackCardH);
     }
 
     /// <inheritdoc/>
@@ -161,6 +172,7 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
         base.OnItemsChangedCore(context, source, args);
         _rowTops.Clear();
         _rowHeights.Clear();
+        _cardHeights.Clear();
         _activeRealizedIndices.Clear();
         InvalidateMeasure();
     }
@@ -170,6 +182,7 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
     {
         _rowTops.Clear();
         _rowHeights.Clear();
+        _cardHeights.Clear();
         _realizedItems.Clear();
 
         if (context is null || availableSize.Width <= 0 || double.IsNaN(availableSize.Width))
@@ -210,12 +223,14 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
             int lastIdx = Math.Min(itemCount - 1, firstIdx + cols - 1);
 
             double estimatedRowH = Math.Max(36.0, MinItemHeight);
+            double estimatedCardH = Math.Max(32.0, MinItemHeight);
             for (int i = firstIdx; i <= lastIdx; i++)
             {
                 try
                 {
                     if (context.GetItemAt(i) is ThumbnailItemViewModel vm && vm.HeightDip > 0)
                     {
+                        estimatedCardH = Math.Max(estimatedCardH, vm.HeightDip);
                         estimatedRowH = Math.Max(estimatedRowH, Math.Ceiling(vm.HeightDip + CaptionAndPaddingHeight));
                     }
                 }
@@ -277,6 +292,7 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
 
             _rowTops.Add(currentY);
             _rowHeights.Add(actualRowH);
+            _cardHeights.Add(estimatedCardH);
 
             currentY += actualRowH;
             if (r < rowCount - 1)
