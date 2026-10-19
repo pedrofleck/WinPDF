@@ -36,6 +36,11 @@ public sealed partial class ShellViewModel : ObservableObject
     public int DefaultZoomIndex => _settingsService.Settings.DefaultZoomIndex;
 
     /// <summary>
+    /// Gets a value indicating whether each document's custom view settings (zoom factor and view mode) should be retained.
+    /// </summary>
+    public bool SaveDocumentViewSettings => _settingsService.Settings.SaveDocumentViewSettings;
+
+    /// <summary>
     /// Event raised when a non-intrusive top InfoBar notification should be shown.
     /// </summary>
     public event Action<string, string>? NotificationRequested;
@@ -434,6 +439,25 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         if (oldValue is not null)
         {
+            if (!string.IsNullOrWhiteSpace(oldValue.FilePath))
+            {
+                int? pageToSave = _settingsService.Settings.RememberDocumentPage ? oldValue.CurrentPageIndex : null;
+                bool saveView = _settingsService.Settings.SaveDocumentViewSettings;
+                double? zoomToSave = saveView ? oldValue.ZoomFactor : null;
+                ViewMode? viewModeToSave = saveView ? ViewMode : null;
+                bool? hasCustom = saveView ? true : (bool?)null;
+
+                if (pageToSave.HasValue || saveView)
+                {
+                    _settingsService.UpdateDocumentState(
+                        oldValue.FilePath,
+                        pageToSave,
+                        zoomToSave,
+                        viewModeToSave,
+                        hasCustomViewSettings: hasCustom);
+                }
+            }
+
             oldValue.PropertyChanged -= OnDocumentPropertyChanged;
             oldValue.Dispose();
         }
@@ -495,6 +519,10 @@ public sealed partial class ShellViewModel : ObservableObject
             if (CurrentDocument is not null)
             {
                 _settingsService.Settings.LastOpenedPageIndex = CurrentDocument.CurrentPageIndex;
+                if (_settingsService.Settings.RememberDocumentPage && !string.IsNullOrWhiteSpace(CurrentDocument.FilePath))
+                {
+                    _settingsService.UpdateDocumentState(CurrentDocument.FilePath, pageIndex: CurrentDocument.CurrentPageIndex, zoomFactor: null);
+                }
             }
         }
         else if (e.PropertyName is nameof(DocumentViewModel.ActiveSelection) or nameof(DocumentViewModel.HasTextSelection))
@@ -601,9 +629,18 @@ public sealed partial class ShellViewModel : ObservableObject
             var metadata = await _pdfService.GetDocumentMetadataAsync(docInfo.DocumentId, cancellationToken);
 
             DocumentViewModel doc = new(_pdfService, _tileCache, docInfo, outline, attachments, metadata, _settingsService);
-            if (initialPageIndex > 0 && initialPageIndex < doc.PageCount)
+
+            int targetPage = initialPageIndex;
+            if (targetPage <= 0 && _settingsService.Settings.RememberDocumentPage &&
+                _settingsService.TryGetDocumentState(docInfo.FilePath, out SavedDocumentState? savedState) &&
+                savedState is not null && savedState.PageIndex >= 0 && savedState.PageIndex < doc.PageCount)
             {
-                doc.GoToPage(initialPageIndex);
+                targetPage = savedState.PageIndex;
+            }
+
+            if (targetPage > 0 && targetPage < doc.PageCount)
+            {
+                doc.GoToPage(targetPage);
             }
 
             _settingsService.Update(s =>
@@ -612,13 +649,26 @@ public sealed partial class ShellViewModel : ObservableObject
                 s.LastOpenedPageIndex = doc.CurrentPageIndex;
             });
 
+            ViewMode targetViewMode = _settingsService.Settings.DefaultViewMode;
+            if (_settingsService.Settings.SaveDocumentViewSettings &&
+                _settingsService.TryGetDocumentState(docInfo.FilePath, out SavedDocumentState? viewState) &&
+                viewState is { HasCustomViewSettings: true, ViewMode: { } savedMode })
+            {
+                targetViewMode = savedMode;
+            }
+
             if (_windowContext.DispatcherQueue.HasThreadAccess)
             {
+                ViewMode = targetViewMode;
                 CurrentDocument = doc;
             }
             else
             {
-                _windowContext.DispatcherQueue.TryEnqueue(() => CurrentDocument = doc);
+                _windowContext.DispatcherQueue.TryEnqueue(() =>
+                {
+                    ViewMode = targetViewMode;
+                    CurrentDocument = doc;
+                });
             }
         }
         catch (PdfiumException ex)

@@ -130,6 +130,28 @@ public sealed class SettingsService : ISettingsService
                     loaded.SidebarWidth = Math.Clamp(sidebarW, 220.0, 480.0);
                 }
 
+                if (TryGetPropertyIgnoreCase(root, "appLanguage", out JsonElement langEl) && langEl.ValueKind == JsonValueKind.String)
+                {
+                    loaded.AppLanguage = langEl.GetString() ?? string.Empty;
+                }
+
+                if (TryGetPropertyIgnoreCase(root, "rememberDocumentPage", out JsonElement remPageEl) &&
+                    (remPageEl.ValueKind == JsonValueKind.True || remPageEl.ValueKind == JsonValueKind.False))
+                {
+                    loaded.RememberDocumentPage = remPageEl.GetBoolean();
+                }
+
+                if (TryGetPropertyIgnoreCase(root, "saveDocumentViewSettings", out JsonElement saveViewEl) &&
+                    (saveViewEl.ValueKind == JsonValueKind.True || saveViewEl.ValueKind == JsonValueKind.False))
+                {
+                    loaded.SaveDocumentViewSettings = saveViewEl.GetBoolean();
+                }
+                else if (TryGetPropertyIgnoreCase(root, "keepDocumentZoomLevel", out JsonElement keepZoomEl) &&
+                    (keepZoomEl.ValueKind == JsonValueKind.True || keepZoomEl.ValueKind == JsonValueKind.False))
+                {
+                    loaded.SaveDocumentViewSettings = keepZoomEl.GetBoolean();
+                }
+
                 if (TryGetPropertyIgnoreCase(root, "documentBookmarks", out JsonElement bookmarksEl) &&
                     bookmarksEl.ValueKind == JsonValueKind.Object)
                 {
@@ -167,6 +189,65 @@ public sealed class SettingsService : ISettingsService
                         {
                             loaded.DocumentBookmarks[docProp.Name] = list;
                         }
+                    }
+                }
+
+                if (TryGetPropertyIgnoreCase(root, "documentStates", out JsonElement statesEl) &&
+                    statesEl.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (JsonProperty docProp in statesEl.EnumerateObject())
+                    {
+                        if (string.IsNullOrWhiteSpace(docProp.Name) || docProp.Value.ValueKind != JsonValueKind.Object)
+                        {
+                            continue;
+                        }
+
+                        int pIdx = 0;
+                        if (TryGetPropertyIgnoreCase(docProp.Value, "pageIndex", out JsonElement pEl) &&
+                            pEl.ValueKind == JsonValueKind.Number && pEl.TryGetInt32(out int parsedP))
+                        {
+                            pIdx = Math.Max(0, parsedP);
+                        }
+
+                        double? zoomFactor = null;
+                        if (TryGetPropertyIgnoreCase(docProp.Value, "zoomFactor", out JsonElement zEl) &&
+                            zEl.ValueKind == JsonValueKind.Number && zEl.TryGetDouble(out double parsedZ) &&
+                            double.IsFinite(parsedZ))
+                        {
+                            zoomFactor = parsedZ;
+                        }
+
+                        DateTime lastOpened = DateTime.UtcNow;
+                        if (TryGetPropertyIgnoreCase(docProp.Value, "lastOpenedUtc", out JsonElement dtEl) &&
+                            dtEl.ValueKind == JsonValueKind.String &&
+                            DateTime.TryParse(dtEl.GetString(), out DateTime parsedDt))
+                        {
+                            lastOpened = parsedDt;
+                        }
+
+                        ViewMode? viewMode = null;
+                        if (TryGetPropertyIgnoreCase(docProp.Value, "viewMode", out JsonElement vmEl) &&
+                            vmEl.ValueKind == JsonValueKind.String &&
+                            Enum.TryParse(vmEl.GetString(), ignoreCase: true, out ViewMode parsedVm))
+                        {
+                            viewMode = parsedVm;
+                        }
+
+                        bool hasCustomView = false;
+                        if (TryGetPropertyIgnoreCase(docProp.Value, "hasCustomViewSettings", out JsonElement hcvEl) &&
+                            (hcvEl.ValueKind == JsonValueKind.True || hcvEl.ValueKind == JsonValueKind.False))
+                        {
+                            hasCustomView = hcvEl.GetBoolean();
+                        }
+
+                        loaded.DocumentStates[docProp.Name] = new SavedDocumentState
+                        {
+                            PageIndex = pIdx,
+                            ZoomFactor = hasCustomView ? zoomFactor : null,
+                            ViewMode = hasCustomView ? viewMode : null,
+                            HasCustomViewSettings = hasCustomView,
+                            LastOpenedUtc = lastOpened
+                        };
                     }
                 }
 
@@ -230,8 +311,11 @@ public sealed class SettingsService : ISettingsService
 
                 writer.WriteNumber("lastOpenedPageIndex", Math.Max(0, Settings.LastOpenedPageIndex));
                 writer.WriteBoolean("isSidebarOpen", Settings.IsSidebarOpen);
-                writer.WriteNumber("sidebarWidth", Math.Round(Math.Clamp(Settings.SidebarWidth, 220.0, 480.0), 1));
+                writer.WriteString("appLanguage", Settings.AppLanguage ?? string.Empty);
+                writer.WriteBoolean("rememberDocumentPage", Settings.RememberDocumentPage);
+                writer.WriteBoolean("saveDocumentViewSettings", Settings.SaveDocumentViewSettings);
                 WriteDocumentBookmarksJson(writer, Settings.DocumentBookmarks);
+                WriteDocumentStatesJson(writer, Settings.DocumentStates);
                 writer.WriteEndObject();
             }
 
@@ -265,7 +349,11 @@ public sealed class SettingsService : ISettingsService
                     writer.WriteNumber("lastOpenedPageIndex", Math.Max(0, Settings.LastOpenedPageIndex));
                     writer.WriteBoolean("isSidebarOpen", Settings.IsSidebarOpen);
                     writer.WriteNumber("sidebarWidth", Math.Round(Math.Clamp(Settings.SidebarWidth, 220.0, 480.0), 1));
+                    writer.WriteString("appLanguage", Settings.AppLanguage ?? string.Empty);
+                    writer.WriteBoolean("rememberDocumentPage", Settings.RememberDocumentPage);
+                    writer.WriteBoolean("saveDocumentViewSettings", Settings.SaveDocumentViewSettings);
                     WriteDocumentBookmarksJson(writer, Settings.DocumentBookmarks);
+                    WriteDocumentStatesJson(writer, Settings.DocumentStates);
                     writer.WriteEndObject();
                 }
 
@@ -275,6 +363,67 @@ public sealed class SettingsService : ISettingsService
             {
                 System.Diagnostics.Debug.WriteLine($"Failed to save settings.json: {ex.Message}");
             }
+        }
+    }
+
+    /// <inheritdoc/>
+    public bool TryGetDocumentState(string filePath, out SavedDocumentState? state)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            state = null;
+            return false;
+        }
+
+        lock (_syncLock)
+        {
+            return Settings.DocumentStates.TryGetValue(filePath, out state);
+        }
+    }
+
+    /// <inheritdoc/>
+    public void UpdateDocumentState(
+        string filePath,
+        int? pageIndex,
+        double? zoomFactor,
+        ViewMode? viewMode = null,
+        bool? hasCustomViewSettings = null)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return;
+        }
+
+        lock (_syncLock)
+        {
+            if (!Settings.DocumentStates.TryGetValue(filePath, out SavedDocumentState? state) || state is null)
+            {
+                state = new SavedDocumentState();
+                Settings.DocumentStates[filePath] = state;
+            }
+
+            if (pageIndex.HasValue)
+            {
+                state.PageIndex = Math.Max(0, pageIndex.Value);
+            }
+
+            if (hasCustomViewSettings.HasValue)
+            {
+                state.HasCustomViewSettings = hasCustomViewSettings.Value;
+            }
+
+            if (zoomFactor.HasValue && double.IsFinite(zoomFactor.Value))
+            {
+                state.ZoomFactor = zoomFactor.Value;
+            }
+
+            if (viewMode.HasValue)
+            {
+                state.ViewMode = viewMode.Value;
+            }
+
+            state.LastOpenedUtc = DateTime.UtcNow;
+            SaveInternal();
         }
     }
 
@@ -311,6 +460,49 @@ public sealed class SettingsService : ISettingsService
                 }
 
                 writer.WriteEndArray();
+            }
+        }
+
+        writer.WriteEndObject();
+    }
+
+    private static void WriteDocumentStatesJson(Utf8JsonWriter writer, Dictionary<string, SavedDocumentState>? documentStates)
+    {
+        writer.WritePropertyName("documentStates");
+        writer.WriteStartObject();
+        if (documentStates is not null)
+        {
+            var ordered = documentStates
+                .Where(kvp => !string.IsNullOrWhiteSpace(kvp.Key))
+                .OrderByDescending(kvp => kvp.Value.LastOpenedUtc)
+                .Take(200);
+
+            foreach (KeyValuePair<string, SavedDocumentState> kvp in ordered)
+            {
+                writer.WritePropertyName(kvp.Key);
+                writer.WriteStartObject();
+                writer.WriteNumber("pageIndex", Math.Max(0, kvp.Value.PageIndex));
+                writer.WriteBoolean("hasCustomViewSettings", kvp.Value.HasCustomViewSettings);
+                if (kvp.Value.HasCustomViewSettings && kvp.Value.ZoomFactor is { } z && double.IsFinite(z))
+                {
+                    writer.WriteNumber("zoomFactor", Math.Round(z, 4));
+                }
+                else
+                {
+                    writer.WriteNull("zoomFactor");
+                }
+
+                if (kvp.Value.HasCustomViewSettings && kvp.Value.ViewMode is { } vm)
+                {
+                    writer.WriteString("viewMode", vm.ToString());
+                }
+                else
+                {
+                    writer.WriteNull("viewMode");
+                }
+
+                writer.WriteString("lastOpenedUtc", kvp.Value.LastOpenedUtc.ToString("o"));
+                writer.WriteEndObject();
             }
         }
 

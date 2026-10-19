@@ -15,6 +15,10 @@ namespace WinPDF.Helpers;
 public static class ResourceStrings
 {
     private static readonly Lazy<ResourceManager> Manager = new(() => new ResourceManager(), isThreadSafe: true);
+    private static readonly object s_contextLock = new();
+    private static ResourceContext? s_cachedContext;
+    private static string? s_cachedLanguage;
+
     /// <summary>
     /// Gets the localized string for the given resource key.
     /// </summary>
@@ -24,8 +28,26 @@ public static class ResourceStrings
     {
         try
         {
-            ResourceCandidate? candidate = Manager.Value.MainResourceMap.TryGetValue($"Resources/{key}")
-                ?? Manager.Value.MainResourceMap.TryGetValue(key);
+            string overrideLang = Microsoft.Windows.Globalization.ApplicationLanguages.PrimaryLanguageOverride;
+            ResourceContext? context = null;
+            if (!string.IsNullOrEmpty(overrideLang))
+            {
+                lock (s_contextLock)
+                {
+                    if (s_cachedContext is null || !string.Equals(s_cachedLanguage, overrideLang, StringComparison.OrdinalIgnoreCase))
+                    {
+                        s_cachedContext = Manager.Value.CreateResourceContext();
+                        s_cachedContext.QualifierValues["Language"] = overrideLang;
+                        s_cachedLanguage = overrideLang;
+                    }
+
+                    context = s_cachedContext;
+                }
+            }
+
+            ResourceCandidate? candidate = context is not null
+                ? (Manager.Value.MainResourceMap.TryGetValue($"Resources/{key}", context) ?? Manager.Value.MainResourceMap.TryGetValue(key, context))
+                : (Manager.Value.MainResourceMap.TryGetValue($"Resources/{key}") ?? Manager.Value.MainResourceMap.TryGetValue(key));
 
             string? value = candidate?.ValueAsString;
             return string.IsNullOrEmpty(value) ? $"[{key}]" : value;

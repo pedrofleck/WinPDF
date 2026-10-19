@@ -245,6 +245,15 @@
   <data name="RemoveBookmarkItemButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Remove bookmark</value></data>
   <data name="Settings_Viewing_ReopenHeader.Text" xml:space="preserve"><value>Reopen last document on startup</value></data>
   <data name="Settings_Viewing_ReopenDescription.Text" xml:space="preserve"><value>Automatically restore the last opened PDF file when launching the application</value></data>
+  <data name="Settings_Viewing_RememberPageHeader.Text" xml:space="preserve"><value>Remember last page</value></data>
+  <data name="Settings_Viewing_RememberPageDescription.Text" xml:space="preserve"><value>Resume reading on the last viewed page when reopening a document</value></data>
+  <data name="Settings_Viewing_SaveViewHeader.Text" xml:space="preserve"><value>Save view settings per document</value></data>
+  <data name="Settings_Viewing_SaveViewDescription.Text" xml:space="preserve"><value>Preserve and restore each document's zoom level and view mode (continuous or paged)</value></data>
+  <data name="Settings_Nav_Advanced.Text" xml:space="preserve"><value>Advanced</value></data>
+  <data name="Settings_Advanced_LanguageHeader.Text" xml:space="preserve"><value>Language</value></data>
+  <data name="Settings_Advanced_LanguageDescription.Text" xml:space="preserve"><value>Choose the display language for the application</value></data>
+  <data name="Settings_Advanced_LanguageSystem.Content" xml:space="preserve"><value>System default</value></data>
+  <data name="Settings_Advanced_LanguageRestartNotice.Text" xml:space="preserve"><value>Restart the app to fully apply the new language</value></data>
   <data name="MissingLastDocInfoBar_Title" xml:space="preserve"><value>Document not found</value></data>
   <data name="MissingLastDocInfoBar_MessageFormat" xml:space="preserve"><value>Could not reopen “{0}” because the file was moved or deleted.</value></data>
   <!-- ===================== QoL 5: Document Properties Sidebar ===================== -->

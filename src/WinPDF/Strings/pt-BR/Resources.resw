@@ -241,6 +241,15 @@
   <data name="RemoveBookmarkItemButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Remover marcador</value></data>
   <data name="Settings_Viewing_ReopenHeader.Text" xml:space="preserve"><value>Reabrir último documento ao iniciar</value></data>
   <data name="Settings_Viewing_ReopenDescription.Text" xml:space="preserve"><value>Restaurar automaticamente o último arquivo PDF aberto ao iniciar o aplicativo</value></data>
+  <data name="Settings_Viewing_RememberPageHeader.Text" xml:space="preserve"><value>Lembrar última página</value></data>
+  <data name="Settings_Viewing_RememberPageDescription.Text" xml:space="preserve"><value>Retoma a leitura na última página visualizada ao reabrir um documento</value></data>
+  <data name="Settings_Viewing_SaveViewHeader.Text" xml:space="preserve"><value>Salvar visualização por documento</value></data>
+  <data name="Settings_Viewing_SaveViewDescription.Text" xml:space="preserve"><value>Mantém e restaura o nível de zoom e o modo de exibição (contínuo ou paginado) ao reabrir o documento</value></data>
+  <data name="Settings_Nav_Advanced.Text" xml:space="preserve"><value>Avançado</value></data>
+  <data name="Settings_Advanced_LanguageHeader.Text" xml:space="preserve"><value>Idioma</value></data>
+  <data name="Settings_Advanced_LanguageDescription.Text" xml:space="preserve"><value>Escolha o idioma de exibição do aplicativo</value></data>
+  <data name="Settings_Advanced_LanguageSystem.Content" xml:space="preserve"><value>Padrão do Sistema</value></data>
+  <data name="Settings_Advanced_LanguageRestartNotice.Text" xml:space="preserve"><value>Reinicie o aplicativo para aplicar o novo idioma</value></data>
   <data name="MissingLastDocInfoBar_Title" xml:space="preserve"><value>Documento não encontrado</value></data>
   <data name="MissingLastDocInfoBar_MessageFormat" xml:space="preserve"><value>Não foi possível reabrir “{0}” porque o arquivo foi movido ou excluído.</value></data>
   <!-- ===================== QoL 5: Document Properties Sidebar ===================== -->

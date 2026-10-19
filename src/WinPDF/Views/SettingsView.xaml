@@ -5,6 +5,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    xmlns:converters="using:WinPDF.Converters"
     xmlns:vm="using:WinPDF.ViewModels"
     Background="Transparent"
     mc:Ignorable="d">
@@ -72,11 +73,10 @@
                                 VerticalAlignment="Center"
                                 FontSize="20"
                                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                Glyph="&#xE790;" />
+                                Glyph="&#xE793;" />
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
                                 <TextBlock
                                     x:Uid="Settings_Theme_Header"
-                                    FontWeight="SemiBold"
                                     Style="{StaticResource BodyTextBlockStyle}" />
                                 <TextBlock
                                     x:Uid="Settings_Theme_Description"
@@ -122,11 +122,10 @@
                                 VerticalAlignment="Center"
                                 FontSize="20"
                                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                Glyph="&#xE8A5;" />
+                                Glyph="&#xF28B;" />
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
                                 <TextBlock
                                     x:Uid="Settings_Viewing_ModeHeader"
-                                    FontWeight="SemiBold"
                                     Style="{StaticResource BodyTextBlockStyle}" />
                                 <TextBlock
                                     x:Uid="Settings_Viewing_ModeDescription"
@@ -158,11 +157,10 @@
                                 VerticalAlignment="Center"
                                 FontSize="20"
                                 Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                Glyph="&#xE71E;" />
+                                Glyph="&#xE773;" />
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
                                 <TextBlock
                                     x:Uid="Settings_Viewing_ZoomHeader"
-                                    FontWeight="SemiBold"
                                     Style="{StaticResource BodyTextBlockStyle}" />
                                 <TextBlock
                                     x:Uid="Settings_Viewing_ZoomDescription"
@@ -199,7 +197,6 @@
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
                                 <TextBlock
                                     x:Uid="Settings_Viewing_ReopenHeader"
-                                    FontWeight="SemiBold"
                                     Style="{StaticResource BodyTextBlockStyle}" />
                                 <TextBlock
                                     x:Uid="Settings_Viewing_ReopenDescription"
@@ -211,6 +208,68 @@
                                 Grid.Column="2"
                                 VerticalAlignment="Center"
                                 IsOn="{x:Bind ViewModel.ReopenLastDocument, Mode=TwoWay}" />
+                        </Grid>
+                    </Border>
+
+                    <!-- Card: Remember last page per document -->
+                    <Border
+                        Padding="16"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
+                            <FontIcon
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                FontSize="20"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Glyph="&#xF572;" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                                <TextBlock
+                                    x:Uid="Settings_Viewing_RememberPageHeader"
+                                    Style="{StaticResource BodyTextBlockStyle}" />
+                                <TextBlock
+                                    x:Uid="Settings_Viewing_RememberPageDescription"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ToggleSwitch
+                                Grid.Column="2"
+                                VerticalAlignment="Center"
+                                IsOn="{x:Bind ViewModel.RememberDocumentPage, Mode=TwoWay}" />
+                        </Grid>
+                    </Border>
+
+                    <!-- Card: Save view settings per document -->
+                    <Border
+                        Padding="16"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
+                            <FontIcon
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                FontSize="20"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Glyph="&#xE890;" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                                <TextBlock
+                                    x:Uid="Settings_Viewing_SaveViewHeader"
+                                    Style="{StaticResource BodyTextBlockStyle}" />
+                                <TextBlock
+                                    x:Uid="Settings_Viewing_SaveViewDescription"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ToggleSwitch
+                                Grid.Column="2"
+                                VerticalAlignment="Center"
+                                IsOn="{x:Bind ViewModel.SaveDocumentViewSettings, Mode=TwoWay}" />
                         </Grid>
                     </Border>
                 </StackPanel>
@@ -234,28 +293,91 @@
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1"
                         CornerRadius="4">
-                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
+                        <Grid
+                            ColumnDefinitions="Auto,*,Auto"
+                            ColumnSpacing="16"
+                            IsHitTestVisible="False"
+                            Opacity="0.5">
                             <FontIcon
                                 Grid.Column="0"
                                 VerticalAlignment="Center"
                                 FontSize="20"
-                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Foreground="{ThemeResource TextFillColorDisabledBrush}"
                                 Glyph="&#xE70F;" />
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
                                 <TextBlock
                                     x:Uid="Settings_Annotations_TouchHeader"
-                                    FontWeight="SemiBold"
+                                    Foreground="{ThemeResource TextFillColorDisabledBrush}"
                                     Style="{StaticResource BodyTextBlockStyle}" />
                                 <TextBlock
                                     x:Uid="Settings_Annotations_TouchDescription"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Foreground="{ThemeResource TextFillColorDisabledBrush}"
                                     Style="{StaticResource CaptionTextBlockStyle}"
                                     TextWrapping="Wrap" />
                             </StackPanel>
                             <ToggleSwitch
                                 Grid.Column="2"
                                 VerticalAlignment="Center"
+                                IsEnabled="False"
                                 IsOn="{x:Bind ViewModel.DefaultTouchDrawing, Mode=TwoWay}" />
+                        </Grid>
+                    </Border>
+                </StackPanel>
+
+                <!-- ========================================================= -->
+                <!-- Section 4: ADVANCED                                       -->
+                <!-- ========================================================= -->
+                <StackPanel x:Name="AdvancedSectionPanel" Spacing="12">
+                    <StackPanel.RenderTransform>
+                        <CompositeTransform x:Name="AdvancedSectionTransform" />
+                    </StackPanel.RenderTransform>
+                    <TextBlock
+                        x:Uid="Settings_Nav_Advanced"
+                        FontWeight="SemiBold"
+                        Style="{StaticResource SubtitleTextBlockStyle}" />
+
+                    <!-- Card: Application display language -->
+                    <Border
+                        Padding="16"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
+                            <FontIcon
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                FontSize="20"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Glyph="&#xE774;" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                                <TextBlock
+                                    x:Uid="Settings_Advanced_LanguageHeader"
+                                    Style="{StaticResource BodyTextBlockStyle}" />
+                                <TextBlock
+                                    x:Uid="Settings_Advanced_LanguageDescription"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    TextWrapping="Wrap" />
+                                <TextBlock
+                                    x:Uid="Settings_Advanced_LanguageRestartNotice"
+                                    Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    TextWrapping="Wrap"
+                                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsLanguageRestartNoticeVisible), Mode=OneWay}" />
+                            </StackPanel>
+                            <ComboBox
+                                Grid.Column="2"
+                                Width="180"
+                                VerticalAlignment="Center"
+                                SelectedIndex="{x:Bind ViewModel.LanguageIndex, Mode=TwoWay}">
+                                <ComboBoxItem x:Uid="Settings_Advanced_LanguageSystem" />
+                                <ComboBoxItem IsEnabled="False" IsHitTestVisible="False" MinHeight="1" Height="9" Padding="0">
+                                    <MenuFlyoutSeparator Margin="-12,0,-12,0" />
+                                </ComboBoxItem>
+                                <ComboBoxItem Content="English" />
+                                <ComboBoxItem Content="Português (Brasil)" />
+                            </ComboBox>
                         </Grid>
                     </Border>
                 </StackPanel>

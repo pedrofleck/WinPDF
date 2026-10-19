@@ -1290,6 +1290,41 @@ public sealed partial class MainWindow : Window
             {
                 s.LastOpenedFilePath = doc.FilePath;
                 s.LastOpenedPageIndex = doc.CurrentPageIndex;
+
+                int? pageToSave = s.RememberDocumentPage ? doc.CurrentPageIndex : null;
+                bool saveView = s.SaveDocumentViewSettings;
+                double? zoomToSave = saveView ? doc.ZoomFactor : null;
+                ViewMode? viewModeToSave = saveView ? ViewModel.ViewMode : null;
+
+                if (pageToSave.HasValue || saveView)
+                {
+                    if (!s.DocumentStates.TryGetValue(doc.FilePath, out var docState) || docState is null)
+                    {
+                        docState = new Models.SavedDocumentState();
+                        s.DocumentStates[doc.FilePath] = docState;
+                    }
+
+                    if (pageToSave.HasValue)
+                    {
+                        docState.PageIndex = pageToSave.Value;
+                    }
+
+                    if (saveView)
+                    {
+                        docState.HasCustomViewSettings = true;
+                        if (zoomToSave.HasValue && double.IsFinite(zoomToSave.Value))
+                        {
+                            docState.ZoomFactor = zoomToSave.Value;
+                        }
+
+                        if (viewModeToSave.HasValue)
+                        {
+                            docState.ViewMode = viewModeToSave.Value;
+                        }
+                    }
+
+                    docState.LastOpenedUtc = DateTime.UtcNow;
+                }
             }
             else
             {

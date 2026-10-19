@@ -15,5 +15,8 @@ public enum SettingsCategory
     Annotations,
 
     /// <summary>Application metadata, version, architecture, and open-source credits.</summary>
-    About
+    About,
+
+    /// <summary>Advanced system preferences, language selection, and diagnostics.</summary>
+    Advanced
 }

@@ -156,6 +156,95 @@ public sealed partial class SettingsViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the last viewed page of each document should be remembered and restored.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool RememberDocumentPage { get; set; }
+
+    partial void OnRememberDocumentPageChanged(bool value)
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        _settingsService.Update(s => s.RememberDocumentPage = value);
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether each document's custom view settings (zoom level and continuous/paged mode) should be remembered and restored.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool SaveDocumentViewSettings { get; set; }
+
+    partial void OnSaveDocumentViewSettingsChanged(bool value)
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        _settingsService.Update(s => s.SaveDocumentViewSettings = value);
+    }
+
+    private readonly string _initialLanguage;
+
+    /// <summary>
+    /// Gets or sets the application language override code (e.g. "", "en-US", "pt-BR").
+    /// </summary>
+    [ObservableProperty]
+    public partial string SelectedLanguage { get; set; } = string.Empty;
+
+    partial void OnSelectedLanguageChanged(string value)
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        _settingsService.Update(s => s.AppLanguage = value);
+        try
+        {
+            Microsoft.Windows.Globalization.ApplicationLanguages.PrimaryLanguageOverride = value;
+        }
+        catch
+        {
+        }
+
+        OnPropertyChanged(nameof(LanguageIndex));
+        OnPropertyChanged(nameof(IsLanguageRestartNoticeVisible));
+    }
+
+    /// <summary>
+    /// Gets or sets the language ComboBox selected index.
+    /// 0 = System Default, 2 = English, 3 = Português (Brasil). Index 1 is the non-selectable separator.
+    /// </summary>
+    public int LanguageIndex
+    {
+        get => SelectedLanguage switch
+        {
+            "en-US" => 2,
+            "pt-BR" => 3,
+            _ => 0
+        };
+        set
+        {
+            SelectedLanguage = value switch
+            {
+                2 => "en-US",
+                3 => "pt-BR",
+                _ => string.Empty
+            };
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the language was changed from the launch language, requiring an app restart.
+    /// </summary>
+    public bool IsLanguageRestartNoticeVisible =>
+        !string.Equals(_initialLanguage, SelectedLanguage, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Gets or sets a value indicating whether touch drawing is active by default.
     /// </summary>
     public bool DefaultTouchDrawing
@@ -198,6 +287,10 @@ public sealed partial class SettingsViewModel : ObservableObject
         _defaultViewMode = _settingsService.Settings.DefaultViewMode;
         DefaultZoomIndex = Math.Clamp(_settingsService.Settings.DefaultZoomIndex, 0, 2);
         ReopenLastDocument = _settingsService.Settings.ReopenLastDocument;
+        RememberDocumentPage = _settingsService.Settings.RememberDocumentPage;
+        SaveDocumentViewSettings = _settingsService.Settings.SaveDocumentViewSettings;
+        SelectedLanguage = _settingsService.Settings.AppLanguage ?? string.Empty;
+        _initialLanguage = SelectedLanguage;
         _isInitializing = false;
 
         _shellViewModel.PropertyChanged += (_, e) =>

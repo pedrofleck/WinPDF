@@ -63,6 +63,7 @@ public sealed partial class SettingsView : Page
             (ViewingSectionPanel, ViewingSectionTransform, 50),
             (AboutPanel, AboutPanelTransform, 45),
             (AnnotationsSectionPanel, AnnotationsSectionTransform, 75),
+            (AdvancedSectionPanel, AdvancedSectionTransform, 90),
         ];
 
         var sb = new Storyboard();

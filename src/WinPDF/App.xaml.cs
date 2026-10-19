@@ -51,6 +51,28 @@ public partial class App : Application
 
         _services = ConfigureServices();
 
+        ISettingsService settingsService = _services.GetRequiredService<ISettingsService>();
+        try
+        {
+            string appLang = settingsService.Settings.AppLanguage;
+            if (!string.IsNullOrEmpty(appLang))
+            {
+                Microsoft.Windows.Globalization.ApplicationLanguages.PrimaryLanguageOverride = appLang;
+                System.Globalization.CultureInfo culture = System.Globalization.CultureInfo.GetCultureInfo(appLang);
+                System.Globalization.CultureInfo.CurrentUICulture = culture;
+                System.Globalization.CultureInfo.CurrentCulture = culture;
+                System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = culture;
+                System.Globalization.CultureInfo.DefaultThreadCurrentCulture = culture;
+            }
+            else
+            {
+                Microsoft.Windows.Globalization.ApplicationLanguages.PrimaryLanguageOverride = string.Empty;
+            }
+        }
+        catch
+        {
+        }
+
         InitializeComponent();
 
         string[] cmdArgs = Environment.GetCommandLineArgs();

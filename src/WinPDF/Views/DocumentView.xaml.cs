@@ -394,16 +394,21 @@ public sealed partial class DocumentView : Page
                 {
                     if (ViewModel.CurrentDocument is { } activeDoc)
                     {
-                        if (ViewModel.DefaultZoomIndex == 0 && ContinuousScrollViewer.ActualWidth > 100)
-                        {
-                            ExecuteFitHorizontal(force: true);
-                        }
-                        else if (ViewModel.DefaultZoomIndex == 1 && ContinuousScrollViewer.ActualHeight > 100)
-                        {
-                            ExecuteFitVertical(force: true);
-                        }
+                        Models.SavedDocumentState? savedState = null;
+                        bool hasCustomRestoredZoom = ViewModel.SettingsService.Settings.SaveDocumentViewSettings &&
+                            !string.IsNullOrWhiteSpace(activeDoc.FilePath) &&
+                            ViewModel.SettingsService.TryGetDocumentState(activeDoc.FilePath, out savedState) &&
+                            savedState is { HasCustomViewSettings: true, ZoomFactor: { } z } &&
+                            z >= ViewModels.DocumentViewModel.MinZoom && z <= ViewModels.DocumentViewModel.MaxZoom;
 
-                        ScrollToPage(activeDoc.CurrentPageIndex, allowUnclampedOffset: true);
+                        if (hasCustomRestoredZoom && savedState?.ZoomFactor is { } restoredZoom)
+                        {
+                            ApplyCustomRestoredZoom(activeDoc, restoredZoom);
+                        }
+                        else
+                        {
+                            ApplyZoomPreferenceByIndex(ViewModel.DefaultZoomIndex);
+                        }
                     }
 
                     ReturnFocusToViewer();
@@ -1756,6 +1761,34 @@ public sealed partial class DocumentView : Page
         }
     }
 
+    private void ApplyCustomRestoredZoom(DocumentViewModel doc, double restoredZoom)
+    {
+        _isFittedVertically = false;
+        double? targetVOffset = null;
+        if (doc.IsContinuous)
+        {
+            double targetY = 24.0;
+            var pages = doc.Pages;
+            int step = doc.IsDoublePage ? 2 : 1;
+            int targetRow = doc.CurrentPageIndex / step;
+            for (int r = 0; r < targetRow && r * step < pages.Count; r++)
+            {
+                targetY += pages[r * step].DisplayHeightDip + 16.0;
+            }
+            targetVOffset = targetY * restoredZoom;
+        }
+        else
+        {
+            targetVOffset = 0;
+        }
+
+        ContinuousScrollViewer.ChangeView(0, targetVOffset, (float)restoredZoom, disableAnimation: true);
+        doc.ZoomFactor = restoredZoom;
+        UpdateZoomSlider(restoredZoom);
+        UpdateViewportPages(restoredZoom);
+        ScheduleViewportUpdate();
+    }
+
     private void ApplyZoomPreferenceByIndex(int zoomIndex)
     {
         switch (zoomIndex)
@@ -1769,6 +1802,10 @@ public sealed partial class DocumentView : Page
             default:
                 _isFittedVertically = false;
                 ApplyZoomAroundCenter(1.0f);
+                if (ViewModel.CurrentDocument is { } doc)
+                {
+                    ScrollToPage(doc.CurrentPageIndex, allowUnclampedOffset: true);
+                }
                 break;
         }
     }
