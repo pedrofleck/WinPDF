@@ -628,6 +628,7 @@ public sealed partial class ThumbnailsTabPage : Page
                     presenter.Item = thumbnail;
                 }
 
+                presenter.IsNightMode = thumbnail.IsNightMode;
                 presenter.SyncCardDimensions();
                 return;
             }

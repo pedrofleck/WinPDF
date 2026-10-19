@@ -46,9 +46,43 @@ public sealed class ThumbnailPresenter : Grid
             typeof(ThumbnailPresenter),
             new PropertyMetadata(null, OnPageInfoPropertyChanged));
 
+    /// <summary>
+    /// Identifies the <see cref="IsNightMode"/> dependency property.
+    /// </summary>
+    public static readonly DependencyProperty IsNightModeProperty =
+        DependencyProperty.Register(
+            nameof(IsNightMode),
+            typeof(bool),
+            typeof(ThumbnailPresenter),
+            new PropertyMetadata(false, OnIsNightModePropertyChanged));
+
     private readonly Image _image;
     private ThumbnailItemViewModel? _observedItem;
     private WriteableBitmap? _reusableBitmap;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether night mode color inversion is enabled.
+    /// </summary>
+    public bool IsNightMode
+    {
+        get => (bool)GetValue(IsNightModeProperty);
+        set => SetValue(IsNightModeProperty, value);
+    }
+
+    private static void OnIsNightModePropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is ThumbnailPresenter presenter)
+        {
+            if (presenter.DispatcherQueue.HasThreadAccess)
+            {
+                presenter.UpdateImage();
+            }
+            else
+            {
+                presenter.DispatcherQueue.TryEnqueue(presenter.UpdateImage);
+            }
+        }
+    }
 
     /// <summary>
     /// Gets or sets the thumbnail view model to display.
@@ -180,6 +214,17 @@ public sealed class ThumbnailPresenter : Grid
                 DispatcherQueue.TryEnqueue(UpdateImage);
             }
         }
+        else if (e.PropertyName == nameof(ThumbnailItemViewModel.IsNightMode))
+        {
+            if (DispatcherQueue.HasThreadAccess)
+            {
+                UpdateImage();
+            }
+            else
+            {
+                DispatcherQueue.TryEnqueue(UpdateImage);
+            }
+        }
         else if (e.PropertyName is nameof(ThumbnailItemViewModel.WidthDip) or nameof(ThumbnailItemViewModel.HeightDip))
         {
             if (DispatcherQueue.HasThreadAccess)
@@ -263,6 +308,9 @@ public sealed class ThumbnailPresenter : Grid
                                       _reusableBitmap.PixelHeight == entry.Height)
                 ? _reusableBitmap
                 : (_reusableBitmap = new WriteableBitmap(entry.Width, entry.Height));
+
+            bool isNight = Item?.IsNightMode ?? IsNightMode;
+
             if (bitmap.PixelBuffer is IBufferByteAccess byteAccess)
             {
                 byte* dest = byteAccess.Buffer;
@@ -270,15 +318,13 @@ public sealed class ThumbnailPresenter : Grid
                 {
                     fixed (byte* src = entry.Pixels)
                     {
-                        long bytesToCopy = Math.Min(entry.ByteLength, (long)entry.Stride * entry.Height);
-                        Buffer.MemoryCopy(src, dest, bytesToCopy, bytesToCopy);
+                        CopyPixels(src, dest, entry.ByteLength, entry.Stride, entry.Height, isNight);
                     }
                 }
                 else if (entry.Bitmap is { IsDisposed: false } lease)
                 {
                     byte* src = (byte*)lease.Scan0;
-                    long bytesToCopy = Math.Min(lease.SizeInBytes, (long)lease.Stride * lease.Height);
-                    Buffer.MemoryCopy(src, dest, bytesToCopy, bytesToCopy);
+                    CopyPixels(src, dest, lease.SizeInBytes, lease.Stride, lease.Height, isNight);
                 }
             }
             else
@@ -286,11 +332,36 @@ public sealed class ThumbnailPresenter : Grid
                 using Stream stream = bitmap.PixelBuffer.AsStream();
                 if (entry.Pixels is { Length: > 0 })
                 {
-                    stream.Write(entry.Pixels, 0, entry.ByteLength);
+                    if (isNight)
+                    {
+                        byte[] temp = new byte[entry.ByteLength];
+                        fixed (byte* s = entry.Pixels, d = temp)
+                        {
+                            CopyPixels(s, d, entry.ByteLength, entry.Stride, entry.Height, true);
+                        }
+                        stream.Write(temp);
+                    }
+                    else
+                    {
+                        stream.Write(entry.Pixels, 0, entry.ByteLength);
+                    }
                 }
                 else if (entry.Bitmap is { IsDisposed: false } lease)
                 {
-                    stream.Write(lease.AsSpan());
+                    if (isNight)
+                    {
+                        int byteCount = (int)Math.Min(lease.SizeInBytes, (long)lease.Stride * lease.Height);
+                        byte[] temp = new byte[byteCount];
+                        fixed (byte* d = temp)
+                        {
+                            CopyPixels((byte*)lease.Scan0, d, byteCount, lease.Stride, lease.Height, true);
+                        }
+                        stream.Write(temp);
+                    }
+                    else
+                    {
+                        stream.Write(lease.AsSpan());
+                    }
                 }
             }
 
@@ -300,6 +371,27 @@ public sealed class ThumbnailPresenter : Grid
         catch
         {
             return null;
+        }
+    }
+
+    private static unsafe void CopyPixels(byte* src, byte* dest, long byteLength, int stride, int height, bool isNight)
+    {
+        long bytesToCopy = Math.Min(byteLength, (long)stride * height);
+        if (!isNight)
+        {
+            Buffer.MemoryCopy(src, dest, bytesToCopy, bytesToCopy);
+        }
+        else
+        {
+            // Invert RGB channels while leaving Alpha (A) 100% untouched:
+            // In BGRA 32-bit little-endian words, (pixel ^ 0x00FFFFFF) inverts B, G, and R, leaving A intact.
+            uint* pSrc = (uint*)src;
+            uint* pDest = (uint*)dest;
+            long pixelCount = bytesToCopy / 4;
+            for (long i = 0; i < pixelCount; i++)
+            {
+                pDest[i] = pSrc[i] ^ 0x00FFFFFF;
+            }
         }
     }
 }

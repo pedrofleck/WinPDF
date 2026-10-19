@@ -514,6 +514,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         {
             DisplayedRows[i].IsNightMode = value;
         }
+
+        for (int i = 0; i < Thumbnails.Count; i++)
+        {
+            Thumbnails[i].IsNightMode = value;
+        }
     }
 
     /// <summary>
@@ -958,7 +963,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         foreach (PdfPageInfo page in info.Pages)
         {
             (double widthDip, double heightDip) = FitThumbnail(page, Rotation);
-            Thumbnails.Add(new ThumbnailItemViewModel(page.Index, widthDip, heightDip) { Owner = this });
+            Thumbnails.Add(new ThumbnailItemViewModel(page.Index, widthDip, heightDip) { Owner = this, IsNightMode = IsNightMode });
         }
 
         if (Thumbnails.Count > 0)

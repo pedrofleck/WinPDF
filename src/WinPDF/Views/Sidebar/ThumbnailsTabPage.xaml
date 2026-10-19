@@ -64,7 +64,7 @@
                                         FontSize="28"
                                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                         Glyph="&#xE8A5;" />
-                                    <controls:ThumbnailPresenter Item="{x:Bind Mode=OneWay}" />
+                                    <controls:ThumbnailPresenter Item="{x:Bind Mode=OneWay}" IsNightMode="{x:Bind IsNightMode, Mode=OneWay}" />
                                     <Border
                                         HorizontalAlignment="Stretch"
                                         VerticalAlignment="Stretch"

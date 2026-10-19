@@ -45,7 +45,7 @@ Checklist de melhorias de usabilidade, ergonomia visual (Fluent 2 / Grid de 4px)
 - [x] **Proporção Real da Página nas Miniaturas:** Respeitar o `AspectRatio` real (`WidthPt / HeightPt`) de cada folha sem forçar A4.
 - [x] **Sincronização Automática da Barra Lateral:** Acompanhar a página atual com `ScrollIntoView` suave durante a rolagem do documento.
 - [x] **Modo Noturno de Leitura na GPU (Inversão Inteligente via Win2D).**
-- [ ] **Modo Noturno nas Miniaturas da Barra Lateral:** Propagar `IsNightMode` para `Thumbnails` no `DocumentViewModel` e aplicar inversão instantânea RGB bit a bit (`pixel ^ 0x00FFFFFF`) no `ThumbnailPresenter` (preservando o cache sem re-renderização no PDFium).
+- [x] **Modo Noturno nas Miniaturas da Barra Lateral:** Propagar `IsNightMode` para `Thumbnails` no `DocumentViewModel` e aplicar inversão instantânea RGB bit a bit (`pixel ^ 0x00FFFFFF`) no `ThumbnailPresenter` (preservando o cache sem re-renderização no PDFium).
 
 ---
 

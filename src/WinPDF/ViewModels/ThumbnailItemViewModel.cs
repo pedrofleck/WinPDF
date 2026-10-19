@@ -31,6 +31,12 @@ public sealed partial class ThumbnailItemViewModel : ObservableObject
     public partial bool IsCurrentPage { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether night mode (color inversion) is active on this thumbnail.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsNightMode { get; set; }
+
+    /// <summary>
     /// Gets or sets the aspect ratio width for the thumbnail placeholder card.
     /// </summary>
     [ObservableProperty]
