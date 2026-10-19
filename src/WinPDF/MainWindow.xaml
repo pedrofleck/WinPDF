@@ -113,6 +113,9 @@
                                 Margin="8,0,0,0"
                                 VerticalAlignment="Center"
                                 FontWeight="SemiBold"
+                                TextWrapping="NoWrap"
+                                TextTrimming="None"
+                                MaxLines="1"
                                 Style="{StaticResource CaptionTextBlockStyle}">
                                 <TextBlock.RenderTransform>
                                     <CompositeTransform x:Name="AppTitleTextTransform" />
