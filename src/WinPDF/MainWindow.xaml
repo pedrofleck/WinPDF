@@ -21,6 +21,8 @@
 
     <Grid
         x:Name="RootGrid"
+        MinWidth="500"
+        MinHeight="360"
         Background="Transparent"
         RowDefinitions="Auto,*"
         AllowDrop="True"
@@ -52,32 +54,43 @@
                 Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.IsSettingsOpen), Mode=OneWay}">
 
                 <!-- Group 1: Sidebar Toggle and App Logo/Name -->
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button
-                        x:Name="SidebarToggleButton"
-                        x:Uid="SidebarToggle"
-                        Width="36"
-                        Height="32"
-                        Padding="0"
-                        Click="OnSidebarToggleClick"
-                        Command="{x:Bind ViewModel.ToggleSidebarCommand}"
-                        CornerRadius="4"
-                        IsTabStop="False"
-                        Style="{StaticResource SubtleButtonStyle}"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
-                        <AnimatedIcon
-                            x:Name="SidebarToggleAnimatedIcon"
-                            Width="16"
-                            Height="16"
-                            AnimatedIcon.State="Normal">
-                            <AnimatedIcon.Source>
-                                <animatedvisuals:AnimatedGlobalNavigationButtonVisualSource />
-                            </AnimatedIcon.Source>
-                            <AnimatedIcon.FallbackIconSource>
-                                <FontIconSource FontSize="16" Glyph="&#xE700;" />
-                            </AnimatedIcon.FallbackIconSource>
-                        </AnimatedIcon>
-                    </Button>
+                <StackPanel Orientation="Horizontal" Spacing="0">
+                    <Grid
+                        x:Name="SidebarToggleClipContainer"
+                        VerticalAlignment="Center"
+                        Visibility="Collapsed">
+                        <Grid.Clip>
+                            <RectangleGeometry x:Name="SidebarToggleClip" Rect="0,0,48,36" />
+                        </Grid.Clip>
+                        <Button
+                            x:Name="SidebarToggleButton"
+                            x:Uid="SidebarToggle"
+                            Width="36"
+                            Height="32"
+                            Margin="0,0,8,0"
+                            Padding="0"
+                            Click="OnSidebarToggleClick"
+                            Command="{x:Bind ViewModel.ToggleSidebarCommand}"
+                            CornerRadius="4"
+                            IsTabStop="False"
+                            Style="{StaticResource SubtleButtonStyle}">
+                            <Button.RenderTransform>
+                                <CompositeTransform x:Name="SidebarToggleTransform" />
+                            </Button.RenderTransform>
+                            <AnimatedIcon
+                                x:Name="SidebarToggleAnimatedIcon"
+                                Width="16"
+                                Height="16"
+                                AnimatedIcon.State="Normal">
+                                <AnimatedIcon.Source>
+                                    <animatedvisuals:AnimatedGlobalNavigationButtonVisualSource />
+                                </AnimatedIcon.Source>
+                                <AnimatedIcon.FallbackIconSource>
+                                    <FontIconSource FontSize="16" Glyph="&#xE700;" />
+                                </AnimatedIcon.FallbackIconSource>
+                            </AnimatedIcon>
+                        </Button>
+                    </Grid>
 
                     <StackPanel
                         VerticalAlignment="Center"
@@ -711,8 +724,8 @@
                     x:Name="MainContentBackdropBorder"
                     Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                    BorderThickness="{x:Bind converters:UiHelpers.MainContainerBorderThickness(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}"
-                    CornerRadius="{x:Bind converters:UiHelpers.MainContainerCornerRadius(ViewModel.HasDocument, ViewModel.IsSidebarOpen, ViewModel.IsSettingsOpen), Mode=OneWay}"
+                    BorderThickness="1,1,0,0"
+                    CornerRadius="8,0,0,0"
                     Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
                     <Border.RenderTransform>
                         <CompositeTransform x:Name="MainContentBackdropTransform" />

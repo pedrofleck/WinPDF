@@ -57,6 +57,16 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsCompactChrome { get; set; }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether the window width is at least 950 DIPs so the sidebar is allowed.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsSidebarAllowed { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether programmatic sidebar changes should avoid overwriting user settings.
+    /// </summary>
+    public bool SuppressSidebarSettingsPersistence { get; set; }
 
     /// <summary>
     /// Gets or sets the active tab displayed in the sidebar (Thumbnails, Outline, Annotations, Bookmarks, Attachments).
@@ -67,7 +77,7 @@ public sealed partial class ShellViewModel : ObservableObject
     partial void OnIsSidebarOpenChanged(bool value)
     {
         CurrentDocument?.SetThumbnailsActive(!IsSettingsOpen && value && SidebarTab == SidebarTab.Thumbnails);
-        if (!_isInitializingSettings && !IsPresentationMode && !IsFullScreen)
+        if (!_isInitializingSettings && !IsPresentationMode && !IsFullScreen && IsSidebarAllowed && !SuppressSidebarSettingsPersistence)
         {
             _settingsService.Update(s => s.IsSidebarOpen = value);
         }
@@ -332,7 +342,10 @@ public sealed partial class ShellViewModel : ObservableObject
 
             if (_sidebarOpenBeforePresentation)
             {
-                IsSidebarOpen = true;
+                if (IsSidebarAllowed)
+                {
+                    IsSidebarOpen = true;
+                }
                 _sidebarOpenBeforePresentation = false;
             }
         }
@@ -967,7 +980,10 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     public void ToggleSidebar()
     {
-        IsSidebarOpen = !IsSidebarOpen;
+        if (IsSidebarAllowed)
+        {
+            IsSidebarOpen = !IsSidebarOpen;
+        }
     }
 
     /// <summary>

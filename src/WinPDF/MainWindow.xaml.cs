@@ -27,18 +27,61 @@ namespace WinPDF;
 public sealed partial class MainWindow : Window
 {
     private const double CompactBreakpoint = 750.0;
+    private const double SidebarAutoCloseBreakpoint = 950.0;
+    private const double SidebarMaxConstraintBreakpoint = 1200.0;
+    private const double MinDocumentAreaWithSidebarDip = 720.0;
     private const double MinWindowWidthDip = 500.0;
     private const double MinWindowHeightDip = 360.0;
-    private const double MinSidebarWidth = 220.0;
+    private const double MinSidebarWidth = 230.0;
     private const double MaxSidebarWidth = 480.0;
     private const double DefaultSidebarWidth = 260.0;
+    private const double SidebarToggleSlotWidthDip = 44.0;
+    private const uint WM_GETMINMAXINFO = 0x0024;
+    private const uint WM_DPICHANGED = 0x02E0;
+    private const int SM_CXSIZEFRAME = 32;
+    private const int SM_CYSIZEFRAME = 33;
+    private const int SM_CXPADDEDBORDER = 92;
+    private static readonly UIntPtr WindowSubclassId = new(0x57504446);
+
+    private delegate IntPtr SubclassProc(IntPtr hWnd, uint uMsg, UIntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, UIntPtr dwRefData);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MINMAXINFO
+    {
+        public POINT ptReserved;
+        public POINT ptMaxSize;
+        public POINT ptMaxPosition;
+        public POINT ptMinTrackSize;
+        public POINT ptMaxTrackSize;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
 
     private readonly Windows.UI.ViewManagement.UISettings _uiSettings = new();
     private double _savedSidebarWidth = DefaultSidebarWidth;
+    private double _effectiveSidebarWidth = DefaultSidebarWidth;
     private bool _wasSidebarClosedByNarrowWindow;
-    private bool _isInternalSidebarToggle;
+    private bool _isNarrowWindowSidebarToggle;
+    private bool _suppressSidebarAnimation;
+    private bool _isSidebarOpenCloseAnimating;
     private int _previousSidebarIndex = -1;
-
+    private IntPtr _hwnd;
+    private SubclassProc? _subclassDelegate;
+    private IntPtr _subclassPtr;
 
     [LibraryImport("user32.dll", EntryPoint = "SendMessageW", SetLastError = true)]
     private static partial IntPtr SendMessage(IntPtr hWnd, uint Msg, UIntPtr wParam, IntPtr lParam);
@@ -48,6 +91,28 @@ public sealed partial class MainWindow : Window
 
     [LibraryImport("user32.dll")]
     private static partial uint GetDpiForWindow(IntPtr hwnd);
+
+    [LibraryImport("user32.dll")]
+    private static partial int GetSystemMetricsForDpi(int nIndex, uint dpi);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+
+    [LibraryImport("comctl32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetWindowSubclass(IntPtr hWnd, IntPtr pfnSubclass, UIntPtr uIdSubclass, UIntPtr dwRefData);
+
+    [LibraryImport("comctl32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool RemoveWindowSubclass(IntPtr hWnd, IntPtr pfnSubclass, UIntPtr uIdSubclass);
+
+    [LibraryImport("comctl32.dll")]
+    private static partial IntPtr DefSubclassProc(IntPtr hWnd, uint uMsg, UIntPtr wParam, IntPtr lParam);
 
     /// <summary>
     /// Gets the shell view model orchestrating window state, documents, and navigation.
@@ -119,8 +184,11 @@ public sealed partial class MainWindow : Window
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         RegisterTitleBarAnimatedIconPointerHandlers();
 
+        InstallMinSizeWindowSubclass();
+
         _savedSidebarWidth = Math.Clamp(ViewModel.SettingsService.Settings.SidebarWidth, MinSidebarWidth, MaxSidebarWidth);
-        SidebarPaneContainer.Width = _savedSidebarWidth;
+        _effectiveSidebarWidth = _savedSidebarWidth;
+        SidebarPaneContainer.Width = _effectiveSidebarWidth;
         SetupSidebarClipping();
         Closed += OnMainWindowClosed;
 
@@ -137,21 +205,34 @@ public sealed partial class MainWindow : Window
             root.Loaded += (_, _) =>
             {
                 SetInitialWindowBounds();
+                InstallMinSizeWindowSubclass();
                 UpdateWindowMinimumSize();
                 ApplyRequestedThemeFromViewModel(isStartup: true);
                 UpdateTitleBarTheme();
                 UpdateTitleBarInsets();
                 UpdateTitleBarNonClientRegions();
+
+                double initialWidthDip = root.ActualWidth > 0 ? root.ActualWidth : 1280.0;
+                bool initialSidebarAllowed = initialWidthDip >= SidebarAutoCloseBreakpoint;
+                ViewModel.IsSidebarAllowed = initialSidebarAllowed;
+                _effectiveSidebarWidth = GetEffectiveSidebarWidth(initialWidthDip);
+                SidebarPaneContainer.Width = _effectiveSidebarWidth;
+
+                if (!initialSidebarAllowed && ViewModel.IsSidebarOpen)
+                {
+                    _wasSidebarClosedByNarrowWindow = true;
+                    SetSidebarOpenFromWindowThreshold(false, animate: false);
+                }
+
+                ApplySidebarToggleStateImmediate(collapse: !ViewModel.HasDocument || !initialSidebarAllowed);
+
+                bool initialCompact = initialWidthDip < CompactBreakpoint;
+                ViewModel.IsCompactChrome = initialCompact;
+                ApplyTitleBarCompactStateImmediate(initialCompact);
+
                 UpdateSidebarLayout();
                 UpdateSidebarClipGeometries();
                 UpdateMainContainerStyle();
-
-                if (root.ActualWidth > 0)
-                {
-                    bool initialCompact = root.ActualWidth < CompactBreakpoint;
-                    ViewModel.IsCompactChrome = initialCompact;
-                    ApplyTitleBarCompactStateImmediate(initialCompact);
-                }
 
                 // Initial frame navigation
                 MainContentFrame.Navigate(typeof(DocumentView), ViewModel);
@@ -159,7 +240,7 @@ public sealed partial class MainWindow : Window
                 {
                     initialDocView.SetSidebarStateImmediate(
                         ViewModel.HasDocument && ViewModel.IsSidebarOpen,
-                        _savedSidebarWidth);
+                        _effectiveSidebarWidth);
                 }
 
                 SelectSidebarTab(ViewModel.SidebarTab);
@@ -226,22 +307,137 @@ public sealed partial class MainWindow : Window
         UpdateWindowMinimumSize(scale);
     }
 
+    private void InstallMinSizeWindowSubclass()
+    {
+        try
+        {
+            if (_hwnd == IntPtr.Zero)
+            {
+                _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            }
+
+            if (_hwnd != IntPtr.Zero && _subclassDelegate is null)
+            {
+                _subclassDelegate = WindowSubclassProc;
+                _subclassPtr = Marshal.GetFunctionPointerForDelegate(_subclassDelegate);
+                _ = SetWindowSubclass(_hwnd, _subclassPtr, WindowSubclassId, UIntPtr.Zero);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private void ComputeMinWindowTrackSizePx(IntPtr hwnd, double explicitScale, out int minWidthPx, out int minHeightPx)
+    {
+        uint dpi = hwnd != IntPtr.Zero ? GetDpiForWindow(hwnd) : 96u;
+        if (dpi == 0)
+        {
+            dpi = 96u;
+        }
+
+        double scale = explicitScale > 0.0 ? explicitScale : (dpi / 96.0);
+        int extraW = 0;
+        int extraH = 0;
+
+        if (hwnd != IntPtr.Zero && GetWindowRect(hwnd, out RECT winRect) && GetClientRect(hwnd, out RECT clientRect))
+        {
+            int winW = winRect.Right - winRect.Left;
+            int clientW = clientRect.Right - clientRect.Left;
+            if (clientW > 0 && winW >= clientW && (winW - clientW) <= (int)Math.Round(64 * scale))
+            {
+                extraW = winW - clientW;
+            }
+
+            int winH = winRect.Bottom - winRect.Top;
+            int clientH = clientRect.Bottom - clientRect.Top;
+            if (clientH > 0 && winH >= clientH && (winH - clientH) <= (int)Math.Round(64 * scale))
+            {
+                extraH = winH - clientH;
+            }
+        }
+
+        if (extraW == 0)
+        {
+            try
+            {
+                int borderX = GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+                if (borderX > 0 && borderX <= 32)
+                {
+                    extraW = borderX * 2;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        if (extraH == 0)
+        {
+            try
+            {
+                int borderY = GetSystemMetricsForDpi(SM_CYSIZEFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
+                if (borderY > 0 && borderY <= 32)
+                {
+                    extraH = borderY;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        minWidthPx = (int)Math.Ceiling(MinWindowWidthDip * scale) + extraW;
+        minHeightPx = (int)Math.Ceiling(MinWindowHeightDip * scale) + extraH;
+    }
+
+    private IntPtr WindowSubclassProc(IntPtr hWnd, uint uMsg, UIntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, UIntPtr dwRefData)
+    {
+        IntPtr result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
+
+        if (uMsg == WM_GETMINMAXINFO && lParam != IntPtr.Zero)
+        {
+            if (ViewModel?.IsFullScreen != true && ViewModel?.IsPresentationMode != true)
+            {
+                ComputeMinWindowTrackSizePx(hWnd, 0.0, out int minW, out int minH);
+                unsafe
+                {
+                    MINMAXINFO* mmi = (MINMAXINFO*)lParam;
+                    if (mmi->ptMinTrackSize.X < minW)
+                    {
+                        mmi->ptMinTrackSize.X = minW;
+                    }
+
+                    if (mmi->ptMinTrackSize.Y < minH)
+                    {
+                        mmi->ptMinTrackSize.Y = minH;
+                    }
+                }
+            }
+        }
+        else if (uMsg == WM_DPICHANGED)
+        {
+            DispatcherQueue?.TryEnqueue(() => UpdateWindowMinimumSize());
+        }
+
+        return result;
+    }
+
     private void UpdateWindowMinimumSize(double explicitScale = 0.0)
     {
         try
         {
             if (AppWindow.Presenter is OverlappedPresenter presenter)
             {
-                double scale = explicitScale > 0.0 ? explicitScale : (Content?.XamlRoot?.RasterizationScale ?? 0.0);
-                if (scale <= 0.0)
+                if (_hwnd == IntPtr.Zero)
                 {
-                    IntPtr hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-                    uint dpi = hwnd != IntPtr.Zero ? GetDpiForWindow(hwnd) : 96u;
-                    scale = dpi > 0 ? dpi / 96.0 : 1.0;
+                    _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
                 }
 
-                presenter.PreferredMinimumWidth = (int)Math.Round(MinWindowWidthDip * scale);
-                presenter.PreferredMinimumHeight = (int)Math.Round(MinWindowHeightDip * scale);
+                double scale = explicitScale > 0.0 ? explicitScale : (Content?.XamlRoot?.RasterizationScale ?? 0.0);
+                ComputeMinWindowTrackSizePx(_hwnd, scale, out int minW, out int minH);
+                presenter.PreferredMinimumWidth = minW;
+                presenter.PreferredMinimumHeight = minH;
             }
         }
         catch
@@ -308,6 +504,79 @@ public sealed partial class MainWindow : Window
 
     private Windows.Foundation.Size _lastWindowSize;
 
+    private double GetCurrentWindowWidthDip()
+    {
+        if (_lastWindowSize.Width > 0)
+        {
+            return _lastWindowSize.Width;
+        }
+
+        if (RootGrid?.ActualWidth > 0)
+        {
+            return RootGrid.ActualWidth;
+        }
+
+        return 1280.0;
+    }
+
+    private static double GetMaxAllowedSidebarWidth(double windowWidthDip)
+    {
+        if (windowWidthDip <= 0 || windowWidthDip >= SidebarMaxConstraintBreakpoint)
+        {
+            return MaxSidebarWidth;
+        }
+
+        return Math.Clamp(windowWidthDip - MinDocumentAreaWithSidebarDip, MinSidebarWidth, MaxSidebarWidth);
+    }
+
+    private double GetEffectiveSidebarWidth(double windowWidthDip)
+    {
+        double maxAllowed = GetMaxAllowedSidebarWidth(windowWidthDip);
+        return Math.Clamp(_savedSidebarWidth, MinSidebarWidth, maxAllowed);
+    }
+
+    private void SetSidebarOpenFromWindowThreshold(bool open, bool animate)
+    {
+        _isNarrowWindowSidebarToggle = true;
+        _suppressSidebarAnimation = !animate;
+        ViewModel.SuppressSidebarSettingsPersistence = true;
+        try
+        {
+            ViewModel.IsSidebarOpen = open;
+        }
+        finally
+        {
+            ViewModel.SuppressSidebarSettingsPersistence = false;
+            _suppressSidebarAnimation = false;
+            _isNarrowWindowSidebarToggle = false;
+        }
+    }
+
+    private void ApplyEffectiveSidebarWidthForWindow(double windowWidthDip)
+    {
+        double targetEffective = GetEffectiveSidebarWidth(windowWidthDip);
+        if (Math.Abs(targetEffective - _effectiveSidebarWidth) <= 0.5 &&
+            Math.Abs(SidebarPaneContainer.Width - targetEffective) <= 0.5)
+        {
+            return;
+        }
+
+        _effectiveSidebarWidth = targetEffective;
+        SidebarPaneContainer.Width = targetEffective;
+
+        if (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !_isSidebarOpenCloseAnimating)
+        {
+            MainContentBackdropTransform.TranslateX = targetEffective;
+            MainContentClipTransform.TranslateX = targetEffective;
+            if (MainContentFrame.Content is DocumentView docView)
+            {
+                docView.SetSidebarStateImmediate(true, targetEffective);
+            }
+        }
+
+        UpdateSidebarClipGeometries();
+    }
+
     private void OnMainWindowSizeChanged(object sender, WindowSizeChangedEventArgs args)
     {
         if (args.Size.Width == _lastWindowSize.Width && args.Size.Height == _lastWindowSize.Height)
@@ -316,50 +585,68 @@ public sealed partial class MainWindow : Window
         }
 
         _lastWindowSize = args.Size;
+        double widthDip = args.Size.Width;
+
+        if (!ViewModel.IsFullScreen && !ViewModel.IsPresentationMode &&
+            (widthDip < MinWindowWidthDip - 0.5 || args.Size.Height < MinWindowHeightDip - 0.5))
+        {
+            UpdateWindowMinimumSize();
+            if (_hwnd != IntPtr.Zero)
+            {
+                ComputeMinWindowTrackSizePx(_hwnd, 0.0, out int minW, out int minH);
+                int curW = Math.Max(AppWindow.Size.Width, minW);
+                int curH = Math.Max(AppWindow.Size.Height, minH);
+                if (curW != AppWindow.Size.Width || curH != AppWindow.Size.Height)
+                {
+                    AppWindow.Resize(new Windows.Graphics.SizeInt32(curW, curH));
+                }
+            }
+        }
 
         UpdateTitleBarInsets();
         UpdateTitleBarNonClientRegions();
 
-        bool isCompact = args.Size.Width < CompactBreakpoint;
+        // 1. < 750 DIPs Compact Chrome (TitleBar & StatusBar text/buttons swallow animation)
+        bool isCompact = widthDip < CompactBreakpoint;
         if (ViewModel.IsCompactChrome != isCompact)
         {
             ViewModel.IsCompactChrome = isCompact;
             AnimateTitleBarCompactMode(isCompact);
         }
 
-        // Responsive behavior with state memory:
-        // Automatically close sidebar if window is narrower than 750 DIPs,
-        // and restore it when expanding back to >= 750 DIPs if it was closed automatically.
-        if (isCompact)
+        // 2. < 950 DIPs Sidebar & Sidebar Toggle Button auto-hide with animation,
+        //    and [950..1200] DIPs dynamic sidebar width reduction (keeping document area >= 720 DIPs)
+        bool isSidebarAllowed = widthDip >= SidebarAutoCloseBreakpoint;
+        bool sidebarAllowedChanged = ViewModel.IsSidebarAllowed != isSidebarAllowed;
+        if (sidebarAllowedChanged)
+        {
+            ViewModel.IsSidebarAllowed = isSidebarAllowed;
+            if (ViewModel.HasDocument)
+            {
+                AnimateSidebarToggleButton(collapse: !isSidebarAllowed);
+            }
+            else
+            {
+                ApplySidebarToggleStateImmediate(collapse: true);
+            }
+        }
+
+        if (!isSidebarAllowed)
         {
             if (ViewModel.IsSidebarOpen)
             {
                 _wasSidebarClosedByNarrowWindow = true;
-                _isInternalSidebarToggle = true;
-                try
-                {
-                    ViewModel.IsSidebarOpen = false;
-                }
-                finally
-                {
-                    _isInternalSidebarToggle = false;
-                }
+                SetSidebarOpenFromWindowThreshold(false, animate: true);
             }
         }
         else
         {
+            ApplyEffectiveSidebarWidthForWindow(widthDip);
+
             if (_wasSidebarClosedByNarrowWindow && !ViewModel.IsSidebarOpen)
             {
                 _wasSidebarClosedByNarrowWindow = false;
-                _isInternalSidebarToggle = true;
-                try
-                {
-                    ViewModel.IsSidebarOpen = true;
-                }
-                finally
-                {
-                    _isInternalSidebarToggle = false;
-                }
+                SetSidebarOpenFromWindowThreshold(true, animate: true);
             }
         }
     }
@@ -476,11 +763,104 @@ public sealed partial class MainWindow : Window
     private Storyboard? _ellipsisWaveStoryboard;
     private Storyboard? _settingsTransitionStoryboard;
     private Storyboard? _sidebarStoryboard;
+    private Storyboard? _sidebarToggleStoryboard;
     private Storyboard? _titleBarCompactStoryboard;
     private double _cachedAppTitleTextWidth = 56.0;
     private double _cachedOpenFileTextWidth = 88.0;
     private double _cachedSettingsTitleTextWidth = 56.0;
     private bool _isSidebarVisualOpen;
+
+    private void ApplySidebarToggleStateImmediate(bool collapse)
+    {
+        if (SidebarToggleClipContainer is null || SidebarToggleButton is null || SidebarToggleTransform is null)
+        {
+            return;
+        }
+
+        _sidebarToggleStoryboard?.Stop();
+        if (collapse)
+        {
+            SidebarToggleClipContainer.Width = 0.0;
+            SidebarToggleClipContainer.Visibility = Visibility.Collapsed;
+            SidebarToggleTransform.TranslateX = -SidebarToggleSlotWidthDip;
+            SidebarToggleButton.Opacity = 0.0;
+        }
+        else
+        {
+            SidebarToggleClipContainer.Visibility = Visibility.Visible;
+            SidebarToggleClipContainer.Width = SidebarToggleSlotWidthDip;
+            SidebarToggleTransform.TranslateX = 0.0;
+            SidebarToggleButton.Opacity = 1.0;
+        }
+    }
+
+    private void AnimateSidebarToggleButton(bool collapse)
+    {
+        if (SidebarToggleClipContainer is null || SidebarToggleButton is null || SidebarToggleTransform is null)
+        {
+            return;
+        }
+
+        _sidebarToggleStoryboard?.Stop();
+        SidebarToggleClipContainer.Visibility = Visibility.Visible;
+
+        double startW = collapse
+            ? (SidebarToggleClipContainer.ActualWidth > 0.5 ? SidebarToggleClipContainer.ActualWidth : SidebarToggleSlotWidthDip)
+            : (double.IsNaN(SidebarToggleClipContainer.Width) ? 0.0 : SidebarToggleClipContainer.Width);
+        double targetW = collapse ? 0.0 : SidebarToggleSlotWidthDip;
+
+        double startX = collapse ? SidebarToggleTransform.TranslateX : -SidebarToggleSlotWidthDip;
+        double targetX = collapse ? -SidebarToggleSlotWidthDip : 0.0;
+
+        double startOpacity = collapse ? SidebarToggleButton.Opacity : 0.0;
+        double targetOpacity = collapse ? 0.0 : 1.0;
+
+        var sb = new Storyboard();
+        var ease = new ExponentialEase { Exponent = 4.5, EasingMode = EasingMode.EaseOut };
+        var duration = new Duration(TimeSpan.FromMilliseconds(250));
+
+        var widthAnim = new DoubleAnimation
+        {
+            From = startW,
+            To = targetW,
+            Duration = duration,
+            EasingFunction = ease,
+            EnableDependentAnimation = true
+        };
+        Storyboard.SetTarget(widthAnim, SidebarToggleClipContainer);
+        Storyboard.SetTargetProperty(widthAnim, "Width");
+        sb.Children.Add(widthAnim);
+
+        var translateAnim = new DoubleAnimation
+        {
+            From = startX,
+            To = targetX,
+            Duration = duration,
+            EasingFunction = ease
+        };
+        Storyboard.SetTarget(translateAnim, SidebarToggleTransform);
+        Storyboard.SetTargetProperty(translateAnim, "TranslateX");
+        sb.Children.Add(translateAnim);
+
+        var opacityAnim = new DoubleAnimation
+        {
+            From = startOpacity,
+            To = targetOpacity,
+            Duration = new Duration(TimeSpan.FromMilliseconds(180)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(opacityAnim, SidebarToggleButton);
+        Storyboard.SetTargetProperty(opacityAnim, "Opacity");
+        sb.Children.Add(opacityAnim);
+
+        sb.Completed += (_, _) =>
+        {
+            ApplySidebarToggleStateImmediate(!ViewModel.HasDocument || !ViewModel.IsSidebarAllowed);
+        };
+
+        _sidebarToggleStoryboard = sb;
+        sb.Begin();
+    }
 
     private void ApplyTitleBarCompactStateImmediate(bool compact)
     {
@@ -897,6 +1277,12 @@ public sealed partial class MainWindow : Window
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)
     {
+        if (_hwnd != IntPtr.Zero && _subclassPtr != IntPtr.Zero)
+        {
+            try { _ = RemoveWindowSubclass(_hwnd, _subclassPtr, WindowSubclassId); } catch { }
+            _subclassPtr = IntPtr.Zero;
+        }
+
         ViewModel.SettingsService.Update(s =>
         {
             s.SidebarWidth = _savedSidebarWidth;
@@ -935,9 +1321,11 @@ public sealed partial class MainWindow : Window
 
     private void OnSidebarSplitterDragDelta(object sender, DragDeltaEventArgs e)
     {
-        double currentWidth = SidebarPaneContainer.Width > 0 ? SidebarPaneContainer.Width : _savedSidebarWidth;
-        double newWidth = Math.Clamp(currentWidth + e.HorizontalChange, MinSidebarWidth, MaxSidebarWidth);
+        double maxAllowed = GetMaxAllowedSidebarWidth(GetCurrentWindowWidthDip());
+        double currentWidth = SidebarPaneContainer.Width > 0 ? SidebarPaneContainer.Width : _effectiveSidebarWidth;
+        double newWidth = Math.Clamp(currentWidth + e.HorizontalChange, MinSidebarWidth, maxAllowed);
         _savedSidebarWidth = newWidth;
+        _effectiveSidebarWidth = newWidth;
         SidebarPaneContainer.Width = newWidth;
         ViewModel.SettingsService.Settings.SidebarWidth = newWidth;
 
@@ -964,8 +1352,13 @@ public sealed partial class MainWindow : Window
 
     private void UpdateSidebarLayout(bool animate = false)
     {
-        bool shouldOpenPane = ViewModel.HasDocument && ViewModel.IsSidebarOpen;
-        double paneWidth = _savedSidebarWidth > 0 ? _savedSidebarWidth : DefaultSidebarWidth;
+        bool shouldOpenPane = ViewModel.HasDocument && ViewModel.IsSidebarOpen && ViewModel.IsSidebarAllowed;
+        double targetEffectiveWidth = GetEffectiveSidebarWidth(GetCurrentWindowWidthDip());
+        _effectiveSidebarWidth = targetEffectiveWidth;
+
+        double paneWidth = shouldOpenPane
+            ? targetEffectiveWidth
+            : (SidebarPaneContainer.ActualWidth > 0 ? SidebarPaneContainer.ActualWidth : targetEffectiveWidth);
         SidebarPaneContainer.Width = paneWidth;
 
         if (!ViewModel.HasDocument)
@@ -982,6 +1375,7 @@ public sealed partial class MainWindow : Window
         if (!animate || !ViewModel.HasDocument || ViewModel.IsSettingsOpen || ViewModel.IsPresentationMode)
         {
             _sidebarStoryboard?.Stop();
+            _isSidebarOpenCloseAnimating = false;
             _isSidebarVisualOpen = shouldOpenPane;
             SidebarPaneContainer.Visibility = shouldOpenPane ? Visibility.Visible : Visibility.Collapsed;
             SidebarPaneContainer.Opacity = shouldOpenPane ? 1.0 : 0.0;
@@ -1015,6 +1409,7 @@ public sealed partial class MainWindow : Window
 
         _isSidebarVisualOpen = shouldOpenPane;
         _sidebarStoryboard?.Stop();
+        _isSidebarOpenCloseAnimating = true;
 
         if (MainContentFrame.Content is DocumentView docView)
         {
@@ -1081,12 +1476,20 @@ public sealed partial class MainWindow : Window
 
             sb.Completed += (_, _) =>
             {
-                if (ViewModel.IsSidebarOpen && ViewModel.HasDocument)
+                _isSidebarOpenCloseAnimating = false;
+                if (ViewModel.IsSidebarOpen && ViewModel.HasDocument && ViewModel.IsSidebarAllowed)
                 {
+                    double latestWidth = GetEffectiveSidebarWidth(GetCurrentWindowWidthDip());
+                    _effectiveSidebarWidth = latestWidth;
+                    SidebarPaneContainer.Width = latestWidth;
                     SidebarPaneTransform.TranslateX = 0.0;
                     SidebarPaneContainer.Opacity = 1.0;
-                    MainContentBackdropTransform.TranslateX = paneWidth;
-                    MainContentClipTransform.TranslateX = paneWidth;
+                    MainContentBackdropTransform.TranslateX = latestWidth;
+                    MainContentClipTransform.TranslateX = latestWidth;
+                    if (MainContentFrame.Content is DocumentView dv)
+                    {
+                        dv.SetSidebarStateImmediate(true, latestWidth);
+                    }
                     if (SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage tp)
                     {
                         DispatcherQueue.TryEnqueue(tp.RefreshAfterVisibilityRestored);
@@ -1096,6 +1499,12 @@ public sealed partial class MainWindow : Window
         }
         else
         {
+            if (ViewModel.HasDocument)
+            {
+                MainContentBackdropBorder.CornerRadius = new CornerRadius(8, 0, 0, 0);
+                MainContentBackdropBorder.BorderThickness = new Thickness(1, 1, 0, 0);
+            }
+
             var paneTranslate = new DoubleAnimation
             {
                 To = -paneWidth,
@@ -1138,7 +1547,8 @@ public sealed partial class MainWindow : Window
 
             sb.Completed += (_, _) =>
             {
-                if (!ViewModel.IsSidebarOpen || !ViewModel.HasDocument)
+                _isSidebarOpenCloseAnimating = false;
+                if (!ViewModel.IsSidebarOpen || !ViewModel.HasDocument || !ViewModel.IsSidebarAllowed)
                 {
                     SidebarPaneContainer.Visibility = Visibility.Collapsed;
                     SidebarPaneContainer.Opacity = 0.0;
@@ -1160,8 +1570,9 @@ public sealed partial class MainWindow : Window
         MainContentBackdropBorder.Visibility = ViewModel.HasDocument ? Visibility.Visible : Visibility.Collapsed;
         if (ViewModel.HasDocument)
         {
-            MainContentBackdropBorder.BorderThickness = ViewModel.IsSidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0);
-            MainContentBackdropBorder.CornerRadius = ViewModel.IsSidebarOpen ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
+            bool sidebarOpen = (ViewModel.IsSidebarOpen && ViewModel.IsSidebarAllowed) || _isSidebarOpenCloseAnimating;
+            MainContentBackdropBorder.BorderThickness = sidebarOpen ? new Thickness(1, 1, 0, 0) : new Thickness(0, 1, 0, 0);
+            MainContentBackdropBorder.CornerRadius = sidebarOpen ? new CornerRadius(8, 0, 0, 0) : new CornerRadius(0);
         }
         else
         {
@@ -1260,15 +1671,26 @@ public sealed partial class MainWindow : Window
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsSidebarOpen))
         {
-            if (!_isInternalSidebarToggle)
+            if (!_isNarrowWindowSidebarToggle && !_suppressSidebarAnimation)
             {
                 _wasSidebarClosedByNarrowWindow = false;
             }
 
-            UpdateSidebarLayout(animate: !_isInternalSidebarToggle);
+            UpdateSidebarLayout(animate: !_suppressSidebarAnimation);
         }
         else if (e.PropertyName == nameof(ShellViewModel.HasDocument))
         {
+            double currentW = GetCurrentWindowWidthDip();
+            bool sidebarAllowed = currentW >= SidebarAutoCloseBreakpoint;
+            ViewModel.IsSidebarAllowed = sidebarAllowed;
+
+            if (ViewModel.HasDocument && !sidebarAllowed && ViewModel.IsSidebarOpen)
+            {
+                _wasSidebarClosedByNarrowWindow = true;
+                SetSidebarOpenFromWindowThreshold(false, animate: false);
+            }
+
+            ApplySidebarToggleStateImmediate(collapse: !ViewModel.HasDocument || !sidebarAllowed);
             UpdateSidebarLayout();
             UpdateMainContainerStyle();
             SelectSidebarTab(ViewModel.SidebarTab);
@@ -1320,15 +1742,7 @@ public sealed partial class MainWindow : Window
                 _sidebarOpenBeforeFullScreen = ViewModel.IsSidebarOpen;
                 if (ViewModel.IsSidebarOpen)
                 {
-                    _isInternalSidebarToggle = true;
-                    try
-                    {
-                        ViewModel.IsSidebarOpen = false;
-                    }
-                    finally
-                    {
-                        _isInternalSidebarToggle = false;
-                    }
+                    SetSidebarOpenFromWindowThreshold(false, animate: false);
                 }
             }
 
@@ -1346,14 +1760,13 @@ public sealed partial class MainWindow : Window
             if (!ViewModel.IsPresentationMode && _sidebarOpenBeforeFullScreen)
             {
                 _sidebarOpenBeforeFullScreen = false;
-                _isInternalSidebarToggle = true;
-                try
+                if (GetCurrentWindowWidthDip() >= SidebarAutoCloseBreakpoint)
                 {
-                    ViewModel.IsSidebarOpen = true;
+                    SetSidebarOpenFromWindowThreshold(true, animate: false);
                 }
-                finally
+                else
                 {
-                    _isInternalSidebarToggle = false;
+                    _wasSidebarClosedByNarrowWindow = true;
                 }
             }
 

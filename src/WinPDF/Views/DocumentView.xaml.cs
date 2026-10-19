@@ -150,7 +150,7 @@ public sealed partial class DocumentView : Page
         ViewModel = App.CurrentApp.Services.GetRequiredService<ShellViewModel>();
         _pdfService = App.CurrentApp.Services.GetRequiredService<IPdfService>();
         _windowContext = App.CurrentApp.Services.GetRequiredService<IWindowContext>();
-        _currentSidebarWidthDip = Math.Clamp(ViewModel.SettingsService.Settings.SidebarWidth, 220.0, 480.0);
+        _currentSidebarWidthDip = Math.Clamp(ViewModel.SettingsService.Settings.SidebarWidth, 230.0, 480.0);
         InitializeComponent();
 
         _wheelHandler = new PointerEventHandler(OnScrollViewerPointerWheelChanged);
