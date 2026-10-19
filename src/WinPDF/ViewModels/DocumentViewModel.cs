@@ -908,16 +908,19 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     /// <param name="outline">Real table of contents read from the document.</param>
     /// <param name="attachmentNames">Names of the embedded file attachments.</param>
     /// <param name="metadata">Document metadata extracted from the PDF, if available.</param>
+    /// <param name="settingsService">Settings service for persisting bookmarks and user preferences.</param>
     public DocumentViewModel(
         IPdfService pdfService,
         TileCache tileCache,
         PdfDocumentInfo info,
         IReadOnlyList<OutlineItem> outline,
         IReadOnlyList<string> attachmentNames,
-        PdfMetadata? metadata = null)
+        PdfMetadata? metadata = null,
+        ISettingsService? settingsService = null)
     {
         _pdfService = pdfService;
         _tileCache = tileCache;
+        _settingsService = settingsService;
         Metadata = metadata ?? PdfMetadata.Empty;
 
         DocumentId = info.DocumentId;
@@ -961,6 +964,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             Attachments.Add(new AttachmentItemViewModel(name));
         }
 
+        LoadSavedBookmarks();
         UpdateIsCurrentPageBookmarked();
         UpdateDisplayedRows();
     }
@@ -1069,6 +1073,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
     private readonly IPdfService _pdfService;
     private readonly TileCache _tileCache;
+    private readonly ISettingsService? _settingsService;
     private readonly CancellationTokenSource _lifetime = new();
     private bool _thumbnailsActive;
     private double _thumbnailScale = 1.0;
@@ -1114,6 +1119,61 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         UpdateIsCurrentPageBookmarked();
     }
 
+    private void LoadSavedBookmarks()
+    {
+        if (_settingsService is null || string.IsNullOrWhiteSpace(FilePath))
+        {
+            return;
+        }
+
+        if (_settingsService.Settings.DocumentBookmarks.TryGetValue(FilePath, out List<SavedBookmarkItem>? savedList) &&
+            savedList is { Count: > 0 })
+        {
+            Bookmarks.Clear();
+            foreach (SavedBookmarkItem entry in savedList.OrderBy(b => b.PageIndex))
+            {
+                if (entry.PageIndex >= 0 && entry.PageIndex < PageCount &&
+                    Bookmarks.All(b => b.PageIndex != entry.PageIndex))
+                {
+                    Bookmarks.Add(new BookmarkItemViewModel(entry.PageIndex, entry.CustomTitle));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Persists the current document's bookmarks and custom titles to <see cref="ISettingsService"/>.
+    /// </summary>
+    public void SaveBookmarksToSettings()
+    {
+        if (_settingsService is null || string.IsNullOrWhiteSpace(FilePath))
+        {
+            return;
+        }
+
+        string key = FilePath;
+        List<SavedBookmarkItem> snapshot = Bookmarks
+            .OrderBy(b => b.PageIndex)
+            .Select(b => new SavedBookmarkItem
+            {
+                PageIndex = b.PageIndex,
+                CustomTitle = b.HasCustomTitle ? b.CustomTitle.Trim() : null
+            })
+            .ToList();
+
+        _settingsService.Update(s =>
+        {
+            if (snapshot.Count == 0)
+            {
+                s.DocumentBookmarks.Remove(key);
+            }
+            else
+            {
+                s.DocumentBookmarks[key] = snapshot;
+            }
+        });
+    }
+
     private void UpdateIsCurrentPageBookmarked()
     {
         IsCurrentPageBookmarked = Bookmarks.Any(b => b.PageIndex == CurrentPageIndex);
@@ -1140,6 +1200,31 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         }
 
         UpdateIsCurrentPageBookmarked();
+        SaveBookmarksToSettings();
+    }
+
+    /// <summary>
+    /// Renames a bookmark item and immediately persists the updated name to disk.
+    /// </summary>
+    /// <param name="bookmark">The bookmark item to rename.</param>
+    /// <param name="newTitle">The new user-defined name (or empty/whitespace to restore the default page number label).</param>
+    public void RenameBookmark(BookmarkItemViewModel? bookmark, string? newTitle)
+    {
+        if (bookmark is null)
+        {
+            return;
+        }
+
+        string trimmed = string.IsNullOrWhiteSpace(newTitle) ? string.Empty : newTitle.Trim();
+        string defaultLabel = WinPDF.Converters.UiHelpers.FormatBookmarkPage(bookmark.PageNumber);
+        if (string.Equals(trimmed, defaultLabel, StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = string.Empty;
+        }
+
+        bookmark.CustomTitle = trimmed;
+        bookmark.IsEditing = false;
+        SaveBookmarksToSettings();
     }
 
     /// <summary>
@@ -1157,6 +1242,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         if (Bookmarks.Remove(bookmark))
         {
             UpdateIsCurrentPageBookmarked();
+            SaveBookmarksToSettings();
         }
     }
 

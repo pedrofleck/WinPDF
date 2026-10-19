@@ -130,6 +130,46 @@ public sealed class SettingsService : ISettingsService
                     loaded.SidebarWidth = Math.Clamp(sidebarW, 220.0, 480.0);
                 }
 
+                if (TryGetPropertyIgnoreCase(root, "documentBookmarks", out JsonElement bookmarksEl) &&
+                    bookmarksEl.ValueKind == JsonValueKind.Object)
+                {
+                    foreach (JsonProperty docProp in bookmarksEl.EnumerateObject())
+                    {
+                        if (string.IsNullOrWhiteSpace(docProp.Name) || docProp.Value.ValueKind != JsonValueKind.Array)
+                        {
+                            continue;
+                        }
+
+                        List<SavedBookmarkItem> list = new();
+                        foreach (JsonElement itemEl in docProp.Value.EnumerateArray())
+                        {
+                            if (itemEl.ValueKind == JsonValueKind.Object &&
+                                TryGetPropertyIgnoreCase(itemEl, "pageIndex", out JsonElement pIdxEl) &&
+                                pIdxEl.ValueKind == JsonValueKind.Number &&
+                                pIdxEl.TryGetInt32(out int pIdx) && pIdx >= 0)
+                            {
+                                string? customTitle = null;
+                                if (TryGetPropertyIgnoreCase(itemEl, "customTitle", out JsonElement titleEl) &&
+                                    titleEl.ValueKind == JsonValueKind.String)
+                                {
+                                    customTitle = titleEl.GetString();
+                                }
+
+                                list.Add(new SavedBookmarkItem
+                                {
+                                    PageIndex = pIdx,
+                                    CustomTitle = string.IsNullOrWhiteSpace(customTitle) ? null : customTitle.Trim()
+                                });
+                            }
+                        }
+
+                        if (list.Count > 0)
+                        {
+                            loaded.DocumentBookmarks[docProp.Name] = list;
+                        }
+                    }
+                }
+
                 Settings = loaded;
             }
             catch (Exception ex)
@@ -191,6 +231,7 @@ public sealed class SettingsService : ISettingsService
                 writer.WriteNumber("lastOpenedPageIndex", Math.Max(0, Settings.LastOpenedPageIndex));
                 writer.WriteBoolean("isSidebarOpen", Settings.IsSidebarOpen);
                 writer.WriteNumber("sidebarWidth", Math.Round(Math.Clamp(Settings.SidebarWidth, 220.0, 480.0), 1));
+                WriteDocumentBookmarksJson(writer, Settings.DocumentBookmarks);
                 writer.WriteEndObject();
             }
 
@@ -224,6 +265,7 @@ public sealed class SettingsService : ISettingsService
                     writer.WriteNumber("lastOpenedPageIndex", Math.Max(0, Settings.LastOpenedPageIndex));
                     writer.WriteBoolean("isSidebarOpen", Settings.IsSidebarOpen);
                     writer.WriteNumber("sidebarWidth", Math.Round(Math.Clamp(Settings.SidebarWidth, 220.0, 480.0), 1));
+                    WriteDocumentBookmarksJson(writer, Settings.DocumentBookmarks);
                     writer.WriteEndObject();
                 }
 
@@ -234,6 +276,45 @@ public sealed class SettingsService : ISettingsService
                 System.Diagnostics.Debug.WriteLine($"Failed to save settings.json: {ex.Message}");
             }
         }
+    }
+
+    private static void WriteDocumentBookmarksJson(Utf8JsonWriter writer, Dictionary<string, List<SavedBookmarkItem>>? documentBookmarks)
+    {
+        writer.WritePropertyName("documentBookmarks");
+        writer.WriteStartObject();
+        if (documentBookmarks is not null)
+        {
+            foreach (KeyValuePair<string, List<SavedBookmarkItem>> kvp in documentBookmarks)
+            {
+                if (string.IsNullOrWhiteSpace(kvp.Key) || kvp.Value is not { Count: > 0 })
+                {
+                    continue;
+                }
+
+                writer.WritePropertyName(kvp.Key);
+                writer.WriteStartArray();
+                for (int i = 0; i < kvp.Value.Count; i++)
+                {
+                    SavedBookmarkItem item = kvp.Value[i];
+                    writer.WriteStartObject();
+                    writer.WriteNumber("pageIndex", Math.Max(0, item.PageIndex));
+                    if (!string.IsNullOrWhiteSpace(item.CustomTitle))
+                    {
+                        writer.WriteString("customTitle", item.CustomTitle.Trim());
+                    }
+                    else
+                    {
+                        writer.WriteNull("customTitle");
+                    }
+
+                    writer.WriteEndObject();
+                }
+
+                writer.WriteEndArray();
+            }
+        }
+
+        writer.WriteEndObject();
     }
 
     private static bool TryGetPropertyIgnoreCase(JsonElement element, string name, out JsonElement value)

@@ -26,7 +26,9 @@ namespace WinPDF;
 /// </summary>
 public sealed partial class MainWindow : Window
 {
-    private const double CompactBreakpoint = 768.0;
+    private const double CompactBreakpoint = 750.0;
+    private const double MinWindowWidthDip = 500.0;
+    private const double MinWindowHeightDip = 360.0;
     private const double MinSidebarWidth = 220.0;
     private const double MaxSidebarWidth = 480.0;
     private const double DefaultSidebarWidth = 260.0;
@@ -135,6 +137,7 @@ public sealed partial class MainWindow : Window
             root.Loaded += (_, _) =>
             {
                 SetInitialWindowBounds();
+                UpdateWindowMinimumSize();
                 ApplyRequestedThemeFromViewModel(isStartup: true);
                 UpdateTitleBarTheme();
                 UpdateTitleBarInsets();
@@ -142,6 +145,13 @@ public sealed partial class MainWindow : Window
                 UpdateSidebarLayout();
                 UpdateSidebarClipGeometries();
                 UpdateMainContainerStyle();
+
+                if (root.ActualWidth > 0)
+                {
+                    bool initialCompact = root.ActualWidth < CompactBreakpoint;
+                    ViewModel.IsCompactChrome = initialCompact;
+                    ApplyTitleBarCompactStateImmediate(initialCompact);
+                }
 
                 // Initial frame navigation
                 MainContentFrame.Navigate(typeof(DocumentView), ViewModel);
@@ -158,6 +168,7 @@ public sealed partial class MainWindow : Window
                 {
                     root.XamlRoot.Changed += (_, _) =>
                     {
+                        UpdateWindowMinimumSize();
                         UpdateTitleBarInsets();
                         UpdateTitleBarNonClientRegions();
                     };
@@ -210,6 +221,31 @@ public sealed partial class MainWindow : Window
         else
         {
             AppWindow.Resize(new Windows.Graphics.SizeInt32(targetWidthPx, targetHeightPx));
+        }
+
+        UpdateWindowMinimumSize(scale);
+    }
+
+    private void UpdateWindowMinimumSize(double explicitScale = 0.0)
+    {
+        try
+        {
+            if (AppWindow.Presenter is OverlappedPresenter presenter)
+            {
+                double scale = explicitScale > 0.0 ? explicitScale : (Content?.XamlRoot?.RasterizationScale ?? 0.0);
+                if (scale <= 0.0)
+                {
+                    IntPtr hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                    uint dpi = hwnd != IntPtr.Zero ? GetDpiForWindow(hwnd) : 96u;
+                    scale = dpi > 0 ? dpi / 96.0 : 1.0;
+                }
+
+                presenter.PreferredMinimumWidth = (int)Math.Round(MinWindowWidthDip * scale);
+                presenter.PreferredMinimumHeight = (int)Math.Round(MinWindowHeightDip * scale);
+            }
+        }
+        catch
+        {
         }
     }
 
@@ -284,10 +320,17 @@ public sealed partial class MainWindow : Window
         UpdateTitleBarInsets();
         UpdateTitleBarNonClientRegions();
 
+        bool isCompact = args.Size.Width < CompactBreakpoint;
+        if (ViewModel.IsCompactChrome != isCompact)
+        {
+            ViewModel.IsCompactChrome = isCompact;
+            AnimateTitleBarCompactMode(isCompact);
+        }
+
         // Responsive behavior with state memory:
-        // Automatically close sidebar if window is narrower than 768 DIPs,
-        // and restore it when expanding back to >= 768 DIPs if it was closed automatically.
-        if (args.Size.Width < CompactBreakpoint)
+        // Automatically close sidebar if window is narrower than 750 DIPs,
+        // and restore it when expanding back to >= 750 DIPs if it was closed automatically.
+        if (isCompact)
         {
             if (ViewModel.IsSidebarOpen)
             {
@@ -433,7 +476,199 @@ public sealed partial class MainWindow : Window
     private Storyboard? _ellipsisWaveStoryboard;
     private Storyboard? _settingsTransitionStoryboard;
     private Storyboard? _sidebarStoryboard;
+    private Storyboard? _titleBarCompactStoryboard;
+    private double _cachedAppTitleTextWidth = 56.0;
+    private double _cachedOpenFileTextWidth = 88.0;
+    private double _cachedSettingsTitleTextWidth = 56.0;
     private bool _isSidebarVisualOpen;
+
+    private void ApplyTitleBarCompactStateImmediate(bool compact)
+    {
+        _titleBarCompactStoryboard?.Stop();
+        if (OpenFileGroupPanel is not null)
+        {
+            OpenFileGroupPanel.Margin = compact ? new Thickness(8, 0, 0, 0) : new Thickness(20, 0, 0, 0);
+        }
+
+        SetElementSwallowStateImmediate(AppTitleTextClipContainer, AppTitleTextBlock, AppTitleTextTransform, compact, ref _cachedAppTitleTextWidth, 56.0);
+        SetElementSwallowStateImmediate(OpenFileTextClipContainer, OpenFileButtonTextBlock, OpenFileTextTransform, compact, ref _cachedOpenFileTextWidth, 88.0);
+        SetElementSwallowStateImmediate(SettingsTitleTextClipContainer, SettingsTitleTextBlock, SettingsTitleTextTransform, compact, ref _cachedSettingsTitleTextWidth, 56.0);
+    }
+
+    private static void SetElementSwallowStateImmediate(
+        FrameworkElement? clipContainer,
+        FrameworkElement? innerElement,
+        CompositeTransform? innerTransform,
+        bool compact,
+        ref double cachedWidth,
+        double fallbackWidth)
+    {
+        if (clipContainer is null || innerElement is null || innerTransform is null)
+        {
+            return;
+        }
+
+        if (clipContainer.ActualWidth > 1.0)
+        {
+            cachedWidth = clipContainer.ActualWidth;
+        }
+        else if (innerElement.ActualWidth > 1.0)
+        {
+            cachedWidth = innerElement.ActualWidth;
+        }
+
+        if (compact)
+        {
+            double w = cachedWidth > 1.0 ? cachedWidth : fallbackWidth;
+            clipContainer.Width = 0.0;
+            clipContainer.Visibility = Visibility.Collapsed;
+            innerTransform.TranslateX = -w;
+            innerElement.Opacity = 0.0;
+        }
+        else
+        {
+            clipContainer.Visibility = Visibility.Visible;
+            clipContainer.Width = double.NaN;
+            innerTransform.TranslateX = 0.0;
+            innerElement.Opacity = 1.0;
+        }
+    }
+
+    private void AnimateTitleBarCompactMode(bool collapse)
+    {
+        _titleBarCompactStoryboard?.Stop();
+        if (OpenFileGroupPanel is not null)
+        {
+            OpenFileGroupPanel.Margin = collapse ? new Thickness(8, 0, 0, 0) : new Thickness(20, 0, 0, 0);
+        }
+
+        var sb = new Storyboard();
+        AddSwallowAnimations(sb, AppTitleTextClipContainer, AppTitleTextBlock, AppTitleTextTransform, collapse, ref _cachedAppTitleTextWidth, 56.0);
+        AddSwallowAnimations(sb, OpenFileTextClipContainer, OpenFileButtonTextBlock, OpenFileTextTransform, collapse, ref _cachedOpenFileTextWidth, 88.0);
+        AddSwallowAnimations(sb, SettingsTitleTextClipContainer, SettingsTitleTextBlock, SettingsTitleTextTransform, collapse, ref _cachedSettingsTitleTextWidth, 56.0);
+
+        sb.Completed += (_, _) =>
+        {
+            ApplyTitleBarCompactStateImmediate(ViewModel.IsCompactChrome);
+        };
+
+        _titleBarCompactStoryboard = sb;
+        sb.Begin();
+    }
+
+    private static void AddSwallowAnimations(
+        Storyboard sb,
+        FrameworkElement? clipContainer,
+        FrameworkElement? innerElement,
+        CompositeTransform? innerTransform,
+        bool collapse,
+        ref double cachedWidth,
+        double fallbackWidth)
+    {
+        if (clipContainer is null || innerElement is null || innerTransform is null)
+        {
+            return;
+        }
+
+        if (collapse)
+        {
+            double startW = clipContainer.ActualWidth > 1.0
+                ? clipContainer.ActualWidth
+                : (innerElement.ActualWidth > 1.0 ? innerElement.ActualWidth : (cachedWidth > 1.0 ? cachedWidth : fallbackWidth));
+            if (startW > 1.0)
+            {
+                cachedWidth = startW;
+            }
+
+            clipContainer.Visibility = Visibility.Visible;
+            var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+            var duration = new Duration(TimeSpan.FromMilliseconds(185));
+
+            var widthAnim = new DoubleAnimation
+            {
+                From = startW,
+                To = 0.0,
+                Duration = duration,
+                EasingFunction = ease,
+                EnableDependentAnimation = true
+            };
+            Storyboard.SetTarget(widthAnim, clipContainer);
+            Storyboard.SetTargetProperty(widthAnim, "Width");
+            sb.Children.Add(widthAnim);
+
+            var translateAnim = new DoubleAnimation
+            {
+                From = innerTransform.TranslateX,
+                To = -startW,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(translateAnim, innerTransform);
+            Storyboard.SetTargetProperty(translateAnim, "TranslateX");
+            sb.Children.Add(translateAnim);
+
+            var opacityAnim = new DoubleAnimation
+            {
+                From = innerElement.Opacity,
+                To = 0.0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(140)),
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(opacityAnim, innerElement);
+            Storyboard.SetTargetProperty(opacityAnim, "Opacity");
+            sb.Children.Add(opacityAnim);
+        }
+        else
+        {
+            clipContainer.Visibility = Visibility.Visible;
+            innerElement.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            double targetW = innerElement.DesiredSize.Width > 1.0
+                ? innerElement.DesiredSize.Width
+                : (cachedWidth > 1.0 ? cachedWidth : fallbackWidth);
+            cachedWidth = targetW;
+
+            clipContainer.Width = 0.0;
+            innerTransform.TranslateX = -targetW;
+            innerElement.Opacity = 0.0;
+
+            var ease = new ExponentialEase { Exponent = 4.0, EasingMode = EasingMode.EaseOut };
+            var duration = new Duration(TimeSpan.FromMilliseconds(210));
+
+            var widthAnim = new DoubleAnimation
+            {
+                From = 0.0,
+                To = targetW,
+                Duration = duration,
+                EasingFunction = ease,
+                EnableDependentAnimation = true
+            };
+            Storyboard.SetTarget(widthAnim, clipContainer);
+            Storyboard.SetTargetProperty(widthAnim, "Width");
+            sb.Children.Add(widthAnim);
+
+            var translateAnim = new DoubleAnimation
+            {
+                From = -targetW,
+                To = 0.0,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(translateAnim, innerTransform);
+            Storyboard.SetTargetProperty(translateAnim, "TranslateX");
+            sb.Children.Add(translateAnim);
+
+            var opacityAnim = new DoubleAnimation
+            {
+                From = 0.0,
+                To = 1.0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(175)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(opacityAnim, innerElement);
+            Storyboard.SetTargetProperty(opacityAnim, "Opacity");
+            sb.Children.Add(opacityAnim);
+        }
+    }
 
     private void AnimateSettingsTransition(bool opening)
     {
@@ -1107,6 +1342,7 @@ public sealed partial class MainWindow : Window
         else
         {
             AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Default);
+            UpdateWindowMinimumSize();
             if (!ViewModel.IsPresentationMode && _sidebarOpenBeforeFullScreen)
             {
                 _sidebarOpenBeforeFullScreen = false;

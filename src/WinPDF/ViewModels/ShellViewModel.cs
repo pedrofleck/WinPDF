@@ -51,6 +51,12 @@ public sealed partial class ShellViewModel : ObservableObject
     [ObservableProperty]
     public partial bool IsSidebarOpen { get; set; } = true;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether the window width is below the 750 DIP compact threshold.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsCompactChrome { get; set; }
+
 
     /// <summary>
     /// Gets or sets the active tab displayed in the sidebar (Thumbnails, Outline, Annotations, Bookmarks, Attachments).
@@ -581,7 +587,7 @@ public sealed partial class ShellViewModel : ObservableObject
             var attachments = await _pdfService.GetAttachmentNamesAsync(docInfo.DocumentId, cancellationToken);
             var metadata = await _pdfService.GetDocumentMetadataAsync(docInfo.DocumentId, cancellationToken);
 
-            DocumentViewModel doc = new(_pdfService, _tileCache, docInfo, outline, attachments, metadata);
+            DocumentViewModel doc = new(_pdfService, _tileCache, docInfo, outline, attachments, metadata, _settingsService);
             if (initialPageIndex > 0 && initialPageIndex < doc.PageCount)
             {
                 doc.GoToPage(initialPageIndex);
@@ -774,6 +780,7 @@ public sealed partial class ShellViewModel : ObservableObject
                 s.LastOpenedFilePath = targetPath;
                 s.LastOpenedPageIndex = CurrentDocument.CurrentPageIndex;
             });
+            CurrentDocument.SaveBookmarksToSettings();
 
             string savedTitle = ResourceStrings.Get(ResourceKeys.StatusSaved);
             NotificationRequested?.Invoke(savedTitle, CurrentDocument.FileName);

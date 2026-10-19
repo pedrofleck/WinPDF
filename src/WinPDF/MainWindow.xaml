@@ -82,22 +82,36 @@
                     <StackPanel
                         VerticalAlignment="Center"
                         Orientation="Horizontal"
-                        Spacing="8">
+                        Spacing="0">
                         <Image
                             Width="16"
                             Height="16"
                             VerticalAlignment="Center"
                             Source="ms-appx:///Assets/appicon.png" />
-                        <TextBlock
-                            x:Uid="AppTitleBarText"
-                            VerticalAlignment="Center"
-                            FontWeight="SemiBold"
-                            Style="{StaticResource CaptionTextBlockStyle}" />
+                        <Grid
+                            x:Name="AppTitleTextClipContainer"
+                            VerticalAlignment="Center">
+                            <Grid.Clip>
+                                <RectangleGeometry x:Name="AppTitleTextClip" Rect="0,0,200,32" />
+                            </Grid.Clip>
+                            <TextBlock
+                                x:Name="AppTitleTextBlock"
+                                x:Uid="AppTitleBarText"
+                                Margin="8,0,0,0"
+                                VerticalAlignment="Center"
+                                FontWeight="SemiBold"
+                                Style="{StaticResource CaptionTextBlockStyle}">
+                                <TextBlock.RenderTransform>
+                                    <CompositeTransform x:Name="AppTitleTextTransform" />
+                                </TextBlock.RenderTransform>
+                            </TextBlock>
+                        </Grid>
                     </StackPanel>
                 </StackPanel>
 
                 <!-- Group 2: 20 DIPs spacing for "Open file" button and Search (8 DIPs) -->
                 <StackPanel
+                    x:Name="OpenFileGroupPanel"
                     Margin="20,0,0,0"
                     Orientation="Horizontal"
                     Spacing="8">
@@ -106,14 +120,29 @@
                         x:Name="OpenFileBtn"
                         x:Uid="OpenFileButton"
                         Height="32"
-                        Padding="12,0"
+                        Padding="10,0"
                         Command="{x:Bind ViewModel.OpenFileCommand}"
                         CornerRadius="4"
                         IsTabStop="False"
                         Style="{StaticResource DefaultButtonStyle}">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon FontSize="16" Glyph="&#xE8E5;" />
-                            <TextBlock x:Uid="OpenFileButtonText" VerticalAlignment="Center" />
+                        <StackPanel Orientation="Horizontal" Spacing="0" VerticalAlignment="Center">
+                            <FontIcon FontSize="16" Glyph="&#xE8E5;" VerticalAlignment="Center" />
+                            <Grid
+                                x:Name="OpenFileTextClipContainer"
+                                VerticalAlignment="Center">
+                                <Grid.Clip>
+                                    <RectangleGeometry x:Name="OpenFileTextClip" Rect="0,0,240,32" />
+                                </Grid.Clip>
+                                <TextBlock
+                                    x:Name="OpenFileButtonTextBlock"
+                                    x:Uid="OpenFileButtonText"
+                                    Margin="8,0,0,0"
+                                    VerticalAlignment="Center">
+                                    <TextBlock.RenderTransform>
+                                        <CompositeTransform x:Name="OpenFileTextTransform" />
+                                    </TextBlock.RenderTransform>
+                                </TextBlock>
+                            </Grid>
                         </StackPanel>
                     </Button>
 
@@ -177,17 +206,30 @@
                 <StackPanel
                     VerticalAlignment="Center"
                     Orientation="Horizontal"
-                    Spacing="8">
+                    Spacing="0">
                     <Image
                         Width="16"
                         Height="16"
                         VerticalAlignment="Center"
                         Source="ms-appx:///Assets/appicon.png" />
-                    <TextBlock
-                        x:Uid="AppTitleBarText"
-                        VerticalAlignment="Center"
-                        FontWeight="SemiBold"
-                        Style="{StaticResource CaptionTextBlockStyle}" />
+                    <Grid
+                        x:Name="SettingsTitleTextClipContainer"
+                        VerticalAlignment="Center">
+                        <Grid.Clip>
+                            <RectangleGeometry x:Name="SettingsTitleTextClip" Rect="0,0,200,32" />
+                        </Grid.Clip>
+                        <TextBlock
+                            x:Name="SettingsTitleTextBlock"
+                            x:Uid="AppTitleBarText"
+                            Margin="8,0,0,0"
+                            VerticalAlignment="Center"
+                            FontWeight="SemiBold"
+                            Style="{StaticResource CaptionTextBlockStyle}">
+                            <TextBlock.RenderTransform>
+                                <CompositeTransform x:Name="SettingsTitleTextTransform" />
+                            </TextBlock.RenderTransform>
+                        </TextBlock>
+                    </Grid>
                 </StackPanel>
             </StackPanel>
 

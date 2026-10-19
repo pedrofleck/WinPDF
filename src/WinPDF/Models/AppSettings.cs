@@ -49,4 +49,25 @@ public sealed class AppSettings
     /// Gets or sets the user-configured width of the navigation sidebar in DIPs.
     /// </summary>
     public double SidebarWidth { get; set; } = 260.0;
+
+    /// <summary>
+    /// Gets or sets the per-document persisted bookmarks keyed by full PDF file path.
+    /// </summary>
+    public Dictionary<string, List<SavedBookmarkItem>> DocumentBookmarks { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// Represents a persisted page bookmark entry with an optional user-defined custom title.
+/// </summary>
+public sealed class SavedBookmarkItem
+{
+    /// <summary>
+    /// Gets or sets the zero-based page index of the bookmarked page.
+    /// </summary>
+    public int PageIndex { get; set; }
+
+    /// <summary>
+    /// Gets or sets the custom user-defined title for this bookmark, or <see langword="null"/> for the default page label.
+    /// </summary>
+    public string? CustomTitle { get; set; }
 }

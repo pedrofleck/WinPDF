@@ -148,7 +148,7 @@
                             <MenuFlyoutItem.Icon>
                                 <FontIcon Glyph="&#xF58A;" RenderTransformOrigin="0.5,0.5">
                                     <FontIcon.RenderTransform>
-                                        <CompositeTransform ScaleX="0.9" ScaleY="0.9" TranslateY="2" />
+                                        <CompositeTransform ScaleX="1.02" ScaleY="1.02" TranslateY="1.5" />
                                     </FontIcon.RenderTransform>
                                 </FontIcon>
                             </MenuFlyoutItem.Icon>
@@ -642,6 +642,54 @@
                         </StackPanel>
                     </Border>
                 </StackPanel>
+
+                <!-- Minimalist native middle-click autoscroll anchor indicator (Windows browser style) -->
+                <Canvas
+                    x:Name="AutoScrollOverlayCanvas"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    IsHitTestVisible="False"
+                    Visibility="Collapsed"
+                    Canvas.ZIndex="98">
+                    <Border
+                        x:Name="AutoScrollAnchorBadge"
+                        Width="28"
+                        Height="28"
+                        CornerRadius="14"
+                        Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        Translation="0,0,16">
+                        <Border.Shadow>
+                            <ThemeShadow />
+                        </Border.Shadow>
+                        <Grid Width="26" Height="26">
+                            <!-- Up chevron -->
+                            <Polygon
+                                Points="13,3 9.5,7 16.5,7"
+                                Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <!-- Down chevron -->
+                            <Polygon
+                                Points="13,23 9.5,19 16.5,19"
+                                Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <!-- Left chevron -->
+                            <Polygon
+                                Points="3,13 7,9.5 7,16.5"
+                                Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <!-- Right chevron -->
+                            <Polygon
+                                Points="23,13 19,9.5 19,16.5"
+                                Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <!-- Center dot -->
+                            <Ellipse
+                                Width="4"
+                                Height="4"
+                                Fill="{ThemeResource TextFillColorPrimaryBrush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+                </Canvas>
             </Grid>
 
 
@@ -725,40 +773,57 @@
                                 Text="{x:Bind ViewModel.FormattedPageCount, Mode=OneWay}" />
                         </StackPanel>
 
-                        <!-- 2. Separator | -->
-                        <Border Width="1" Height="16" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="4,0" VerticalAlignment="Center" />
+                        <Grid
+                            x:Name="StatusBarMetadataClipContainer"
+                            VerticalAlignment="Center">
+                            <Grid.Clip>
+                                <RectangleGeometry x:Name="StatusBarMetadataClip" Rect="0,0,400,32" />
+                            </Grid.Clip>
+                            <StackPanel
+                                x:Name="StatusBarMetadataInnerPanel"
+                                Orientation="Horizontal"
+                                Spacing="8"
+                                VerticalAlignment="Center">
+                                <StackPanel.RenderTransform>
+                                    <CompositeTransform x:Name="StatusBarMetadataTransform" />
+                                </StackPanel.RenderTransform>
 
-                        <!-- 3. Format badge -->
-                        <TextBlock
-                            Text="{x:Bind ViewModel.CurrentDocument.FileFormatBadge, Mode=OneWay}"
-                            FontSize="12"
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            VerticalAlignment="Center"
-                            ToolTipService.ToolTip="{x:Bind FormatToolTipText, Mode=OneTime}" />
+                                <!-- 2. Separator | -->
+                                <Border Width="1" Height="16" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="4,0" VerticalAlignment="Center" />
 
-                        <!-- 4. Separator | -->
-                        <Border Width="1" Height="16" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="4,0" VerticalAlignment="Center" />
-
-                        <!-- 5. Unified clickable info and size Button [ ⓘ . XB ] -->
-                        <Button
-                            Padding="8,0"
-                            Height="24"
-                            MinHeight="24"
-                            MinWidth="0"
-                            CornerRadius="4"
-                            BorderThickness="0"
-                            IsTabStop="False"
-                            Style="{StaticResource SubtleButtonStyle}"
-                            Command="{x:Bind ViewModel.ShowPropertiesCommand}"
-                            ToolTipService.ToolTip="{x:Bind PropertiesToolTipText, Mode=OneTime}">
-                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                                <FontIcon Glyph="&#xE946;" FontSize="12" VerticalAlignment="Center" />
+                                <!-- 3. Format badge -->
                                 <TextBlock
-                                    Text="{x:Bind ViewModel.CurrentDocument.FormattedFileSize, Mode=OneWay}"
+                                    Text="{x:Bind ViewModel.CurrentDocument.FileFormatBadge, Mode=OneWay}"
                                     FontSize="12"
-                                    VerticalAlignment="Center" />
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    VerticalAlignment="Center"
+                                    ToolTipService.ToolTip="{x:Bind FormatToolTipText, Mode=OneTime}" />
+
+                                <!-- 4. Separator | -->
+                                <Border Width="1" Height="16" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="4,0" VerticalAlignment="Center" />
+
+                                <!-- 5. Unified clickable info and size Button [ ⓘ . XB ] -->
+                                <Button
+                                    Padding="8,0"
+                                    Height="24"
+                                    MinHeight="24"
+                                    MinWidth="0"
+                                    CornerRadius="4"
+                                    BorderThickness="0"
+                                    IsTabStop="False"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Command="{x:Bind ViewModel.ShowPropertiesCommand}"
+                                    ToolTipService.ToolTip="{x:Bind PropertiesToolTipText, Mode=OneTime}">
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <FontIcon Glyph="&#xE946;" FontSize="12" VerticalAlignment="Center" />
+                                        <TextBlock
+                                            Text="{x:Bind ViewModel.CurrentDocument.FormattedFileSize, Mode=OneWay}"
+                                            FontSize="12"
+                                            VerticalAlignment="Center" />
+                                    </StackPanel>
+                                </Button>
                             </StackPanel>
-                        </Button>
+                        </Grid>
                     </StackPanel>
 
                     <!-- Right-aligned elements -->
@@ -869,12 +934,12 @@
                             ToolTipService.ToolTip="{x:Bind FitHorizontalToolTipText, Mode=OneTime}">
                             <FontIcon
                                 Glyph="&#xF58A;"
-                                FontSize="12"
+                                FontSize="13"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
                                 RenderTransformOrigin="0.5,0.5">
                                 <FontIcon.RenderTransform>
-                                    <CompositeTransform ScaleX="0.92" ScaleY="0.92" TranslateY="0.5" />
+                                    <CompositeTransform ScaleX="1.04" ScaleY="1.04" TranslateY="0.5" />
                                 </FontIcon.RenderTransform>
                             </FontIcon>
                         </Button>
@@ -949,37 +1014,54 @@
                             <FontIcon Glyph="&#xE710;" FontSize="13" />
                         </Button>
 
-                        <!-- 6. Separator | -->
-                        <Border Width="1" Height="16" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="4,0" VerticalAlignment="Center" />
+                        <Grid
+                            x:Name="StatusBarPresentationClipContainer"
+                            VerticalAlignment="Center">
+                            <Grid.Clip>
+                                <RectangleGeometry x:Name="StatusBarPresentationClip" Rect="0,0,200,32" />
+                            </Grid.Clip>
+                            <StackPanel
+                                x:Name="StatusBarPresentationInnerPanel"
+                                Orientation="Horizontal"
+                                Spacing="4"
+                                VerticalAlignment="Center">
+                                <StackPanel.RenderTransform>
+                                    <CompositeTransform x:Name="StatusBarPresentationTransform" />
+                                </StackPanel.RenderTransform>
 
-                        <!-- 7. Presentation and Full Screen block -->
-                        <!-- Slideshow button (F5) -->
-                        <Button
-                            Style="{StaticResource SubtleButtonStyle}"
-                            Width="26"
-                            Height="24"
-                            Padding="0"
-                            MinWidth="26"
-                            MinHeight="24"
-                            CornerRadius="4"
-                            Command="{x:Bind ViewModel.StartPresentationCommand}"
-                            ToolTipService.ToolTip="{x:Bind SlideshowToolTipText, Mode=OneTime}">
-                            <FontIcon Glyph="&#xE786;" FontSize="13" />
-                        </Button>
+                                <!-- 6. Separator | -->
+                                <Border Width="1" Height="16" Background="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="4,0" VerticalAlignment="Center" />
 
-                        <!-- Full Screen button (F11) -->
-                        <Button
-                            Style="{StaticResource SubtleButtonStyle}"
-                            Width="26"
-                            Height="24"
-                            Padding="0"
-                            MinWidth="26"
-                            MinHeight="24"
-                            CornerRadius="4"
-                            Command="{x:Bind ViewModel.ToggleFullScreenCommand}"
-                            ToolTipService.ToolTip="{x:Bind FullScreenToolTipText, Mode=OneTime}">
-                            <FontIcon Glyph="&#xE740;" FontSize="13" />
-                        </Button>
+                                <!-- 7. Presentation and Full Screen block -->
+                                <!-- Slideshow button (F5) -->
+                                <Button
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Width="26"
+                                    Height="24"
+                                    Padding="0"
+                                    MinWidth="26"
+                                    MinHeight="24"
+                                    CornerRadius="4"
+                                    Command="{x:Bind ViewModel.StartPresentationCommand}"
+                                    ToolTipService.ToolTip="{x:Bind SlideshowToolTipText, Mode=OneTime}">
+                                    <FontIcon Glyph="&#xE786;" FontSize="13" />
+                                </Button>
+
+                                <!-- Full Screen button (F11) -->
+                                <Button
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Width="26"
+                                    Height="24"
+                                    Padding="0"
+                                    MinWidth="26"
+                                    MinHeight="24"
+                                    CornerRadius="4"
+                                    Command="{x:Bind ViewModel.ToggleFullScreenCommand}"
+                                    ToolTipService.ToolTip="{x:Bind FullScreenToolTipText, Mode=OneTime}">
+                                    <FontIcon Glyph="&#xE740;" FontSize="13" />
+                                </Button>
+                            </StackPanel>
+                        </Grid>
                     </StackPanel>
                 </Grid>
             </Grid>

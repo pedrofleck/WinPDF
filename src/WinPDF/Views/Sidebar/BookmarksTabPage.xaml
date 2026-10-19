@@ -67,40 +67,93 @@
                         Background="{ThemeResource LayerFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1"
-                        CornerRadius="4">
+                        CornerRadius="4"
+                        PointerEntered="OnBookmarkCardPointerEntered"
+                        PointerExited="OnBookmarkCardPointerExited">
                         <Grid ColumnDefinitions="*,Auto" ColumnSpacing="4">
-                            <StackPanel
-                                Grid.Column="0"
-                                VerticalAlignment="Center"
-                                Orientation="Horizontal"
-                                Spacing="8">
-                                <FontIcon
-                                    FontSize="14"
-                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                    Glyph="&#xE728;" />
-                                <TextBlock
+                            <Grid Grid.Column="0" VerticalAlignment="Center">
+                                <StackPanel
                                     VerticalAlignment="Center"
-                                    Style="{StaticResource BodyTextBlockStyle}"
-                                    Text="{x:Bind DisplayText}"
-                                    TextTrimming="CharacterEllipsis" />
-                            </StackPanel>
-                            <Button
+                                    Orientation="Horizontal"
+                                    Spacing="8"
+                                    ToolTipService.ToolTip="{x:Bind PageBadgeText, Mode=OneWay}"
+                                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(IsDisplayMode), Mode=OneWay}">
+                                    <FontIcon
+                                        FontSize="14"
+                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                        Glyph="&#xE728;" />
+                                    <TextBlock
+                                        VerticalAlignment="Center"
+                                        Style="{StaticResource BodyTextBlockStyle}"
+                                        Text="{x:Bind DisplayText, Mode=OneWay}"
+                                        TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+
+                                <TextBox
+                                    x:Name="BookmarkRenameTextBox"
+                                    Height="28"
+                                    MinHeight="28"
+                                    Padding="6,3,6,3"
+                                    FontSize="13"
+                                    CornerRadius="4"
+                                    VerticalAlignment="Center"
+                                    VerticalContentAlignment="Center"
+                                    DataContext="{x:Bind}"
+                                    Text="{x:Bind EditingText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                    KeyDown="OnRenameTextBoxKeyDown"
+                                    LostFocus="OnRenameTextBoxLostFocus"
+                                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(IsEditing), Mode=OneWay}">
+                                    <TextBox.Resources>
+                                        <x:Double x:Key="TextControlThemeMinHeight">28</x:Double>
+                                    </TextBox.Resources>
+                                </TextBox>
+                            </Grid>
+
+                            <StackPanel
                                 Grid.Column="1"
-                                x:Uid="RemoveBookmarkItemButton"
-                                Width="28"
-                                Height="28"
-                                Padding="0"
-                                VerticalAlignment="Center"
-                                Click="OnRemoveBookmarkItemClick"
-                                CornerRadius="4"
-                                DataContext="{x:Bind}"
-                                IsTabStop="False"
-                                Style="{StaticResource SubtleButtonStyle}">
-                                <FontIcon
-                                    FontSize="10"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    Glyph="&#xE711;" />
-                            </Button>
+                                Orientation="Horizontal"
+                                Spacing="2"
+                                VerticalAlignment="Center">
+                                <Button
+                                    x:Name="RenameBookmarkItemButton"
+                                    x:Uid="RenameBookmarkItemButton"
+                                    Width="28"
+                                    Height="28"
+                                    Padding="0"
+                                    Opacity="0"
+                                    VerticalAlignment="Center"
+                                    Click="OnRenameBookmarkItemClick"
+                                    CornerRadius="4"
+                                    DataContext="{x:Bind}"
+                                    IsTabStop="False"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(IsDisplayMode), Mode=OneWay}">
+                                    <Button.OpacityTransition>
+                                        <ScalarTransition Duration="0:0:0.12" />
+                                    </Button.OpacityTransition>
+                                    <FontIcon
+                                        FontSize="11"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Glyph="&#xE70F;" />
+                                </Button>
+
+                                <Button
+                                    x:Uid="RemoveBookmarkItemButton"
+                                    Width="28"
+                                    Height="28"
+                                    Padding="0"
+                                    VerticalAlignment="Center"
+                                    Click="OnRemoveBookmarkItemClick"
+                                    CornerRadius="4"
+                                    DataContext="{x:Bind}"
+                                    IsTabStop="False"
+                                    Style="{StaticResource SubtleButtonStyle}">
+                                    <FontIcon
+                                        FontSize="10"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Glyph="&#xE711;" />
+                                </Button>
+                            </StackPanel>
                         </Grid>
                     </Border>
                 </DataTemplate>

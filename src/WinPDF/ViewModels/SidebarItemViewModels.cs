@@ -19,17 +19,60 @@ public sealed partial class BookmarkItemViewModel : ObservableObject
     public int PageNumber => PageIndex + 1;
 
     /// <summary>
-    /// Gets the localized page display label (e.g. "Page 1" / "Página 1").
+    /// Gets or sets the user-defined custom bookmark name. When empty, <see cref="DisplayText"/> falls back to the page number label.
     /// </summary>
-    public string DisplayText => UiHelpers.FormatBookmarkPage(PageNumber);
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayText))]
+    [NotifyPropertyChangedFor(nameof(HasCustomTitle))]
+    [NotifyPropertyChangedFor(nameof(PageBadgeText))]
+    public partial string CustomTitle { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether this bookmark item is currently being renamed inline.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsDisplayMode))]
+    public partial bool IsEditing { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether this bookmark item is in normal display mode (not being edited).
+    /// </summary>
+    public bool IsDisplayMode => !IsEditing;
+
+    /// <summary>
+    /// Gets or sets the temporary text bound to the inline rename TextBox while <see cref="IsEditing"/> is true.
+    /// </summary>
+    [ObservableProperty]
+    public partial string EditingText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets a value indicating whether a non-empty custom name has been assigned to this bookmark.
+    /// </summary>
+    public bool HasCustomTitle => !string.IsNullOrWhiteSpace(CustomTitle);
+
+    /// <summary>
+    /// Gets the primary label displayed for this bookmark (custom name if set; otherwise localized "Page X").
+    /// </summary>
+    public string DisplayText =>
+        HasCustomTitle ? CustomTitle.Trim() : UiHelpers.FormatBookmarkPage(PageNumber);
+
+    /// <summary>
+    /// Gets the localized page label ("Page X" / "Página X") used for tooltips.
+    /// </summary>
+    public string PageBadgeText => UiHelpers.FormatBookmarkPage(PageNumber);
 
     /// <summary>
     /// Initializes a new instance of the <see cref="BookmarkItemViewModel"/> class.
     /// </summary>
     /// <param name="pageIndex">Zero-based index of the page.</param>
-    public BookmarkItemViewModel(int pageIndex)
+    /// <param name="customTitle">Optional persisted custom bookmark name.</param>
+    public BookmarkItemViewModel(int pageIndex, string? customTitle = null)
     {
         PageIndex = pageIndex;
+        if (!string.IsNullOrWhiteSpace(customTitle))
+        {
+            CustomTitle = customTitle.Trim();
+        }
     }
 }
 

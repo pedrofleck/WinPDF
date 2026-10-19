@@ -68,6 +68,22 @@ public sealed partial class DocumentView : Page
     private Storyboard? _transitionStoryboard;
     private Storyboard? _searchBarStoryboard;
     private Storyboard? _horizontalPushStoryboard;
+    private Storyboard? _statusBarCompactStoryboard;
+    private double _statusBarMetadataExpandedWidth = 148.0;
+    private double _statusBarPresentationExpandedWidth = 68.0;
+    private bool _isAutoScrolling;
+    private bool _autoScrollMiddleButtonDown;
+    private long _autoScrollStartTimestamp;
+    private long _lastAutoScrollRenderTicks;
+    private long _lastAutoScrollPageFlipTicks;
+    private Point _autoScrollAnchorPoint;
+    private Point _autoScrollCurrentPoint;
+    private double _autoScrollAccumulatedX;
+    private double _autoScrollAccumulatedY;
+    private bool _isAutoScrollRenderingSubscribed;
+    private PointerEventHandler? _autoScrollPointerPressedHandler;
+    private PointerEventHandler? _autoScrollPointerMovedHandler;
+    private PointerEventHandler? _autoScrollPointerReleasedHandler;
     private PrintManager? _registeredPrintManager;
     private nint _registeredPrintHwnd;
     private PrintDocument? _printDocument;
@@ -138,6 +154,12 @@ public sealed partial class DocumentView : Page
         InitializeComponent();
 
         _wheelHandler = new PointerEventHandler(OnScrollViewerPointerWheelChanged);
+        _autoScrollPointerPressedHandler = new PointerEventHandler(OnViewerAutoScrollPointerPressed);
+        _autoScrollPointerMovedHandler = new PointerEventHandler(OnViewerAutoScrollPointerMoved);
+        _autoScrollPointerReleasedHandler = new PointerEventHandler(OnViewerAutoScrollPointerReleased);
+        ScrollViewerContentRoot.AddHandler(UIElement.PointerPressedEvent, _autoScrollPointerPressedHandler, true);
+        ScrollViewerContentRoot.AddHandler(UIElement.PointerMovedEvent, _autoScrollPointerMovedHandler, true);
+        ScrollViewerContentRoot.AddHandler(UIElement.PointerReleasedEvent, _autoScrollPointerReleasedHandler, true);
         ScrollViewerContentRoot.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         ContinuousPagesRepeater.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         PrevPageZone.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
@@ -198,6 +220,7 @@ public sealed partial class DocumentView : Page
         }
 
         SyncPaneOffsetsImmediate();
+        ApplyStatusBarCompactStateImmediate(ViewModel.IsCompactChrome);
 
         if (ViewModel.CurrentDocument is not null)
         {
@@ -243,9 +266,11 @@ public sealed partial class DocumentView : Page
         ViewModel.NotificationRequested -= OnNotificationRequested;
         ViewModel.DefaultZoomPreferenceChanged -= OnDefaultZoomPreferenceChanged;
         ViewModel.PrintRequested -= OnPrintRequestedAsync;
+        StopAutoScroll();
         _transitionStoryboard?.Stop();
         _searchBarStoryboard?.Stop();
         _horizontalPushStoryboard?.Stop();
+        _statusBarCompactStoryboard?.Stop();
         _isHorizontalPushAnimating = false;
         UnsubscribeFromDocument();
     }
@@ -358,6 +383,7 @@ public sealed partial class DocumentView : Page
     {
         if (e.PropertyName == nameof(ShellViewModel.CurrentDocument))
         {
+            StopAutoScroll();
             SubscribeToDocument(ViewModel.CurrentDocument);
             if (ViewModel.CurrentDocument is not null)
             {
@@ -493,6 +519,10 @@ public sealed partial class DocumentView : Page
                 _presentationHideTimer.Stop();
                 FullScreenInfoBar.IsOpen = false;
             }
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.IsCompactChrome))
+        {
+            AnimateStatusBarCompactMode(ViewModel.IsCompactChrome);
         }
     }
 
@@ -1527,6 +1557,11 @@ public sealed partial class DocumentView : Page
 
     private void OnScrollViewerPointerWheelChanged(object sender, PointerRoutedEventArgs e)
     {
+        if (_isAutoScrolling)
+        {
+            StopAutoScroll();
+        }
+
         if (e.Handled || ViewModel.CurrentDocument is not { } doc)
         {
             return;
@@ -1817,6 +1852,16 @@ public sealed partial class DocumentView : Page
         if (e.Handled)
         {
             return;
+        }
+
+        if (_isAutoScrolling)
+        {
+            StopAutoScroll();
+            if (e.Key == Windows.System.VirtualKey.Escape)
+            {
+                e.Handled = true;
+                return;
+            }
         }
 
         object? focusedObj = XamlRoot is not null ? FocusManager.GetFocusedElement(XamlRoot) : null;
@@ -3372,6 +3417,469 @@ public sealed partial class DocumentView : Page
     private void ReturnFocusToViewer()
     {
         ContinuousScrollViewer.Focus(FocusState.Programmatic);
+    }
+
+    // =========================================================================
+    // Native Browser-Style Middle-Click Free Autoscroll
+    // =========================================================================
+
+    private void OnViewerAutoScrollPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (ViewModel.CurrentDocument is null)
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(ScrollViewerContentRoot);
+        var props = point.Properties;
+
+        if (_isAutoScrolling)
+        {
+            StopAutoScroll();
+            e.Handled = true;
+            return;
+        }
+
+        if (point.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse && props.IsMiddleButtonPressed)
+        {
+            StartAutoScroll(point.Position, e.Pointer);
+            e.Handled = true;
+        }
+    }
+
+    private void OnViewerAutoScrollPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isAutoScrolling)
+        {
+            return;
+        }
+
+        _autoScrollCurrentPoint = e.GetCurrentPoint(ScrollViewerContentRoot).Position;
+    }
+
+    private void OnViewerAutoScrollPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isAutoScrolling || !_autoScrollMiddleButtonDown)
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(ScrollViewerContentRoot);
+        var props = point.Properties;
+        if (props.PointerUpdateKind == Microsoft.UI.Input.PointerUpdateKind.MiddleButtonReleased || !props.IsMiddleButtonPressed)
+        {
+            _autoScrollMiddleButtonDown = false;
+            _autoScrollCurrentPoint = point.Position;
+
+            double dx = _autoScrollCurrentPoint.X - _autoScrollAnchorPoint.X;
+            double dy = _autoScrollCurrentPoint.Y - _autoScrollAnchorPoint.Y;
+            double distance = Math.Sqrt((dx * dx) + (dy * dy));
+            long elapsedMs = Environment.TickCount64 - _autoScrollStartTimestamp;
+
+            // If user held and dragged the middle mouse button, stop on release; if it was a quick click, stay latched.
+            if (distance > 10.0 || (elapsedMs > 260 && distance > 4.0))
+            {
+                StopAutoScroll();
+            }
+
+            e.Handled = true;
+        }
+    }
+
+    private void StartAutoScroll(Point anchorPosition, Pointer pointer)
+    {
+        if (ViewModel.CurrentDocument is null || AutoScrollOverlayCanvas is null || AutoScrollAnchorBadge is null)
+        {
+            return;
+        }
+
+        _isAutoScrolling = true;
+        _autoScrollMiddleButtonDown = true;
+        _autoScrollStartTimestamp = Environment.TickCount64;
+        _lastAutoScrollRenderTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        _lastAutoScrollPageFlipTicks = _lastAutoScrollRenderTicks;
+        _autoScrollAnchorPoint = anchorPosition;
+        _autoScrollCurrentPoint = anchorPosition;
+        _autoScrollAccumulatedX = ContinuousScrollViewer.HorizontalOffset;
+        _autoScrollAccumulatedY = ContinuousScrollViewer.VerticalOffset;
+
+        Canvas.SetLeft(AutoScrollAnchorBadge, anchorPosition.X - 14.0);
+        Canvas.SetTop(AutoScrollAnchorBadge, anchorPosition.Y - 14.0);
+        AutoScrollOverlayCanvas.Visibility = Visibility.Visible;
+
+        try
+        {
+            ScrollViewerContentRoot.CapturePointer(pointer);
+        }
+        catch
+        {
+        }
+
+        if (!_isAutoScrollRenderingSubscribed)
+        {
+            CompositionTarget.Rendering += OnAutoScrollRendering;
+            _isAutoScrollRenderingSubscribed = true;
+        }
+    }
+
+    private void StopAutoScroll()
+    {
+        if (_isAutoScrollRenderingSubscribed)
+        {
+            CompositionTarget.Rendering -= OnAutoScrollRendering;
+            _isAutoScrollRenderingSubscribed = false;
+        }
+
+        if (!_isAutoScrolling)
+        {
+            return;
+        }
+
+        _isAutoScrolling = false;
+        _autoScrollMiddleButtonDown = false;
+
+        if (AutoScrollOverlayCanvas is not null)
+        {
+            AutoScrollOverlayCanvas.Visibility = Visibility.Collapsed;
+        }
+
+        try
+        {
+            ScrollViewerContentRoot?.ReleasePointerCaptures();
+        }
+        catch
+        {
+        }
+
+        ScheduleViewportUpdate();
+    }
+
+    private void OnAutoScrollRendering(object? sender, object e)
+    {
+        if (!_isAutoScrolling || ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            StopAutoScroll();
+            return;
+        }
+
+        long nowTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        double dt = (double)(nowTicks - _lastAutoScrollRenderTicks) / System.Diagnostics.Stopwatch.Frequency;
+        _lastAutoScrollRenderTicks = nowTicks;
+        dt = Math.Clamp(dt, 0.001, 0.05);
+
+        double dx = _autoScrollCurrentPoint.X - _autoScrollAnchorPoint.X;
+        double dy = _autoScrollCurrentPoint.Y - _autoScrollAnchorPoint.Y;
+
+        const double DeadZoneDip = 8.0;
+        double absX = Math.Abs(dx);
+        double absY = Math.Abs(dy);
+
+        if (absX <= DeadZoneDip && absY <= DeadZoneDip)
+        {
+            _autoScrollAccumulatedX = ContinuousScrollViewer.HorizontalOffset;
+            _autoScrollAccumulatedY = ContinuousScrollViewer.VerticalOffset;
+            return;
+        }
+
+        // Smooth browser-style exponential velocity curve (DIPs/second)
+        double velX = absX > DeadZoneDip
+            ? Math.Sign(dx) * Math.Min(4200.0, Math.Pow(absX - DeadZoneDip, 1.35) * 4.2)
+            : 0.0;
+        double velY = absY > DeadZoneDip
+            ? Math.Sign(dy) * Math.Min(4200.0, Math.Pow(absY - DeadZoneDip, 1.35) * 4.2)
+            : 0.0;
+
+        bool canScrollH = ContinuousScrollViewer.ScrollableWidth > 1.0;
+        bool canScrollV = ContinuousScrollViewer.ScrollableHeight > 1.0 && (doc.IsContinuous || !_isFittedVertically);
+
+        if (!doc.IsContinuous && !canScrollV && absY > 28.0)
+        {
+            double elapsedFlipSec = (double)(nowTicks - _lastAutoScrollPageFlipTicks) / System.Diagnostics.Stopwatch.Frequency;
+            double flipInterval = Math.Clamp(0.45 - (Math.Min(220.0, absY - 28.0) * 0.0014), 0.12, 0.45);
+            if (elapsedFlipSec >= flipInterval)
+            {
+                _lastAutoScrollPageFlipTicks = nowTicks;
+                FlipPagedSlide(forward: dy > 0);
+            }
+            return;
+        }
+
+        double? targetH = null;
+        double? targetV = null;
+
+        if (canScrollH && Math.Abs(velX) > 0.01)
+        {
+            if (Math.Abs(_autoScrollAccumulatedX - ContinuousScrollViewer.HorizontalOffset) > 48.0)
+            {
+                _autoScrollAccumulatedX = ContinuousScrollViewer.HorizontalOffset;
+            }
+
+            _autoScrollAccumulatedX = Math.Clamp(
+                _autoScrollAccumulatedX + (velX * dt),
+                0.0,
+                ContinuousScrollViewer.ScrollableWidth);
+            targetH = _autoScrollAccumulatedX;
+        }
+        else
+        {
+            _autoScrollAccumulatedX = ContinuousScrollViewer.HorizontalOffset;
+        }
+
+        if (canScrollV && Math.Abs(velY) > 0.01)
+        {
+            if (ContinuousScrollViewer.VerticalScrollMode != ScrollMode.Enabled)
+            {
+                ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Enabled;
+            }
+
+            if (Math.Abs(_autoScrollAccumulatedY - ContinuousScrollViewer.VerticalOffset) > 48.0)
+            {
+                _autoScrollAccumulatedY = ContinuousScrollViewer.VerticalOffset;
+            }
+
+            _autoScrollAccumulatedY = Math.Clamp(
+                _autoScrollAccumulatedY + (velY * dt),
+                0.0,
+                ContinuousScrollViewer.ScrollableHeight);
+            targetV = _autoScrollAccumulatedY;
+        }
+        else
+        {
+            _autoScrollAccumulatedY = ContinuousScrollViewer.VerticalOffset;
+        }
+
+        if (targetH.HasValue || targetV.HasValue)
+        {
+            ContinuousScrollViewer.ChangeView(targetH, targetV, null, disableAnimation: true);
+            if (targetH.HasValue)
+            {
+                doc.LastHorizontalOffset = targetH.Value;
+            }
+
+            if (targetV.HasValue)
+            {
+                doc.LastVerticalOffset = targetV.Value;
+            }
+
+            if (doc.IsContinuous)
+            {
+                UpdatePageProgressFromScroll();
+            }
+
+            ScheduleViewportUpdate();
+        }
+    }
+
+    // =========================================================================
+    // Compact Chrome (< 750 DIPs) Status Bar "Swallowed" Animation
+    // =========================================================================
+
+    private void ApplyStatusBarCompactStateImmediate(bool compact)
+    {
+        _statusBarCompactStoryboard?.Stop();
+
+        if (StatusBarMetadataClipContainer is not null &&
+            StatusBarMetadataInnerPanel is not null &&
+            StatusBarMetadataTransform is not null &&
+            StatusBarMetadataClip is not null)
+        {
+            if (compact)
+            {
+                if (StatusBarMetadataInnerPanel.ActualWidth > 1.0)
+                {
+                    _statusBarMetadataExpandedWidth = StatusBarMetadataInnerPanel.ActualWidth;
+                }
+
+                StatusBarMetadataClipContainer.Width = 0.0;
+                StatusBarMetadataClipContainer.Opacity = 0.0;
+                StatusBarMetadataClipContainer.Visibility = Visibility.Collapsed;
+                StatusBarMetadataTransform.TranslateX = -_statusBarMetadataExpandedWidth;
+            }
+            else
+            {
+                StatusBarMetadataClipContainer.Visibility = Visibility.Visible;
+                StatusBarMetadataClipContainer.Width = double.NaN;
+                StatusBarMetadataClipContainer.Opacity = 1.0;
+                StatusBarMetadataTransform.TranslateX = 0.0;
+                StatusBarMetadataClip.Rect = new Rect(0, 0, 400, 32);
+            }
+        }
+
+        if (StatusBarPresentationClipContainer is not null &&
+            StatusBarPresentationInnerPanel is not null &&
+            StatusBarPresentationTransform is not null &&
+            StatusBarPresentationClip is not null)
+        {
+            if (compact)
+            {
+                if (StatusBarPresentationInnerPanel.ActualWidth > 1.0)
+                {
+                    _statusBarPresentationExpandedWidth = StatusBarPresentationInnerPanel.ActualWidth;
+                }
+
+                StatusBarPresentationClipContainer.Width = 0.0;
+                StatusBarPresentationClipContainer.Opacity = 0.0;
+                StatusBarPresentationClipContainer.Visibility = Visibility.Collapsed;
+                StatusBarPresentationTransform.TranslateX = -_statusBarPresentationExpandedWidth;
+            }
+            else
+            {
+                StatusBarPresentationClipContainer.Visibility = Visibility.Visible;
+                StatusBarPresentationClipContainer.Width = double.NaN;
+                StatusBarPresentationClipContainer.Opacity = 1.0;
+                StatusBarPresentationTransform.TranslateX = 0.0;
+                StatusBarPresentationClip.Rect = new Rect(0, 0, 200, 32);
+            }
+        }
+    }
+
+    private void AnimateStatusBarCompactMode(bool collapse)
+    {
+        if (StatusBarMetadataClipContainer is null ||
+            StatusBarMetadataInnerPanel is null ||
+            StatusBarMetadataTransform is null ||
+            StatusBarMetadataClip is null ||
+            StatusBarPresentationClipContainer is null ||
+            StatusBarPresentationInnerPanel is null ||
+            StatusBarPresentationTransform is null ||
+            StatusBarPresentationClip is null)
+        {
+            return;
+        }
+
+        _statusBarCompactStoryboard?.Stop();
+
+        if (!collapse)
+        {
+            StatusBarMetadataClipContainer.Visibility = Visibility.Visible;
+            StatusBarPresentationClipContainer.Visibility = Visibility.Visible;
+        }
+
+        StatusBarMetadataInnerPanel.Measure(new Size(double.PositiveInfinity, 32));
+        if (StatusBarMetadataInnerPanel.DesiredSize.Width > 1.0)
+        {
+            _statusBarMetadataExpandedWidth = StatusBarMetadataInnerPanel.DesiredSize.Width;
+        }
+        else if (StatusBarMetadataInnerPanel.ActualWidth > 1.0)
+        {
+            _statusBarMetadataExpandedWidth = StatusBarMetadataInnerPanel.ActualWidth;
+        }
+
+        StatusBarPresentationInnerPanel.Measure(new Size(double.PositiveInfinity, 32));
+        if (StatusBarPresentationInnerPanel.DesiredSize.Width > 1.0)
+        {
+            _statusBarPresentationExpandedWidth = StatusBarPresentationInnerPanel.DesiredSize.Width;
+        }
+        else if (StatusBarPresentationInnerPanel.ActualWidth > 1.0)
+        {
+            _statusBarPresentationExpandedWidth = StatusBarPresentationInnerPanel.ActualWidth;
+        }
+
+        StatusBarMetadataClip.Rect = new Rect(0, 0, Math.Max(400.0, _statusBarMetadataExpandedWidth + 32.0), 32);
+        StatusBarPresentationClip.Rect = new Rect(0, 0, Math.Max(200.0, _statusBarPresentationExpandedWidth + 32.0), 32);
+
+        double fromMetaW = collapse
+            ? (StatusBarMetadataClipContainer.ActualWidth > 0.5 ? StatusBarMetadataClipContainer.ActualWidth : _statusBarMetadataExpandedWidth)
+            : (double.IsNaN(StatusBarMetadataClipContainer.Width) ? 0.0 : StatusBarMetadataClipContainer.Width);
+        double toMetaW = collapse ? 0.0 : _statusBarMetadataExpandedWidth;
+
+        double fromPresW = collapse
+            ? (StatusBarPresentationClipContainer.ActualWidth > 0.5 ? StatusBarPresentationClipContainer.ActualWidth : _statusBarPresentationExpandedWidth)
+            : (double.IsNaN(StatusBarPresentationClipContainer.Width) ? 0.0 : StatusBarPresentationClipContainer.Width);
+        double toPresW = collapse ? 0.0 : _statusBarPresentationExpandedWidth;
+
+        var sb = new Storyboard();
+        var ease = new ExponentialEase { Exponent = 4.5, EasingMode = EasingMode.EaseOut };
+        var duration = new Duration(TimeSpan.FromMilliseconds(220));
+
+        var metaWidthAnim = new DoubleAnimation
+        {
+            From = fromMetaW,
+            To = toMetaW,
+            Duration = duration,
+            EasingFunction = ease,
+            EnableDependentAnimation = true
+        };
+        Storyboard.SetTarget(metaWidthAnim, StatusBarMetadataClipContainer);
+        Storyboard.SetTargetProperty(metaWidthAnim, "Width");
+        sb.Children.Add(metaWidthAnim);
+
+        var metaTranslateAnim = new DoubleAnimation
+        {
+            From = collapse ? StatusBarMetadataTransform.TranslateX : -_statusBarMetadataExpandedWidth,
+            To = collapse ? -_statusBarMetadataExpandedWidth : 0.0,
+            Duration = duration,
+            EasingFunction = ease
+        };
+        Storyboard.SetTarget(metaTranslateAnim, StatusBarMetadataTransform);
+        Storyboard.SetTargetProperty(metaTranslateAnim, "TranslateX");
+        sb.Children.Add(metaTranslateAnim);
+
+        var metaOpacityAnim = new DoubleAnimation
+        {
+            From = collapse ? StatusBarMetadataClipContainer.Opacity : 0.0,
+            To = collapse ? 0.0 : 1.0,
+            Duration = duration,
+            EasingFunction = ease
+        };
+        Storyboard.SetTarget(metaOpacityAnim, StatusBarMetadataClipContainer);
+        Storyboard.SetTargetProperty(metaOpacityAnim, "Opacity");
+        sb.Children.Add(metaOpacityAnim);
+
+        var presWidthAnim = new DoubleAnimation
+        {
+            From = fromPresW,
+            To = toPresW,
+            Duration = duration,
+            EasingFunction = ease,
+            EnableDependentAnimation = true
+        };
+        Storyboard.SetTarget(presWidthAnim, StatusBarPresentationClipContainer);
+        Storyboard.SetTargetProperty(presWidthAnim, "Width");
+        sb.Children.Add(presWidthAnim);
+
+        var presTranslateAnim = new DoubleAnimation
+        {
+            From = collapse ? StatusBarPresentationTransform.TranslateX : -_statusBarPresentationExpandedWidth,
+            To = collapse ? -_statusBarPresentationExpandedWidth : 0.0,
+            Duration = duration,
+            EasingFunction = ease
+        };
+        Storyboard.SetTarget(presTranslateAnim, StatusBarPresentationTransform);
+        Storyboard.SetTargetProperty(presTranslateAnim, "TranslateX");
+        sb.Children.Add(presTranslateAnim);
+
+        var presOpacityAnim = new DoubleAnimation
+        {
+            From = collapse ? StatusBarPresentationClipContainer.Opacity : 0.0,
+            To = collapse ? 0.0 : 1.0,
+            Duration = duration,
+            EasingFunction = ease
+        };
+        Storyboard.SetTarget(presOpacityAnim, StatusBarPresentationClipContainer);
+        Storyboard.SetTargetProperty(presOpacityAnim, "Opacity");
+        sb.Children.Add(presOpacityAnim);
+
+        sb.Completed += (_, _) =>
+        {
+            if (ViewModel.IsCompactChrome)
+            {
+                StatusBarMetadataClipContainer.Visibility = Visibility.Collapsed;
+                StatusBarPresentationClipContainer.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                StatusBarMetadataClipContainer.Width = double.NaN;
+                StatusBarMetadataClipContainer.Opacity = 1.0;
+                StatusBarMetadataTransform.TranslateX = 0.0;
+                StatusBarPresentationClipContainer.Width = double.NaN;
+                StatusBarPresentationClipContainer.Opacity = 1.0;
+                StatusBarPresentationTransform.TranslateX = 0.0;
+            }
+        };
+
+        _statusBarCompactStoryboard = sb;
+        sb.Begin();
     }
 
     private void OnStatusBarZoomSliderValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)

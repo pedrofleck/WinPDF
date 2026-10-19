@@ -235,6 +235,8 @@
   <data name="Dialog_OpenExternalLink_Title" xml:space="preserve"><value>Abrir link externo?</value></data>
   <data name="Dialog_OpenExternalLink_Content" xml:space="preserve"><value>Deseja abrir o seguinte link no navegador?&#10;&#10;{0}</value></data>
   <data name="Dialog_OpenExternalLink_Confirm" xml:space="preserve"><value>Abrir link</value></data>
+  <data name="RenameBookmarkItemButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Renomear marcador</value></data>
+  <data name="RenameBookmarkItemButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Renomear marcador</value></data>
   <data name="RemoveBookmarkItemButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Remover marcador</value></data>
   <data name="RemoveBookmarkItemButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Remover marcador</value></data>
   <data name="Settings_Viewing_ReopenHeader.Text" xml:space="preserve"><value>Reabrir último documento ao iniciar</value></data>
