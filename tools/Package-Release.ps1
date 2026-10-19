@@ -9,7 +9,7 @@
 param(
     [string]$Configuration = 'Release',
     [string]$Platform = 'x64',
-    [string]$Version = 'v0.5.1-alpha.5'
+    [string]$Version = 'v0.5.2-alpha.5'
 )
 
 $ErrorActionPreference = 'Stop'

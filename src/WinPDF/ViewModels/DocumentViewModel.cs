@@ -1072,10 +1072,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
             if (i < Pages.Count)
             {
-                // Swap current card dimensions if already sized by the sidebar, otherwise recompute from default box.
+                // Recompute card dimensions from current item or default box preserving dynamic orientation.
                 double aspect = GetPageDisplayAspectRatio(Pages[i], Rotation);
-                double maxW = Math.Max(DefaultMaxThumbnailWidthDip, Math.Max(item.WidthDip, item.HeightDip / 1.45));
-                double maxH = Math.Round(maxW * 1.45);
+                double maxDim = Math.Max(DefaultMaxThumbnailWidthDip, Math.Max(item.WidthDip, item.HeightDip));
+                double maxW = maxDim;
+                double maxH = Math.Round(maxDim * 1.48);
                 (double w, double h) = ComputeThumbnailBox(aspect, maxW, maxH);
                 item.WidthDip = w;
                 item.HeightDip = h;

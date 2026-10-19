@@ -251,15 +251,21 @@ public sealed class ThumbnailPresenter : Grid
             double h = Item.HeightDip;
             if (double.IsFinite(w) && double.IsFinite(h) && w > 0 && h > 0)
             {
-                Width = w;
-                Height = h;
-                _image.Width = w;
-                _image.Height = h;
-
                 if (Parent is FrameworkElement parentGrid && parentGrid.Parent is Border cardBorder)
                 {
                     cardBorder.Width = w;
                     cardBorder.Height = h;
+                    Width = double.NaN;
+                    Height = double.NaN;
+                    _image.Width = double.NaN;
+                    _image.Height = double.NaN;
+                }
+                else
+                {
+                    Width = w;
+                    Height = h;
+                    _image.Width = w;
+                    _image.Height = h;
                 }
             }
             else

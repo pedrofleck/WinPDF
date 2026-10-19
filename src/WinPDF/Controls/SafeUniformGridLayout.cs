@@ -265,6 +265,23 @@ public sealed class SafeUniformGridLayout : VirtualizingLayout
                             {
                                 cardBorder.Width = itemVm.WidthDip;
                                 cardBorder.Height = itemVm.HeightDip;
+
+                                if (cardBorder.Child is Panel cardGrid)
+                                {
+                                    for (int c = 0; c < cardGrid.Children.Count; c++)
+                                    {
+                                        if (cardGrid.Children[c] is ThumbnailPresenter presenter)
+                                        {
+                                            if (!ReferenceEquals(presenter.Item, itemVm))
+                                            {
+                                                presenter.Item = itemVm;
+                                            }
+                                            presenter.IsNightMode = itemVm.IsNightMode;
+                                            presenter.SyncCardDimensions();
+                                            break;
+                                        }
+                                    }
+                                }
                             }
                         }
 

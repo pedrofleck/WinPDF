@@ -609,6 +609,24 @@ public sealed partial class ThumbnailsTabPage : Page
             {
                 cardBorder.Width = thumbnail.WidthDip;
                 cardBorder.Height = thumbnail.HeightDip;
+
+                if (cardBorder.Child is Panel cardGrid)
+                {
+                    for (int c = 0; c < cardGrid.Children.Count; c++)
+                    {
+                        if (cardGrid.Children[c] is WinPDF.Controls.ThumbnailPresenter presenter)
+                        {
+                            if (!ReferenceEquals(presenter.Item, thumbnail))
+                            {
+                                presenter.Item = thumbnail;
+                            }
+
+                            presenter.IsNightMode = thumbnail.IsNightMode;
+                            presenter.SyncCardDimensions();
+                            return;
+                        }
+                    }
+                }
             }
         }
 
