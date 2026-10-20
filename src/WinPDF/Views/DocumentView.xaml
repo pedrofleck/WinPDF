@@ -293,8 +293,6 @@
                                     VerticalAlignment="Center">
                                     <!-- Left page (or single page) -->
                                     <Border
-                                        Width="{x:Bind LeftPageWidth, Mode=OneWay}"
-                                        Height="{x:Bind LeftPageHeight, Mode=OneWay}"
                                         HorizontalAlignment="Center"
                                         VerticalAlignment="Center"
                                         Background="{ThemeResource LayerFillColorDefaultBrush}"
@@ -310,8 +308,6 @@
                                     <!-- Right page (when double page) -->
                                     <Border
                                         Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasRightPage), Mode=OneWay}"
-                                        Width="{x:Bind RightPageWidth, Mode=OneWay}"
-                                        Height="{x:Bind RightPageHeight, Mode=OneWay}"
                                         HorizontalAlignment="Center"
                                         VerticalAlignment="Center"
                                         Background="{ThemeResource LayerFillColorDefaultBrush}"

@@ -1744,12 +1744,59 @@ internal sealed unsafe class PdfiumEngine : IDisposable
 
             void* scan0 = PdfiumNative.FPDFBitmap_GetBuffer(bitmap);
             int stride = PdfiumNative.FPDFBitmap_GetStride(bitmap);
+
+            // Enhance text contrast and trim subpixel antialiasing blur in-place to match DirectWrite / ClearType.
+            ApplyContrastLut((byte*)scan0, request.BitmapHeight, stride, request.BitmapWidth);
+
             return new PdfBitmapLease(bitmap, request.BitmapWidth, request.BitmapHeight, stride, scan0, owner);
         }
         catch
         {
             bitmap.Dispose();
             throw;
+        }
+    }
+
+    private static readonly byte[] s_contrastLut = InitializeContrastLut();
+
+    private static byte[] InitializeContrastLut()
+    {
+        byte[] lut = new byte[256];
+        double thresh = 15.1; // Trim faint antialiasing halo (> 239.9 sRGB to pure white)
+        double gamma = 1.25;  // DirectWrite / ClearType gamma contrast enhancement
+        for (int i = 0; i < 256; i++)
+        {
+            double ink = 255.0 - i;
+            if (ink <= thresh)
+            {
+                lut[i] = 255;
+            }
+            else
+            {
+                double adj = (ink - thresh) / (255.0 - thresh);
+                lut[i] = (byte)Math.Clamp(Math.Round(255.0 - Math.Pow(adj, gamma) * 255.0), 0, 255);
+            }
+        }
+
+        return lut;
+    }
+
+    private static void ApplyContrastLut(byte* scan0, int height, int stride, int width)
+    {
+        fixed (byte* lut = s_contrastLut)
+        {
+            for (int y = 0; y < height; y++)
+            {
+                byte* row = scan0 + (y * stride);
+                for (int x = 0; x < width; x++)
+                {
+                    int offset = x * 4;
+                    row[offset] = lut[row[offset]];         // B
+                    row[offset + 1] = lut[row[offset + 1]]; // G
+                    row[offset + 2] = lut[row[offset + 2]]; // R
+                    // row[offset + 3] is Alpha (255), preserved
+                }
+            }
         }
     }
 

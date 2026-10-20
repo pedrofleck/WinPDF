@@ -1168,8 +1168,11 @@ public sealed partial class PdfPageCanvas : Grid
         if (PageInfo is not null)
         {
             bool swap = (RotationAngle % 180 != 0);
-            double effW = Math.Max(1.0, swap ? PageInfo.DisplayHeightDip : PageInfo.DisplayWidthDip);
-            double effH = Math.Max(1.0, swap ? PageInfo.DisplayWidthDip : PageInfo.DisplayHeightDip);
+            double defaultW = swap ? PageInfo.DisplayHeightDip : PageInfo.DisplayWidthDip;
+            double defaultH = swap ? PageInfo.DisplayWidthDip : PageInfo.DisplayHeightDip;
+            double rasterScale = XamlRoot?.RasterizationScale ?? 1.0;
+            double effW = Math.Max(1.0, Math.Round(defaultW * rasterScale) / rasterScale);
+            double effH = Math.Max(1.0, Math.Round(defaultH * rasterScale) / rasterScale);
 
             Width = effW;
             Height = effH;
@@ -1244,6 +1247,7 @@ public sealed partial class PdfPageCanvas : Grid
             TileX: 0,
             TileY: 0,
             RenderFlags: (int)(PdfRenderFlags.Annotations | PdfRenderFlags.LcdText),
+            // RenderFlags: (int)(PdfRenderFlags.Annotations | PdfRenderFlags.NoSmoothText),
             Rotation: 0,
             ScalePercent: scalePercent);
 
@@ -1323,8 +1327,16 @@ public sealed partial class PdfPageCanvas : Grid
                     bool swap = (RotationAngle % 180 != 0);
                     double origW = swap ? h : w;
                     double origH = swap ? w : h;
-                    Rect baseDest = new((w - origW) / 2.0, (h - origH) / 2.0, origW, origH);
-                    DrawBitmapWithNightMode(ds, baseBmp, baseDest, baseBmp.Bounds);
+                    Rect bmpBounds = baseBmp.Bounds;
+                    double scale = XamlRoot?.RasterizationScale ?? 1.0;
+                    double destX = Math.Round(((w - bmpBounds.Width) / 2.0) * scale) / scale;
+                    double destY = Math.Round(((h - bmpBounds.Height) / 2.0) * scale) / scale;
+                    Rect baseDest = new(destX, destY, bmpBounds.Width, bmpBounds.Height);
+                    CanvasImageInterpolation baseInterpolation = CanvasImageInterpolation.Linear;
+                    // CanvasImageInterpolation baseInterpolation = (EffectiveZoom >= 0.99 && EffectiveZoom <= 1.01)
+                    //     ? CanvasImageInterpolation.NearestNeighbor
+                    //     : CanvasImageInterpolation.Linear;
+                    DrawBitmapWithNightMode(ds, baseBmp, baseDest, bmpBounds, baseInterpolation);
                 }
                 catch (Exception ex) when (ex is ObjectDisposedException or COMException)
                 {
@@ -1359,10 +1371,11 @@ public sealed partial class PdfPageCanvas : Grid
             return;
         }
 
-        Rect destRect = new(0, 0, w, h);
+        Rect bmpBounds = detailBmp.Bounds;
+        Rect destRect = new(0, 0, bmpBounds.Width, bmpBounds.Height);
         try
         {
-            DrawBitmapWithNightMode(ds, detailBmp, destRect, detailBmp.Bounds);
+            DrawBitmapWithNightMode(ds, detailBmp, destRect, bmpBounds, CanvasImageInterpolation.Linear);
         }
         catch (Exception ex) when (ex is ObjectDisposedException or COMException)
         {
@@ -1477,18 +1490,19 @@ public sealed partial class PdfPageCanvas : Grid
         CanvasDrawingSession ds,
         CanvasBitmap bitmap,
         Rect destRect,
-        Rect srcRect)
+        Rect srcRect,
+        CanvasImageInterpolation interpolation = CanvasImageInterpolation.Linear)
     {
         try
         {
             if (IsNightMode)
             {
                 using var invert = new InvertEffect { Source = bitmap };
-                ds.DrawImage(invert, destRect, invert.GetBounds(ds), 1.0f, CanvasImageInterpolation.HighQualityCubic);
+                ds.DrawImage(invert, destRect, invert.GetBounds(ds), 1.0f, interpolation);
             }
             else
             {
-                ds.DrawImage(bitmap, destRect, srcRect, 1.0f, CanvasImageInterpolation.HighQualityCubic);
+                ds.DrawImage(bitmap, destRect, srcRect, 1.0f, interpolation);
             }
         }
         catch (Exception ex) when (ex is ObjectDisposedException or COMException)
@@ -1901,10 +1915,13 @@ public sealed partial class PdfPageCanvas : Grid
                 _renderedZoom = currentZoom;
                 _renderedPixelScale = pixelScale;
 
-                _detailTranslate.X = exactPatchDip.X;
-                _detailTranslate.Y = exactPatchDip.Y;
-                _detailCanvas.Width = Math.Max(1.0, exactPatchDip.Width);
-                _detailCanvas.Height = Math.Max(1.0, exactPatchDip.Height);
+                Rect patchBmpBounds = newBitmap.Bounds;
+                double snapTransX = Math.Round(exactPatchDip.X * activeRasterScale) / activeRasterScale;
+                double snapTransY = Math.Round(exactPatchDip.Y * activeRasterScale) / activeRasterScale;
+                _detailTranslate.X = snapTransX;
+                _detailTranslate.Y = snapTransY;
+                _detailCanvas.Width = patchBmpBounds.Width;
+                _detailCanvas.Height = patchBmpBounds.Height;
 
                 if (Math.Abs(_detailCanvas.DpiScale - targetDpiScale) > 0.001f)
                 {

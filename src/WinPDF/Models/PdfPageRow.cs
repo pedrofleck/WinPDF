@@ -37,7 +37,7 @@ public sealed class PdfPageRow : INotifyPropertyChanged
         get
         {
             int effRot = (LeftPage.Rotation + Rotation) % 360;
-            return (effRot is 90 or 270 ? LeftPage.HeightPt : LeftPage.WidthPt) * (96.0 / 72.0);
+            return Math.Round((effRot is 90 or 270 ? LeftPage.HeightPt : LeftPage.WidthPt) * (96.0 / 72.0));
         }
     }
 
@@ -49,7 +49,7 @@ public sealed class PdfPageRow : INotifyPropertyChanged
         get
         {
             int effRot = (LeftPage.Rotation + Rotation) % 360;
-            return (effRot is 90 or 270 ? LeftPage.WidthPt : LeftPage.HeightPt) * (96.0 / 72.0);
+            return Math.Round((effRot is 90 or 270 ? LeftPage.WidthPt : LeftPage.HeightPt) * (96.0 / 72.0));
         }
     }
 
@@ -66,7 +66,7 @@ public sealed class PdfPageRow : INotifyPropertyChanged
             }
 
             int effRot = (RightPage.Rotation + Rotation) % 360;
-            return (effRot is 90 or 270 ? RightPage.HeightPt : RightPage.WidthPt) * (96.0 / 72.0);
+            return Math.Round((effRot is 90 or 270 ? RightPage.HeightPt : RightPage.WidthPt) * (96.0 / 72.0));
         }
     }
 
@@ -83,7 +83,7 @@ public sealed class PdfPageRow : INotifyPropertyChanged
             }
 
             int effRot = (RightPage.Rotation + Rotation) % 360;
-            return (effRot is 90 or 270 ? RightPage.WidthPt : RightPage.HeightPt) * (96.0 / 72.0);
+            return Math.Round((effRot is 90 or 270 ? RightPage.WidthPt : RightPage.HeightPt) * (96.0 / 72.0));
         }
     }
 

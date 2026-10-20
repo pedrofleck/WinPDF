@@ -26,8 +26,8 @@ public static class RenderGeometry
         double factor = (96.0 / 72.0) * zoom * rasterizationScale;
 
         return (
-            Math.Max(1, (int)Math.Ceiling(widthPt * factor)),
-            Math.Max(1, (int)Math.Ceiling(heightPt * factor)));
+            Math.Max(1, (int)Math.Round(widthPt * factor)),
+            Math.Max(1, (int)Math.Round(heightPt * factor)));
     }
 
     /// <summary>
