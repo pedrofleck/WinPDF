@@ -100,7 +100,6 @@ public sealed partial class PdfPageCanvas : Grid
             new PropertyMetadata(0, OnRotationAnglePropertyChanged));
 
     private readonly CanvasControl _baseCanvas;
-    private readonly Viewbox _baseViewbox;
     private readonly CanvasControl _detailCanvas;
     private readonly TranslateTransform _detailTranslate;
     private readonly IPdfService _pdfService;
@@ -297,15 +296,6 @@ public sealed partial class PdfPageCanvas : Grid
         _baseCanvas.CreateResources += OnCreateResources;
         _baseCanvas.Draw += OnBaseCanvasDraw;
 
-        _baseViewbox = new Viewbox
-        {
-            Stretch = Stretch.Fill,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            VerticalAlignment = VerticalAlignment.Stretch,
-            IsHitTestVisible = false,
-            Child = _baseCanvas,
-        };
-
         _detailTranslate = new TranslateTransform();
         _detailCanvas = new CanvasControl
         {
@@ -326,7 +316,7 @@ public sealed partial class PdfPageCanvas : Grid
         _detailCanvas.SizeChanged += OnDetailCanvasSizeChanged;
         _detailCanvas.Draw += OnDetailCanvasDraw;
 
-        Children.Add(_baseViewbox);
+        Children.Add(_baseCanvas);
         Children.Add(_detailCanvas);
 
         PointerPressed += OnCanvasPointerPressed;
@@ -1253,7 +1243,7 @@ public sealed partial class PdfPageCanvas : Grid
             ZoomStep: 0,
             TileX: 0,
             TileY: 0,
-            RenderFlags: 0,
+            RenderFlags: (int)(PdfRenderFlags.Annotations | PdfRenderFlags.LcdText),
             Rotation: 0,
             ScalePercent: scalePercent);
 
@@ -1494,11 +1484,11 @@ public sealed partial class PdfPageCanvas : Grid
             if (IsNightMode)
             {
                 using var invert = new InvertEffect { Source = bitmap };
-                ds.DrawImage(invert, destRect, invert.GetBounds(ds));
+                ds.DrawImage(invert, destRect, invert.GetBounds(ds), 1.0f, CanvasImageInterpolation.HighQualityCubic);
             }
             else
             {
-                ds.DrawImage(bitmap, destRect, srcRect);
+                ds.DrawImage(bitmap, destRect, srcRect, 1.0f, CanvasImageInterpolation.HighQualityCubic);
             }
         }
         catch (Exception ex) when (ex is ObjectDisposedException or COMException)
@@ -1688,7 +1678,7 @@ public sealed partial class PdfPageCanvas : Grid
             ZoomStep: 0,
             TileX: 0,
             TileY: 0,
-            RenderFlags: 0,
+            RenderFlags: (int)(PdfRenderFlags.Annotations | PdfRenderFlags.LcdText),
             Rotation: 0,
             ScalePercent: scalePercent);
 
@@ -1771,7 +1761,7 @@ public sealed partial class PdfPageCanvas : Grid
                     return;
                 }
 
-                float baseDpi = _baseCanvas.Dpi > 0 ? _baseCanvas.Dpi : (float)(96.0 * rasterizationScale);
+                float baseDpi = (float)(96.0 * rasterizationScale);
                 CanvasBitmap? newBitmap = CreateCanvasBitmapFromLease(_baseCanvas, lease, baseDpi);
                 if (newBitmap is null)
                 {
@@ -1847,7 +1837,7 @@ public sealed partial class PdfPageCanvas : Grid
                 -regX,
                 -regY,
                 targetRotation,
-                PdfRenderFlags.Annotations);
+                PdfRenderFlags.Annotations | PdfRenderFlags.LcdText);
 
             lease = await _pdfService.RenderAsync(
                 request,

@@ -164,7 +164,7 @@ public readonly record struct PdfRenderRequest(
         double zoom,
         double rasterizationScale,
         int userRotationDegrees = 0,
-        PdfRenderFlags flags = PdfRenderFlags.Annotations)
+        PdfRenderFlags flags = PdfRenderFlags.Annotations | PdfRenderFlags.LcdText)
     {
         (int width, int height) = Rendering.RenderGeometry.GetPagePixelSize(page, userRotationDegrees, zoom, rasterizationScale);
         return new PdfRenderRequest(documentId, page.Index, width, height, width, height, 0, 0, userRotationDegrees, flags);
@@ -190,7 +190,7 @@ public readonly record struct PdfRenderRequest(
         int tileX,
         int tileY,
         int userRotationDegrees = 0,
-        PdfRenderFlags flags = PdfRenderFlags.Annotations)
+        PdfRenderFlags flags = PdfRenderFlags.Annotations | PdfRenderFlags.LcdText)
     {
         (int pageWidth, int pageHeight) = Rendering.RenderGeometry.GetPagePixelSize(page, userRotationDegrees, zoom, rasterizationScale);
         (int left, int top, int width, int height) = Rendering.RenderGeometry.GetTileRect(pageWidth, pageHeight, tileX, tileY);

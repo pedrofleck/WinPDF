@@ -283,7 +283,17 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
         bool highPriority = true,
         CancellationToken cancellationToken = default)
     {
-        PdfRenderRequest request = PdfRenderRequest.ForThumbnail(documentId, pageIndex, widthPx, heightPx);
+        PdfRenderRequest request = new(
+            documentId,
+            pageIndex,
+            widthPx,
+            heightPx,
+            widthPx,
+            heightPx,
+            0,
+            0,
+            0,
+            PdfRenderFlags.Annotations | PdfRenderFlags.LcdText);
         RenderPageJob job = new(request, this, highPriority, cancellationToken);
         return Enqueue<PdfBitmapLease>(job, highPriority);
     }
@@ -311,7 +321,7 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
             -startXPx,
             -startYPx,
             0,
-            PdfRenderFlags.Annotations);
+            PdfRenderFlags.Annotations | PdfRenderFlags.LcdText);
         RenderRegionJob job = new(request, this, highPriority, cancellationToken);
         return Enqueue<PdfBitmapLease>(job, highPriority);
     }
