@@ -27,6 +27,14 @@ public interface IPdfService : IDisposable
     Task CloseDocumentAsync(long documentId, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Dynamically sets the page handle LRU cache capacity on the dedicated PDFium thread.
+    /// </summary>
+    /// <param name="capacity">Maximum number of pages to keep in the PDFium handle cache.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>A task completing when the capacity is updated.</returns>
+    Task SetPageCacheCapacityAsync(int capacity, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Reads the hierarchical table of contents (bookmarks).
     /// </summary>
     /// <param name="documentId">Document id.</param>

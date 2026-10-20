@@ -37,7 +37,24 @@ internal sealed class PdfiumPageCache : IDisposable
     }
 
     /// <summary>Gets the maximum number of retained page handles.</summary>
-    internal int Capacity { get; }
+    internal int Capacity { get; private set; }
+
+    /// <summary>
+    /// Updates the maximum number of retained page handles, evicting oldest entries if necessary.
+    /// </summary>
+    /// <param name="newCapacity">The new capacity (minimum 1).</param>
+    internal void SetCapacity(int newCapacity)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThan(newCapacity, 1);
+        Capacity = newCapacity;
+        while (_lru.Count > Capacity)
+        {
+            LinkedListNode<Entry> tail = _lru.Last!;
+            _lru.RemoveLast();
+            _map.Remove((tail.Value.DocumentId, tail.Value.PageIndex));
+            tail.Value.DisposeHandles();
+        }
+    }
 
     /// <summary>Gets the number of page handles currently retained.</summary>
     internal int Count => _map.Count;

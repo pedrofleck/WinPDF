@@ -412,6 +412,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     partial void OnIsDoublePageChanged(bool value)
     {
         UpdateDisplayedRows();
+        UpdatePageCacheCapacity();
         ModeChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -551,6 +552,23 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     {
         OnPropertyChanged(nameof(FormattedFileSize));
         OnPropertyChanged(nameof(FileSizeDetailed));
+        OnPropertyChanged(nameof(IsHeavyDocument));
+        UpdatePageCacheCapacity();
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the current document is classified as heavy (e.g. large file size or scanned).
+    /// </summary>
+    public bool IsHeavyDocument => FileSizeBytes > 25L * 1024 * 1024 || (Pages.Count > 0 && FileSizeBytes > 0 && (FileSizeBytes / Pages.Count) > 1.5 * 1024 * 1024);
+
+    /// <summary>
+    /// Updates the PDFium page handle cache capacity based on document heaviness and view mode.
+    /// </summary>
+    public void UpdatePageCacheCapacity()
+    {
+        // Double page: 8 pages. Single page: 4 pages (if heavy) or 6 pages (if normal).
+        int targetCapacity = IsDoublePage ? 8 : (IsHeavyDocument ? 4 : 6);
+        _ = _pdfService.SetPageCacheCapacityAsync(targetCapacity);
     }
 
     /// <summary>
@@ -959,6 +977,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
                 FileSizeBytes = 0;
             }
         }
+
+        UpdatePageCacheCapacity();
 
         foreach (PdfPageInfo page in info.Pages)
         {
@@ -1392,10 +1412,17 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
         if (!isIdentical)
         {
-            DisplayedRows.Clear();
-            foreach (var r in targetRows)
+            if (DisplayedRows.Count == 1 && targetRows.Count == 1)
             {
-                DisplayedRows.Add(r);
+                DisplayedRows[0] = targetRows[0];
+            }
+            else
+            {
+                DisplayedRows.Clear();
+                foreach (var r in targetRows)
+                {
+                    DisplayedRows.Add(r);
+                }
             }
         }
     }
@@ -1708,6 +1735,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
             item.ClearImage();
         }
+        Thumbnails.Clear();
+        DisplayedRows.Clear();
 
         _tileCache.RemoveDocument(DocumentId);
         _ = _pdfService.CloseDocumentAsync(DocumentId);

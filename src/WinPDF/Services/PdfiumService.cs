@@ -70,6 +70,19 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
             highPriority: true);
 
     /// <inheritdoc/>
+    public Task SetPageCacheCapacityAsync(int capacity, CancellationToken cancellationToken = default)
+        => Enqueue<bool>(
+            new PdfiumJob<bool>(
+                PdfJobPriority.Critical,
+                (engine, _) =>
+                {
+                    engine.SetPageCacheCapacity(capacity);
+                    return true;
+                },
+                cancellationToken),
+            highPriority: true);
+
+    /// <inheritdoc/>
     public Task<IReadOnlyList<OutlineItem>> GetOutlineAsync(long documentId, CancellationToken cancellationToken = default)
         => Enqueue<IReadOnlyList<OutlineItem>>(
             new PdfiumJob<IReadOnlyList<OutlineItem>>(

@@ -623,6 +623,12 @@ public sealed partial class ShellViewModel : ObservableObject
                 return;
             }
 
+            if (CurrentDocument is { } oldDoc)
+            {
+                CurrentDocument = null;
+                oldDoc.Dispose();
+            }
+
             PdfDocumentInfo docInfo = await _pdfService.OpenDocumentAsync(filePath, null, cancellationToken);
             var outline = await _pdfService.GetOutlineAsync(docInfo.DocumentId, cancellationToken);
             var attachments = await _pdfService.GetAttachmentNamesAsync(docInfo.DocumentId, cancellationToken);

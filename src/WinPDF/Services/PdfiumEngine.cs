@@ -79,7 +79,14 @@ internal sealed unsafe class PdfiumEngine : IDisposable
                     cancellationToken.ThrowIfCancellationRequested();
                 }
 
-                pages.Add(ReadPageInfo(document, i, id));
+                if (i == 0)
+                {
+                    pages.Add(ReadPageInfo(document, 0, id));
+                }
+                else
+                {
+                    pages.Add(ReadPageInfoFast(document, i, id));
+                }
             }
 
             _documents[id] = document;
@@ -90,6 +97,14 @@ internal sealed unsafe class PdfiumEngine : IDisposable
             document.Dispose();
             throw;
         }
+    }
+
+    /// <summary>
+    /// Dynamically sets the page handle LRU cache capacity.
+    /// </summary>
+    internal void SetPageCacheCapacity(int capacity)
+    {
+        _pageCache.SetCapacity(capacity);
     }
 
     /// <summary>Closes a document; its cached pages are closed first.</summary>
@@ -1645,6 +1660,19 @@ internal sealed unsafe class PdfiumEngine : IDisposable
         }
 
         return new PdfPageInfo(index, DefaultPageWidthPt, DefaultPageHeightPt, rotation, 0, 0, documentId);
+    }
+
+    // Fast path for bulk pages: reads page dimensions directly from dictionary metadata (FPDF_GetPageSizeByIndexF)
+    // without stream decompression or memory allocations; falls back to full ReadPageInfo on error.
+    private static PdfPageInfo ReadPageInfoFast(PdfiumDocumentHandle document, int index, long documentId = 0)
+    {
+        FsSizeF size = default;
+        if (PdfiumNative.FPDF_GetPageSizeByIndexF(document, index, &size) != 0 && size.Width > 0 && size.Height > 0)
+        {
+            return new PdfPageInfo(index, size.Width, size.Height, 0, 0, 0, documentId);
+        }
+
+        return ReadPageInfo(document, index, documentId);
     }
 
     private static bool TryGetBox(int success, float left, float bottom, float right, float top, out Box box)

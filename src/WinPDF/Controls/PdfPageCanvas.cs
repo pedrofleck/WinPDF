@@ -1616,12 +1616,15 @@ public sealed partial class PdfPageCanvas : Grid
     {
         double desiredPixelScale = Math.Max(1.0, currentZoom * rasterScale);
 
-        // Bound the patch in DIPs so that the 20% prefetch margin does not force pixelScale below native resolution on 4K displays.
+        // Bound the patch in DIPs so that the prefetch margin does not force pixelScale below native resolution on 4K displays.
         double maxAllowedPatchW = Math.Max(visibleDip.Width, MaxDetailPatchDimensionPx / desiredPixelScale);
         double maxAllowedPatchH = Math.Max(visibleDip.Height, MaxDetailPatchDimensionPx / desiredPixelScale);
 
-        double marginX = Math.Min(visibleDip.Width * 0.20, Math.Max(0.0, (maxAllowedPatchW - visibleDip.Width) / 2.0));
-        double marginY = Math.Min(visibleDip.Height * 0.20, Math.Max(0.0, (maxAllowedPatchH - visibleDip.Height) / 2.0));
+        // Expand the horizontal prefetch margin generously (up to 75% of viewport width) and vertical margin (up to 40% of viewport height)
+        // so that scrolling/panning laterally across high-resolution pages maintains crisp detail without exposing the low-res base bitmap,
+        // while strictly bounding within maxAllowedPatch to keep memory controlled and prevent downsampling below native pixel scale.
+        double marginX = Math.Min(visibleDip.Width * 0.75, Math.Max(0.0, (maxAllowedPatchW - visibleDip.Width) / 2.0));
+        double marginY = Math.Min(visibleDip.Height * 0.40, Math.Max(0.0, (maxAllowedPatchH - visibleDip.Height) / 2.0));
 
         double patchX = Math.Max(0, visibleDip.X - marginX);
         double patchY = Math.Max(0, visibleDip.Y - marginY);
