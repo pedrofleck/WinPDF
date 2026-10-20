@@ -1786,13 +1786,13 @@ internal sealed unsafe class PdfiumEngine : IDisposable
     byte[] lut = new byte[256];
     
     // 1. White Threshold: removes the white halo (> 239.9 sRGB to pure white)
-    double whiteThresh = 15.1; 
+    double whiteThresh = 18; // default = 15.1
     
     // 2. Black Threshold: any pixel with brightness <= 45 (ink >= 210) becomes PURE BLACK (0)
     double blackThresh = 210.0; // default = 210
     
     // 3. Transition curve between the edge and the core
-    double gamma = 1.25; // 1.25 = default, 1.10 = sharper
+    double gamma = 1.10; // 1.25 = default, 1.10 = sharper
     for (int i = 0; i < 256; i++)
     {
         double ink = 255.0 - i;

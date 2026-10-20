@@ -1332,10 +1332,9 @@ public sealed partial class PdfPageCanvas : Grid
                     double destX = Math.Round(((w - bmpBounds.Width) / 2.0) * scale) / scale;
                     double destY = Math.Round(((h - bmpBounds.Height) / 2.0) * scale) / scale;
                     Rect baseDest = new(destX, destY, bmpBounds.Width, bmpBounds.Height);
-                    CanvasImageInterpolation baseInterpolation = CanvasImageInterpolation.Linear;
-                    // CanvasImageInterpolation baseInterpolation = (EffectiveZoom >= 0.99 && EffectiveZoom <= 1.01)
-                    //     ? CanvasImageInterpolation.NearestNeighbor
-                    //     : CanvasImageInterpolation.Linear;
+                    CanvasImageInterpolation baseInterpolation = (EffectiveZoom >= 0.99 && EffectiveZoom <= 1.01)
+                        ? CanvasImageInterpolation.NearestNeighbor
+                        : CanvasImageInterpolation.Linear;
                     DrawBitmapWithNightMode(ds, baseBmp, baseDest, bmpBounds, baseInterpolation);
                 }
                 catch (Exception ex) when (ex is ObjectDisposedException or COMException)

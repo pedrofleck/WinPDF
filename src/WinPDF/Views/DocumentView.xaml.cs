@@ -2724,9 +2724,7 @@ public sealed partial class DocumentView : Page
         }
 
         double leftW = (ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
-        double appliedMarginLeft = ContinuousScrollViewer?.Margin.Left ?? 0.0;
-        double unappliedLeftW = Math.Max(0.0, leftW - appliedMarginLeft);
-        return unappliedLeftW / 2.0;
+        return leftW / 2.0;
     }
 
     private double GetTargetFloatingTopOffsetDip()
@@ -2760,12 +2758,13 @@ public sealed partial class DocumentView : Page
         _horizontalPushStoryboard?.Stop();
         _isHorizontalPushAnimating = false;
 
-        double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
-        if (ContinuousScrollViewer is not null && Math.Abs(ContinuousScrollViewer.Margin.Left - leftW) > 0.5)
+        // Keep ContinuousScrollViewer.Margin permanently at 0 so the ScrollViewer never shifts or triggers a second layout push.
+        if (ContinuousScrollViewer is not null && ContinuousScrollViewer.Margin.Left != 0.0)
         {
-            ContinuousScrollViewer.Margin = new Thickness(leftW, 0, 0, 0);
+            ContinuousScrollViewer.Margin = new Thickness(0);
         }
 
+        double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
         double zoom = ContinuousScrollViewer?.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
         double targetDocOffsetDip = GetTargetDocumentOffsetDip(zoom);
 
@@ -2802,7 +2801,7 @@ public sealed partial class DocumentView : Page
 
     /// <summary>
     /// Smoothly animates the document, status bar, and navigation zones when the left sidebar opens or closes,
-    /// using pure forward GPU transforms with zero layout width mutation on the ScrollViewer (zero 1-frame jump).
+    /// pushing the document once by exactly half of the sidebar width simultaneously with the sidebar animation.
     /// </summary>
     /// <param name="sidebarOpen">Whether the left sidebar is opening.</param>
     /// <param name="sidebarWidth">Width of the left sidebar in DIPs.</param>
@@ -2823,22 +2822,28 @@ public sealed partial class DocumentView : Page
             return;
         }
 
+        double startRepeaterX = PagesRepeaterPushTransform.TranslateX;
+        double startTopX = FloatingTopTransform?.TranslateX ?? 0.0;
+        double startBackdropX = StatusBarBackdropTransform?.TranslateX ?? 0.0;
+        double startLeftX = StatusBarLeftTransform?.TranslateX ?? 0.0;
+        double startPrevX = PrevPageZoneTransform?.TranslateX ?? 0.0;
+
         _horizontalPushStoryboard?.Stop();
         _isHorizontalPushAnimating = true;
+
+        if (ContinuousScrollViewer is not null && ContinuousScrollViewer.Margin.Left != 0.0)
+        {
+            ContinuousScrollViewer.Margin = new Thickness(0);
+        }
 
         double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
         double zoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
 
-        if (ContinuousScrollViewer is not null && ContinuousScrollViewer.Margin.Left > 0.5)
-        {
-            double prevMarginLeft = ContinuousScrollViewer.Margin.Left;
-            ContinuousScrollViewer.Margin = new Thickness(0);
-            PagesRepeaterPushTransform.TranslateX += (prevMarginLeft / 2.0) / Math.Max(0.05, zoom);
-        }
-
         double targetDocOffsetDip = GetTargetDocumentOffsetDip(zoom);
         double targetRepeaterX = targetDocOffsetDip / Math.Max(0.05, zoom);
         double targetTopOffsetDip = GetTargetFloatingTopOffsetDip();
+
+        PagesRepeaterPushTransform.TranslateX = startRepeaterX;
 
         var sb = new Storyboard();
         var ease = new ExponentialEase { Exponent = 4.5, EasingMode = EasingMode.EaseOut };
@@ -2846,6 +2851,7 @@ public sealed partial class DocumentView : Page
 
         var docPush = new DoubleAnimation
         {
+            From = startRepeaterX,
             To = targetRepeaterX,
             Duration = duration,
             EasingFunction = ease
@@ -2856,8 +2862,10 @@ public sealed partial class DocumentView : Page
 
         if (FloatingTopTransform is not null)
         {
+            FloatingTopTransform.TranslateX = startTopX;
             var topAnim = new DoubleAnimation
             {
+                From = startTopX,
                 To = targetTopOffsetDip,
                 Duration = duration,
                 EasingFunction = ease
@@ -2869,8 +2877,10 @@ public sealed partial class DocumentView : Page
 
         if (StatusBarBackdropTransform is not null)
         {
+            StatusBarBackdropTransform.TranslateX = startBackdropX;
             var sbBackdropAnim = new DoubleAnimation
             {
+                From = startBackdropX,
                 To = leftW,
                 Duration = duration,
                 EasingFunction = ease
@@ -2882,8 +2892,10 @@ public sealed partial class DocumentView : Page
 
         if (StatusBarLeftTransform is not null)
         {
+            StatusBarLeftTransform.TranslateX = startLeftX;
             var sbLeftAnim = new DoubleAnimation
             {
+                From = startLeftX,
                 To = leftW,
                 Duration = duration,
                 EasingFunction = ease
@@ -2895,8 +2907,10 @@ public sealed partial class DocumentView : Page
 
         if (PrevPageZoneTransform is not null)
         {
+            PrevPageZoneTransform.TranslateX = startPrevX;
             var prevAnim = new DoubleAnimation
             {
+                From = startPrevX,
                 To = leftW,
                 Duration = duration,
                 EasingFunction = ease
@@ -2910,6 +2924,7 @@ public sealed partial class DocumentView : Page
         {
             var nextAnim = new DoubleAnimation
             {
+                From = NextPageZoneTransform.TranslateX,
                 To = 0.0,
                 Duration = duration,
                 EasingFunction = ease
@@ -2922,6 +2937,7 @@ public sealed partial class DocumentView : Page
         sb.Completed += (_, _) =>
         {
             SyncPaneOffsetsImmediate();
+            ScheduleViewportUpdate();
         };
 
         _horizontalPushStoryboard = sb;
