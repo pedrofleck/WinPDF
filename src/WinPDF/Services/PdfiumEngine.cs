@@ -1762,24 +1762,37 @@ internal sealed unsafe class PdfiumEngine : IDisposable
     private static byte[] InitializeContrastLut()
     {
         byte[] lut = new byte[256];
-        double thresh = 15.1; // Trim faint antialiasing halo (> 239.9 sRGB to pure white)
-        double gamma = 1.25;  // DirectWrite / ClearType gamma contrast enhancement
+
+        // 1. White threshold: trims faint antialiasing halo (> 239.9 sRGB mapped to pure white 255).
+        const double whiteThresh = 15.1;
+
+        // 2. Black threshold: stems darkening (brightness <= 45 / ink >= 210 mapped to pure black 0).
+        const double blackThresh = 210.0;
+
+        // 3. Power curve for smooth antialiasing transition between edge and stem core.
+        const double gamma = 1.25;
+
         for (int i = 0; i < 256; i++)
         {
             double ink = 255.0 - i;
-            if (ink <= thresh)
+            if (ink <= whiteThresh)
             {
-                lut[i] = 255;
+                lut[i] = 255; // Pure white
+            }
+            else if (ink >= blackThresh)
+            {
+                lut[i] = 0;   // Pure black
             }
             else
             {
-                double adj = (ink - thresh) / (255.0 - thresh);
-                lut[i] = (byte)Math.Clamp(Math.Round(255.0 - Math.Pow(adj, gamma) * 255.0), 0, 255);
+                double adj = (ink - whiteThresh) / (blackThresh - whiteThresh);
+                lut[i] = (byte)Math.Clamp(Math.Round(255.0 - (Math.Pow(adj, gamma) * 255.0)), 0, 255);
             }
         }
 
         return lut;
     }
+
 
     private static void ApplyContrastLut(byte* scan0, int height, int stride, int width)
     {
