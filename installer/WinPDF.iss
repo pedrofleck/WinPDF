@@ -3,7 +3,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.5.2"
+  #define AppVersion "0.5.2-alpha.5"
 #endif
 
 #ifndef AppArch
@@ -195,11 +195,15 @@ end;
 function GetInstalledVersion(var InstalledVer: string): Boolean;
 var
   UninstallKey: string;
+  InstallLoc: string;
+  ExePath: string;
 begin
   Result := False;
   InstalledVer := '';
+  InstallLoc := '';
   UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{8F4E9A2B-5C7D-4E1A-9B3F-2D6C8A1E5F09}_is1';
 
+  // 1. Try 64-bit HKLM
   if IsWin64 then
   begin
     if RegQueryStringValue(HKLM64, UninstallKey, 'DisplayVersion', InstalledVer) and (Trim(InstalledVer) <> '') then
@@ -214,12 +218,14 @@ begin
     end;
   end;
 
+  // 2. Try standard HKLM
   if RegQueryStringValue(HKLM, UninstallKey, 'DisplayVersion', InstalledVer) and (Trim(InstalledVer) <> '') then
   begin
     Result := True;
     Exit;
   end;
 
+  // 3. Try HKCU (in case installed or tested per-user)
   if IsWin64 then
   begin
     if RegQueryStringValue(HKCU64, UninstallKey, 'DisplayVersion', InstalledVer) and (Trim(InstalledVer) <> '') then
@@ -240,10 +246,24 @@ begin
     Exit;
   end;
 
-  if FileExists(ExpandConstant('{app}\{#MyAppExeName}')) then
+  // 4. If registry key exists with InstallLocation but DisplayVersion was empty, check the exe
+  if (IsWin64 and RegQueryStringValue(HKLM64, UninstallKey, 'InstallLocation', InstallLoc)) or
+     RegQueryStringValue(HKLM, UninstallKey, 'InstallLocation', InstallLoc) or
+     (IsWin64 and RegQueryStringValue(HKCU64, UninstallKey, 'InstallLocation', InstallLoc)) or
+     RegQueryStringValue(HKCU, UninstallKey, 'InstallLocation', InstallLoc) then
   begin
-    if GetVersionNumbersString(ExpandConstant('{app}\{#MyAppExeName}'), InstalledVer) then
-      Result := (Trim(InstalledVer) <> '');
+    if Trim(InstallLoc) <> '' then
+    begin
+      ExePath := AddBackslash(Trim(InstallLoc)) + '{#MyAppExeName}';
+      if FileExists(ExePath) then
+      begin
+        if GetVersionNumbersString(ExePath, InstalledVer) and (Trim(InstalledVer) <> '') then
+        begin
+          Result := True;
+          Exit;
+        end;
+      end;
+    end;
   end;
 end;
 
