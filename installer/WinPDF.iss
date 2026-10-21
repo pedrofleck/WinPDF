@@ -3,7 +3,7 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.4.2-alpha.4"
+  #define AppVersion "0.5.2"
 #endif
 
 #ifndef AppArch
