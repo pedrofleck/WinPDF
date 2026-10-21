@@ -431,30 +431,24 @@
                     Style="{StaticResource BodyTextBlockStyle}"
                     TextWrapping="Wrap" />
 
-                <MenuFlyoutSeparator />
-
-                <StackPanel Spacing="4">
+                <StackPanel Margin="4,8,0,0" Spacing="6">
                     <TextBlock
-                        x:Uid="Settings_About_CreditsHeader"
-                        FontWeight="SemiBold"
-                        Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <TextBlock
-                        x:Uid="Settings_About_CreditsText"
+                        x:Uid="Settings_About_Copyright"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        TextWrapping="Wrap" />
-                </StackPanel>
+                        Style="{StaticResource BodyTextBlockStyle}" />
 
-                <StackPanel Spacing="4">
-                    <TextBlock
-                        x:Uid="Settings_About_LicenseHeader"
-                        FontWeight="SemiBold"
-                        Style="{StaticResource BodyStrongTextBlockStyle}" />
-                    <TextBlock
-                        x:Uid="Settings_About_LicenseText"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        Style="{StaticResource CaptionTextBlockStyle}"
-                        TextWrapping="Wrap" />
+                    <HyperlinkButton
+                        x:Name="LicenseLinkButton"
+                        x:Uid="Settings_About_LicenseLink"
+                        Margin="0,6,0,0"
+                        Padding="0"
+                        Click="OnLicenseLinkClick" />
+
+                    <HyperlinkButton
+                        x:Name="ThirdPartyNoticesLinkButton"
+                        x:Uid="Settings_About_ThirdPartyLink"
+                        Padding="0"
+                        Click="OnThirdPartyNoticesLinkClick" />
                 </StackPanel>
             </StackPanel>
         </Grid>

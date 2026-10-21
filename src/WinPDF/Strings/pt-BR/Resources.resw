@@ -137,10 +137,12 @@
   <data name="Settings_Annotations_TouchDescription.Text" xml:space="preserve"><value>Quando desativado, dedos movem e ampliam enquanto a caneta desenha.</value></data>
   <data name="Settings_About_AppHeader.Text" xml:space="preserve"><value>WinPDF Leitor e Anotador</value></data>
   <data name="Settings_About_Description.Text" xml:space="preserve"><value>Um leitor e anotador de PDF nativo moderno e leve para o Windows 11.</value></data>
-  <data name="Settings_About_CreditsHeader.Text" xml:space="preserve"><value>Componentes de código aberto</value></data>
-  <data name="Settings_About_CreditsText.Text" xml:space="preserve"><value>Construído com WinUI 3 (Windows App SDK), PDFium e Win2D. Inspirado no GNOME Papers.</value></data>
-  <data name="Settings_About_LicenseHeader.Text" xml:space="preserve"><value>Licença</value></data>
-  <data name="Settings_About_LicenseText.Text" xml:space="preserve"><value>O WinPDF é um software de código aberto distribuído sob a Licença MIT.</value></data>
+  <data name="Settings_About_Copyright.Text" xml:space="preserve"><value>© 2026 Pedro H. F. Fleck (Fluentify). Todos os direitos reservados.</value></data>
+  <data name="Settings_About_LicenseLink.Content" xml:space="preserve"><value>GNU General Public License v3.0 (GPLv3)</value></data>
+  <data name="Settings_About_ThirdPartyLink.Content" xml:space="preserve"><value>Confirmações de software de terceiros</value></data>
+  <data name="Dialog_License_Title" xml:space="preserve"><value>Termos de Licença (GNU GPLv3)</value></data>
+  <data name="Dialog_ThirdParty_Title" xml:space="preserve"><value>Confirmações de software de terceiros</value></data>
+  <data name="Dialog_CloseButton" xml:space="preserve"><value>Fechar</value></data>
 
   <!-- ===================== Document Properties Dialog ===================== -->
   <data name="DocProps_Title" xml:space="preserve"><value>Propriedades</value></data>

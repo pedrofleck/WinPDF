@@ -141,10 +141,12 @@
   <data name="Settings_Annotations_TouchDescription.Text" xml:space="preserve"><value>When disabled, fingers pan and zoom while pen draws.</value></data>
   <data name="Settings_About_AppHeader.Text" xml:space="preserve"><value>WinPDF Reader &amp; Annotator</value></data>
   <data name="Settings_About_Description.Text" xml:space="preserve"><value>A modern, lightweight native PDF reader and annotator for Windows 11.</value></data>
-  <data name="Settings_About_CreditsHeader.Text" xml:space="preserve"><value>Open source credits</value></data>
-  <data name="Settings_About_CreditsText.Text" xml:space="preserve"><value>Built with WinUI 3 (Windows App SDK), PDFium and Win2D. Inspired by GNOME Papers.</value></data>
-  <data name="Settings_About_LicenseHeader.Text" xml:space="preserve"><value>License</value></data>
-  <data name="Settings_About_LicenseText.Text" xml:space="preserve"><value>WinPDF is open source software released under the MIT License.</value></data>
+  <data name="Settings_About_Copyright.Text" xml:space="preserve"><value>© 2026 Pedro H. F. Fleck (Fluentify). All rights reserved.</value></data>
+  <data name="Settings_About_LicenseLink.Content" xml:space="preserve"><value>GNU General Public License v3.0 (GPLv3)</value></data>
+  <data name="Settings_About_ThirdPartyLink.Content" xml:space="preserve"><value>Third-party software acknowledgments</value></data>
+  <data name="Dialog_License_Title" xml:space="preserve"><value>License Terms (GNU GPLv3)</value></data>
+  <data name="Dialog_ThirdParty_Title" xml:space="preserve"><value>Third-party software acknowledgments</value></data>
+  <data name="Dialog_CloseButton" xml:space="preserve"><value>Close</value></data>
 
   <!-- ===================== Document Properties Dialog ===================== -->
   <data name="DocProps_Title" xml:space="preserve"><value>Properties</value></data>

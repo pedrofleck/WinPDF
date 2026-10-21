@@ -204,4 +204,13 @@ public static class ResourceKeys
 
     /// <summary>Primary button text to confirm opening an external URI link.</summary>
     public const string DialogOpenExternalLinkConfirm = "Dialog_OpenExternalLink_Confirm";
+
+    /// <summary>Dialog title for GNU GPLv3 license terms.</summary>
+    public const string DialogLicenseTitle = "Dialog_License_Title";
+
+    /// <summary>Dialog title for third-party software acknowledgments.</summary>
+    public const string DialogThirdPartyTitle = "Dialog_ThirdParty_Title";
+
+    /// <summary>Close button text for legal notice dialogs.</summary>
+    public const string DialogCloseButton = "Dialog_CloseButton";
 }

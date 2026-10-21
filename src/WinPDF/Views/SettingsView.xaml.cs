@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Navigation;
+using WinPDF.Helpers;
 using WinPDF.ViewModels;
 
 namespace WinPDF.Views;
@@ -170,5 +171,73 @@ public sealed partial class SettingsView : Page
         {
             ViewModel = App.CurrentApp.Services.GetRequiredService<SettingsViewModel>();
         }
+    }
+
+    private async void OnLicenseLinkClick(object sender, RoutedEventArgs e)
+    {
+        string title = ResourceStrings.Get(ResourceKeys.DialogLicenseTitle);
+        string body = ReadBundledTextFile("LICENSE.txt");
+        await ShowLegalNoticeDialogAsync(title, body);
+    }
+
+    private async void OnThirdPartyNoticesLinkClick(object sender, RoutedEventArgs e)
+    {
+        string title = ResourceStrings.Get(ResourceKeys.DialogThirdPartyTitle);
+        string body = ReadBundledTextFile("THIRD-PARTY-NOTICES.txt");
+        await ShowLegalNoticeDialogAsync(title, body);
+    }
+
+    private static string ReadBundledTextFile(string fileName)
+    {
+        try
+        {
+            string path = System.IO.Path.Combine(AppContext.BaseDirectory, fileName);
+            if (System.IO.File.Exists(path))
+            {
+                return System.IO.File.ReadAllText(path);
+            }
+        }
+        catch
+        {
+            // Fallback when file is missing or unreadable
+        }
+
+        return $"{fileName} not found.";
+    }
+
+    private async Task ShowLegalNoticeDialogAsync(string title, string contentText)
+    {
+        if (XamlRoot is null)
+        {
+            return;
+        }
+
+        var scrollViewer = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Margin = new Thickness(0, 8, -24, 0),
+            Padding = new Thickness(0, 0, 20, 0),
+            Content = new TextBlock
+            {
+                Text = contentText,
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = true,
+                FontSize = 13,
+                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"]
+            }
+        };
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            RequestedTheme = ActualTheme,
+            Title = title,
+            Content = scrollViewer,
+            CloseButtonText = ResourceStrings.Get(ResourceKeys.DialogCloseButton),
+            DefaultButton = ContentDialogButton.Close
+        };
+
+        await dialog.ShowAsync();
     }
 }
