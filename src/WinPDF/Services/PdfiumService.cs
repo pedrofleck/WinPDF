@@ -329,7 +329,7 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
     /// <inheritdoc/>
     public Task<PdfBitmapLease> RenderAsync(PdfRenderRequest request, PdfJobPriority priority, CancellationToken cancellationToken = default)
     {
-        bool highPriority = priority != PdfJobPriority.Thumbnail;
+        bool highPriority = priority is PdfJobPriority.Critical or PdfJobPriority.Visible;
         RenderPageJob job = new(request, this, highPriority, cancellationToken);
         return Enqueue<PdfBitmapLease>(job, highPriority);
     }

@@ -707,6 +707,10 @@ public sealed partial class DocumentView : Page
             return;
         }
 
+        PdfPageCanvas.ClearSlideBuffer();
+        PdfPageCanvas.ReleaseReusableBuffer();
+        GC.Collect(2, GCCollectionMode.Optimized, false);
+
         int targetPage = Math.Clamp(doc.CurrentPageIndex, 0, doc.Pages.Count - 1);
         double restoreZoom = Math.Clamp(_prePresentationZoom > 0.05 ? _prePresentationZoom : ViewModel.ZoomBeforePresentation, DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
 

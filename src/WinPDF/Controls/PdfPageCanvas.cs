@@ -112,8 +112,16 @@ public sealed partial class PdfPageCanvas : Grid
     private double _renderedZoom = 1.0;
     private double _renderedPixelScale = 1.0;
 
+    private static readonly object s_slideBufferLock = new();
+    private static readonly Dictionary<int, CanvasBitmap> s_slideBuffer = new();
+    private static long s_slideBufferDocId = -1;
+    private static int s_slideBufferRotation = -1;
+    private static double s_slideBufferPixelScale = 1.0;
+
     private CancellationTokenSource? _baseCts;
     private CancellationTokenSource? _detailCts;
+    private CancellationTokenSource? _detailDebounceCts;
+    private CancellationTokenSource? _prefetchCts;
     private DocumentViewModel? _observedDocument;
     private ShellViewModel? _shellViewModel;
     private ScrollViewer? _cachedScrollViewer;
@@ -1192,6 +1200,7 @@ public sealed partial class PdfPageCanvas : Grid
         if (args.Reason == CanvasCreateResourcesReason.NewDevice)
         {
             _tileCache.HandleDeviceLost();
+            ClearSlideBuffer();
             _level0Bitmap?.Dispose();
             _level0Bitmap = null;
             ReleaseHighResPatch();
@@ -1231,23 +1240,22 @@ public sealed partial class PdfPageCanvas : Grid
 
     private void TryLoadCachedBitmaps()
     {
-        if (PageInfo is null || EffectiveDocumentId <= 0)
+        if (PageInfo is not { } pageInfo || EffectiveDocumentId <= 0 || _isUnloaded)
         {
             return;
         }
 
-        double rasterizationScale = XamlRoot?.RasterizationScale ?? 1.0;
-        int scalePercent = (int)Math.Round(rasterizationScale * 100);
+        double rasterScale = XamlRoot?.RasterizationScale ?? 1.0;
+        int scalePercent = (int)Math.Round(rasterScale * 100);
 
         TileKey baseKey = new(
             EffectiveDocumentId,
-            PageInfo.Index,
+            pageInfo.Index,
             TileKind.FullPage,
             ZoomStep: 0,
             TileX: 0,
             TileY: 0,
             RenderFlags: (int)(PdfRenderFlags.Annotations | PdfRenderFlags.LcdText),
-            // RenderFlags: (int)(PdfRenderFlags.Annotations | PdfRenderFlags.NoSmoothText),
             Rotation: 0,
             ScalePercent: scalePercent);
 
@@ -1262,17 +1270,58 @@ public sealed partial class PdfPageCanvas : Grid
                         _level0Entry?.Release();
                         _level0Entry = canvasEntry;
                         _level0Bitmap = canvasEntry.Bitmap;
-                        return;
+                    }
+                    else
+                    {
+                        cached.Release();
                     }
                 }
                 catch
                 {
-                    _tileCache.RemovePage(EffectiveDocumentId, PageInfo.Index);
+                    _tileCache.RemovePage(EffectiveDocumentId, pageInfo.Index);
                     _level0Bitmap = null;
+                    cached.Release();
                 }
             }
+            else
+            {
+                cached?.Release();
+            }
+        }
 
-            cached?.Release();
+        double activeZoom = EffectiveZoom;
+        if (activeZoom > DetailZoomThreshold)
+        {
+            double desiredPixelScale = Math.Max(1.0, activeZoom * rasterScale);
+
+            if (TryGetSlideFromBuffer(EffectiveDocumentId, pageInfo.Index, RotationAngle, desiredPixelScale, out CanvasBitmap? bufferedSlide) && bufferedSlide is not null)
+            {
+                _detailBitmap = bufferedSlide;
+
+                bool swap = (RotationAngle % 180 != 0);
+                double pageW = Math.Max(1.0, swap ? pageInfo.DisplayHeightDip : pageInfo.DisplayWidthDip);
+                double pageH = Math.Max(1.0, swap ? pageInfo.DisplayWidthDip : pageInfo.DisplayHeightDip);
+
+                _detailRectDip = new Rect(0, 0, pageW, pageH);
+                _renderedZoom = activeZoom;
+                _renderedPixelScale = desiredPixelScale;
+                _detailTranslate.X = 0;
+                _detailTranslate.Y = 0;
+                _detailCanvas.Width = bufferedSlide.Bounds.Width;
+                _detailCanvas.Height = bufferedSlide.Bounds.Height;
+
+                float targetDpiScale = (float)Math.Max(1.0, desiredPixelScale / Math.Max(0.1, rasterScale));
+                if (Math.Abs(_detailCanvas.DpiScale - targetDpiScale) > 0.001f)
+                {
+                    _detailCanvas.DpiScale = targetDpiScale;
+                }
+
+                _detailCanvas.Opacity = 1.0;
+                _detailCanvas.Visibility = Visibility.Visible;
+                _detailCanvas.Invalidate();
+
+                PrefetchAdjacentPages(EffectiveDocumentId, pageInfo.Index, RotationAngle, activeZoom, desiredPixelScale, rasterScale);
+            }
         }
     }
 
@@ -1514,6 +1563,14 @@ public sealed partial class PdfPageCanvas : Grid
     /// </summary>
     public void ReleaseHighResPatch()
     {
+        _prefetchCts?.Cancel();
+        _prefetchCts?.Dispose();
+        _prefetchCts = null;
+
+        _detailDebounceCts?.Cancel();
+        _detailDebounceCts?.Dispose();
+        _detailDebounceCts = null;
+
         _detailCts?.Cancel();
         _detailCts?.Dispose();
         _detailCts = null;
@@ -1534,7 +1591,10 @@ public sealed partial class PdfPageCanvas : Grid
                 _detailCanvas.DpiScale = 1.0f;
             }
 
-            old?.Dispose();
+            if (old is not null && !IsInSlideBuffer(old))
+            {
+                old.Dispose();
+            }
         }
     }
 
@@ -1604,10 +1664,52 @@ public sealed partial class PdfPageCanvas : Grid
 
         if (sameZoom && sameScale && coversViewport)
         {
+            _detailDebounceCts?.Cancel();
+            _detailDebounceCts?.Dispose();
+            _detailDebounceCts = null;
             return;
         }
 
-        _ = RenderDetailPatchAsync(candidatePatchDip, targetPixelScale, currentZoom, rasterScale);
+        bool shouldDebounce = _detailBitmap is not null && _detailCanvas.Visibility == Visibility.Visible;
+        ScheduleDetailPatch(candidatePatchDip, targetPixelScale, currentZoom, rasterScale, shouldDebounce);
+    }
+
+    private void ScheduleDetailPatch(Rect candidatePatchDip, double targetPixelScale, double currentZoom, double rasterScale, bool debounce = true)
+    {
+        _detailDebounceCts?.Cancel();
+        _detailDebounceCts?.Dispose();
+        _detailDebounceCts = new CancellationTokenSource();
+        CancellationToken ct = _detailDebounceCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            if (debounce)
+            {
+                try
+                {
+                    await Task.Delay(85, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
+
+            if (ct.IsCancellationRequested || _isUnloaded)
+            {
+                return;
+            }
+
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (ct.IsCancellationRequested || _isUnloaded || !IsLoaded)
+                {
+                    return;
+                }
+
+                _ = RenderDetailPatchAsync(candidatePatchDip, targetPixelScale, currentZoom, rasterScale);
+            });
+        }, ct);
     }
 
     private static (Rect PatchDip, double PixelScale) ComputePatchAndPixelScale(
@@ -1930,7 +2032,30 @@ public sealed partial class PdfPageCanvas : Grid
                 _detailCanvas.Opacity = 1.0;
                 _detailCanvas.Visibility = Visibility.Visible;
                 _detailCanvas.Invalidate();
-                oldDetail?.Dispose();
+
+                bool isFullPagePatch = Math.Abs(exactPatchDip.X) <= 1.0
+                    && Math.Abs(exactPatchDip.Y) <= 1.0
+                    && exactPatchDip.Width >= (pageW - 1.0)
+                    && exactPatchDip.Height >= (pageH - 1.0);
+
+                ShellViewModel? shell = _shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>();
+                DocumentViewModel? doc = _observedDocument ??= shell?.CurrentDocument;
+                bool isSlideMode = shell?.IsPresentationMode == true || doc?.IsContinuous == false;
+
+                if (isFullPagePatch && isSlideMode)
+                {
+                    StoreInSlideBuffer(targetDocId, targetPageIndex, targetPageIndex, targetRotation, pixelScale, newBitmap);
+                }
+
+                if (oldDetail is not null && !IsInSlideBuffer(oldDetail))
+                {
+                    oldDetail.Dispose();
+                }
+
+                if (isSlideMode)
+                {
+                    PrefetchAdjacentPages(targetDocId, targetPageIndex, targetRotation, currentZoom, pixelScale, activeRasterScale);
+                }
             }
             catch (Exception ex)
             {
@@ -2053,6 +2178,14 @@ public sealed partial class PdfPageCanvas : Grid
 
     private void CancelInFlightRenders()
     {
+        _prefetchCts?.Cancel();
+        _prefetchCts?.Dispose();
+        _prefetchCts = null;
+
+        _detailDebounceCts?.Cancel();
+        _detailDebounceCts?.Dispose();
+        _detailDebounceCts = null;
+
         _baseCts?.Cancel();
         _baseCts?.Dispose();
         _baseCts = null;
@@ -2060,6 +2193,327 @@ public sealed partial class PdfPageCanvas : Grid
         _detailCts?.Cancel();
         _detailCts?.Dispose();
         _detailCts = null;
+    }
+
+    private void PrefetchAdjacentPages(
+        long targetDocId,
+        int currentIdx,
+        int targetRotation,
+        double currentZoom,
+        double pixelScale,
+        double activeRasterScale)
+    {
+        ShellViewModel? shell = _shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>();
+        DocumentViewModel? doc = _observedDocument ??= shell?.CurrentDocument;
+        if (doc is null || doc.DocumentId != targetDocId || doc.Pages.Count <= 1 || _isUnloaded)
+        {
+            return;
+        }
+
+        bool isPresentation = shell?.IsPresentationMode == true;
+        bool isSinglePage = !doc.IsContinuous;
+        if (!isPresentation && !isSinglePage)
+        {
+            return;
+        }
+
+        _prefetchCts?.Cancel();
+        _prefetchCts?.Dispose();
+        _prefetchCts = new CancellationTokenSource();
+        CancellationToken ct = _prefetchCts.Token;
+
+        int totalPages = doc.Pages.Count;
+        int zoomStep = Math.Max(1, ZoomQuantizer.ToStep(pixelScale));
+        int scalePercent = (int)Math.Round(activeRasterScale * 100);
+
+        List<int> pagesToPrefetch = new(2);
+        if (currentIdx + 1 < totalPages)
+        {
+            lock (s_slideBufferLock)
+            {
+                if (!s_slideBuffer.ContainsKey(currentIdx + 1))
+                {
+                    pagesToPrefetch.Add(currentIdx + 1);
+                }
+            }
+        }
+
+        if (currentIdx - 1 >= 0)
+        {
+            lock (s_slideBufferLock)
+            {
+                if (!s_slideBuffer.ContainsKey(currentIdx - 1))
+                {
+                    pagesToPrefetch.Add(currentIdx - 1);
+                }
+            }
+        }
+
+        if (pagesToPrefetch.Count == 0)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            foreach (int pageIndex in pagesToPrefetch)
+            {
+                if (ct.IsCancellationRequested || _isUnloaded)
+                {
+                    break;
+                }
+
+                lock (s_slideBufferLock)
+                {
+                    if (s_slideBuffer.ContainsKey(pageIndex))
+                    {
+                        continue;
+                    }
+                }
+
+                if (pageIndex >= doc.Pages.Count)
+                {
+                    continue;
+                }
+
+                PdfPageInfo? candidateInfo = doc.Pages[pageIndex];
+                if (candidateInfo is null)
+                {
+                    continue;
+                }
+
+                bool swap = (targetRotation % 180 != 0);
+                double pW = Math.Max(1.0, swap ? candidateInfo.DisplayHeightDip : candidateInfo.DisplayWidthDip);
+                double pH = Math.Max(1.0, swap ? candidateInfo.DisplayWidthDip : candidateInfo.DisplayHeightDip);
+                int fullW = Math.Max(1, (int)Math.Round(pW * pixelScale));
+                int fullH = Math.Max(1, (int)Math.Round(pH * pixelScale));
+
+                PdfRenderRequest request = new(
+                    targetDocId,
+                    pageIndex,
+                    fullW,
+                    fullH,
+                    fullW,
+                    fullH,
+                    0,
+                    0,
+                    targetRotation,
+                    PdfRenderFlags.Annotations | PdfRenderFlags.LcdText);
+
+                PdfBitmapLease lease;
+                try
+                {
+                    lease = await _pdfService.RenderAsync(request, PdfJobPriority.Prefetch, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"Prefetch render failed for page {pageIndex}: {ex.Message}");
+                    continue;
+                }
+
+                if (ct.IsCancellationRequested || _isUnloaded)
+                {
+                    lease.Dispose();
+                    break;
+                }
+
+                DispatcherQueue.TryEnqueue(() =>
+                {
+                    try
+                    {
+                        if (ct.IsCancellationRequested || _isUnloaded)
+                        {
+                            lease.Dispose();
+                            return;
+                        }
+
+                        ICanvasResourceCreator? resourceCreator = _detailCanvas.Device ?? _baseCanvas.Device;
+                        if (resourceCreator is null)
+                        {
+                            try
+                            {
+                                resourceCreator = CanvasDevice.GetSharedDevice();
+                            }
+                            catch
+                            {
+                                lease.Dispose();
+                                return;
+                            }
+                        }
+
+                        float targetDpiScale = (float)Math.Max(1.0, pixelScale / Math.Max(0.1, activeRasterScale));
+                        float targetDpi = (float)(96.0 * activeRasterScale * targetDpiScale);
+
+                        CanvasBitmap? prefetchedBitmap = CreateCanvasBitmapFromLease(resourceCreator, lease, targetDpi);
+                        if (prefetchedBitmap is not null)
+                        {
+                            StoreInSlideBuffer(targetDocId, currentIdx, pageIndex, targetRotation, pixelScale, prefetchedBitmap);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        lease.Dispose();
+                        Debug.WriteLine($"Prefetch upload failed for page {pageIndex}: {ex.Message}");
+                    }
+                });
+            }
+        }, ct);
+    }
+
+    [ThreadStatic]
+    private static Windows.Storage.Streams.Buffer? s_reusableBuffer;
+
+    /// <summary>
+    /// Explicitly releases the thread-static staging buffer to reclaim unmanaged memory.
+    /// </summary>
+    public static void ReleaseReusableBuffer()
+    {
+        s_reusableBuffer = null;
+    }
+
+    /// <summary>
+    /// Explicitly disposes all pre-rendered slide bitmaps and resets the presentation slide buffer.
+    /// Call when exiting presentation mode or closing the document.
+    /// </summary>
+    public static void ClearSlideBuffer()
+    {
+        lock (s_slideBufferLock)
+        {
+            foreach (var kvp in s_slideBuffer)
+            {
+                try
+                {
+                    kvp.Value?.Dispose();
+                }
+                catch
+                {
+                }
+            }
+            s_slideBuffer.Clear();
+            s_slideBufferDocId = -1;
+            s_slideBufferRotation = -1;
+            s_slideBufferPixelScale = 1.0;
+        }
+    }
+
+    private static bool IsInSlideBuffer(CanvasBitmap? bitmap)
+    {
+        if (bitmap is null)
+        {
+            return false;
+        }
+
+        lock (s_slideBufferLock)
+        {
+            foreach (var bmp in s_slideBuffer.Values)
+            {
+                if (ReferenceEquals(bmp, bitmap))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static void StoreInSlideBuffer(long docId, int activePageIndex, int storedPageIndex, int rotation, double pixelScale, CanvasBitmap bitmap)
+    {
+        lock (s_slideBufferLock)
+        {
+            if (s_slideBufferDocId != docId || s_slideBufferRotation != rotation || Math.Abs(s_slideBufferPixelScale - pixelScale) > 0.1)
+            {
+                foreach (var kvp in s_slideBuffer)
+                {
+                    try { kvp.Value?.Dispose(); } catch { }
+                }
+                s_slideBuffer.Clear();
+                s_slideBufferDocId = docId;
+                s_slideBufferRotation = rotation;
+                s_slideBufferPixelScale = pixelScale;
+            }
+
+            if (s_slideBuffer.TryGetValue(storedPageIndex, out CanvasBitmap? existing))
+            {
+                if (!ReferenceEquals(existing, bitmap))
+                {
+                    try { existing.Dispose(); } catch { }
+                }
+            }
+
+            s_slideBuffer[storedPageIndex] = bitmap;
+            TrimSlideBufferLocked(activePageIndex);
+        }
+    }
+
+    private static void TrimSlideBufferLocked(int activePageIndex)
+    {
+        List<int>? toRemove = null;
+        foreach (var key in s_slideBuffer.Keys)
+        {
+            if (key < activePageIndex - 1 || key > activePageIndex + 1)
+            {
+                toRemove ??= new List<int>();
+                toRemove.Add(key);
+            }
+        }
+
+        if (toRemove is not null)
+        {
+            foreach (int key in toRemove)
+            {
+                if (s_slideBuffer.Remove(key, out CanvasBitmap? deadBmp))
+                {
+                    try { deadBmp?.Dispose(); } catch { }
+                }
+            }
+        }
+    }
+
+    private static bool TryGetSlideFromBuffer(long docId, int pageIndex, int rotation, double pixelScale, out CanvasBitmap? bitmap)
+    {
+        lock (s_slideBufferLock)
+        {
+            if (s_slideBufferDocId == docId &&
+                s_slideBufferRotation == rotation &&
+                Math.Abs(s_slideBufferPixelScale - pixelScale) <= 0.1 &&
+                s_slideBuffer.TryGetValue(pageIndex, out CanvasBitmap? candidate))
+            {
+                try
+                {
+                    if (candidate.Device is not null)
+                    {
+                        bitmap = candidate;
+                        return true;
+                    }
+                }
+                catch
+                {
+                }
+
+                s_slideBuffer.Remove(pageIndex);
+                try { candidate?.Dispose(); } catch { }
+            }
+
+            bitmap = null;
+            return false;
+        }
+    }
+
+    private static Windows.Storage.Streams.Buffer GetOrCreateReusableBuffer(int requiredCapacity)
+    {
+        if (s_reusableBuffer is null || s_reusableBuffer.Capacity < requiredCapacity)
+        {
+            uint newCap = (uint)Math.Max(requiredCapacity, (int)((s_reusableBuffer?.Capacity ?? 0) * 1.25));
+            s_reusableBuffer = new Windows.Storage.Streams.Buffer(newCap);
+        }
+
+        s_reusableBuffer.Length = (uint)requiredCapacity;
+        return s_reusableBuffer;
     }
 
     private static unsafe CanvasBitmap? CreateCanvasBitmapFromLease(
@@ -2075,12 +2529,9 @@ public sealed partial class PdfPageCanvas : Grid
             }
 
             int byteLength = (int)lease.SizeInBytes;
-            Windows.Storage.Streams.IBuffer nativeBuffer = new Windows.Storage.Streams.Buffer((uint)byteLength)
-            {
-                Length = (uint)byteLength
-            };
+            Windows.Storage.Streams.IBuffer nativeBuffer = GetOrCreateReusableBuffer(byteLength);
 
-            if (nativeBuffer is ICanvasBufferByteAccess byteAccess)
+            if ((object)nativeBuffer is ICanvasBufferByteAccess byteAccess)
             {
                 byte* dst = byteAccess.Buffer;
                 byte* src = (byte*)lease.Scan0;
@@ -2089,6 +2540,7 @@ public sealed partial class PdfPageCanvas : Grid
             else
             {
                 using var stream = nativeBuffer.AsStream();
+                stream.Position = 0;
                 stream.Write(lease.AsSpan());
             }
 
@@ -2119,6 +2571,10 @@ public sealed partial class PdfPageCanvas : Grid
 
         CanvasBitmap? bd = _detailBitmap;
         _detailBitmap = null;
-        bd?.Dispose();
+
+        if (bd is not null && !IsInSlideBuffer(bd))
+        {
+            bd.Dispose();
+        }
     }
 }
