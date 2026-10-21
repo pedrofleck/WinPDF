@@ -1866,6 +1866,11 @@ public sealed partial class DocumentView : Page
         FullScreenInfoBar.IsOpen = false;
     }
 
+    private void OnAnnotationNoticeCloseButtonClick(InfoBar sender, object args)
+    {
+        ViewModel.IsAnnotationNoticeOpen = false;
+    }
+
     private void OnEscapeAcceleratorInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         if (ViewModel.IsSearchOpen)
@@ -2050,6 +2055,7 @@ public sealed partial class DocumentView : Page
             {
                 e.Handled = true;
                 ViewModel.IsAnnotationToolbarOpen = false;
+                ViewModel.IsAnnotationNoticeOpen = false;
                 return;
             }
         }

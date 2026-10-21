@@ -207,6 +207,8 @@
   <data name="Presentation_ExitButton" xml:space="preserve"><value>Exit presentation (Esc)</value></data>
   <data name="FullScreenInfoBar.Title" xml:space="preserve"><value>Full screen</value></data>
   <data name="FullScreenInfoBar.Message" xml:space="preserve"><value>Press Esc to exit full screen</value></data>
+  <data name="AnnotationNotImplementedInfoBar.Title" xml:space="preserve"><value>Annotations</value></data>
+  <data name="AnnotationNotImplementedInfoBar.Message" xml:space="preserve"><value>This feature has not been implemented yet.</value></data>
   <data name="ExitFullScreenButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Exit full screen</value></data>
   <data name="ExitFullScreenButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Exit full screen (F11)</value></data>
   <!-- ===================== QoL 4: Search Bar, Context Menu & Close Document ===================== -->

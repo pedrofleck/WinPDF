@@ -138,6 +138,12 @@ public sealed partial class ShellViewModel : ObservableObject
     public partial bool IsAnnotationToolbarOpen { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the annotation not implemented notice InfoBar is open.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsAnnotationNoticeOpen { get; set; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether the floating document search bar is open.
     /// </summary>
     [ObservableProperty]
@@ -480,6 +486,7 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             IsSearchOpen = false;
             IsAnnotationToolbarOpen = false;
+            IsAnnotationNoticeOpen = false;
         }
 
         UpdateTitle();
@@ -1003,6 +1010,7 @@ public sealed partial class ShellViewModel : ObservableObject
         IsSidebarOpen = false;
         IsSearchOpen = false;
         IsAnnotationToolbarOpen = false;
+        IsAnnotationNoticeOpen = false;
         IsPresentationMode = true;
         IsFullScreen = true;
         CurrentDocument.IsDoublePage = false;
@@ -1091,12 +1099,13 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Toggles the visibility of the floating annotation tool bar.
+    /// Toggles the visibility of the floating annotation tool bar and displays the not-implemented notice.
     /// </summary>
     [RelayCommand]
     public void ToggleAnnotationToolbar()
     {
         IsAnnotationToolbarOpen = !IsAnnotationToolbarOpen;
+        IsAnnotationNoticeOpen = IsAnnotationToolbarOpen;
     }
 
     /// <summary>
@@ -1308,6 +1317,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
         IsSearchOpen = false;
         IsAnnotationToolbarOpen = false;
+        IsAnnotationNoticeOpen = false;
         if (IsPresentationMode)
         {
             IsPresentationMode = false;

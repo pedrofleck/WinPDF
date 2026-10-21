@@ -448,6 +448,29 @@
                         <CompositeTransform x:Name="FloatingTopTransform" />
                     </StackPanel.RenderTransform>
 
+                    <!-- Native Informational InfoBar for unimplemented annotation feature (closes only via X button) -->
+                    <InfoBar
+                        x:Name="AnnotationNotImplementedInfoBar"
+                        x:Uid="AnnotationNotImplementedInfoBar"
+                        Severity="Informational"
+                        IsOpen="{x:Bind ViewModel.IsAnnotationNoticeOpen, Mode=TwoWay}"
+                        IsIconVisible="True"
+                        IsClosable="True"
+                        Title="Annotations"
+                        Message="This feature has not been implemented yet."
+                        HorizontalAlignment="Center"
+                        MaxWidth="600"
+                        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        CloseButtonClick="OnAnnotationNoticeCloseButtonClick">
+                        <InfoBar.Resources>
+                            <StaticResource x:Key="InfoBarInformationalSeverityBackgroundBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
+                            <StaticResource x:Key="InfoBarBackgroundFillColorDefaultBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
+                        </InfoBar.Resources>
+                    </InfoBar>
+
                     <!-- Floating search bar in Acrylic (Windows 11 Notepad style) -->
                     <Border
                         x:Name="FloatingSearchBar"
