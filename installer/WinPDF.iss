@@ -37,7 +37,7 @@ AppUpdatesURL={#MyAppURL}/releases
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-DisableWelcomePage=yes
+DisableWelcomePage=no
 
 ; Installs directly for All Users (Admin), without initial prompt
 PrivilegesRequired=admin
@@ -85,6 +85,12 @@ english.CreateStartMenuIcon=Create a &Start Menu shortcut
 brazilianportuguese.CreateStartMenuIcon=Criar um atalho no &Menu Iniciar
 english.RemoveSettingsQuestion=Do you also want to remove your saved {#MyAppName} configuration files and preferences?
 brazilianportuguese.RemoveSettingsQuestion=Deseja remover também seus arquivos de configuração e preferências salvas do {#MyAppName}?
+english.ReinstallQuestion=WinPDF version %1 is already installed on your computer.%n%nDo you want to reinstall it?
+brazilianportuguese.ReinstallQuestion=A versão %1 do WinPDF já está instalada neste computador.%n%nDeseja reinstalar?
+english.UpgradeQuestion=An earlier version of WinPDF (%1) is installed.%n%nDo you want to update it to version %2?
+brazilianportuguese.UpgradeQuestion=Uma versão anterior do WinPDF (%1) está instalada.%n%nDeseja atualizar para a versão %2?
+english.DowngradeQuestion=A newer version of WinPDF (%1) is already installed.%n%nDo you want to replace it with version %2?
+brazilianportuguese.DowngradeQuestion=Uma versão mais recente do WinPDF (%1) já está instalada.%n%nDeseja substituí-la pela versão %2?
 
 [Tasks]
 Name: "startmenuicon"; Description: "{cm:CreateStartMenuIcon}"; GroupDescription: "{cm:AdditionalIcons}"
@@ -121,6 +127,173 @@ Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\{#MyApp
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 
 [Code]
+// State tracking to avoid prompting repeatedly if the user navigates Back and Next
+var
+  VersionPromptAccepted: Boolean;
+
+// Extracts the next integer token from a version string S, advancing past dots and non-digits.
+function ParseVersionNumber(var S: string): Integer;
+var
+  NumStr: string;
+begin
+  NumStr := '';
+  while (Length(S) > 0) and not ((S[1] >= '0') and (S[1] <= '9')) do
+    Delete(S, 1, 1);
+
+  while (Length(S) > 0) and (S[1] >= '0') and (S[1] <= '9') do
+  begin
+    NumStr := NumStr + S[1];
+    Delete(S, 1, 1);
+  end;
+
+  if (Length(S) > 0) and (S[1] = '.') then
+    Delete(S, 1, 1);
+
+  if NumStr <> '' then
+    Result := StrToIntDef(NumStr, 0)
+  else
+    Result := 0;
+end;
+
+// Compares two semantic/dot version strings (e.g. "0.4.2-alpha.4" vs "0.5.2-alpha.5").
+// Returns < 0 if V1 < V2, 0 if V1 = V2, > 0 if V1 > V2.
+function CompareVersionStrings(V1, V2: string): Integer;
+var
+  S1, S2: string;
+  N1, N2: Integer;
+  Part: Integer;
+begin
+  if SameText(Trim(V1), Trim(V2)) then
+  begin
+    Result := 0;
+    Exit;
+  end;
+
+  S1 := Trim(V1);
+  S2 := Trim(V2);
+
+  for Part := 1 to 4 do
+  begin
+    N1 := ParseVersionNumber(S1);
+    N2 := ParseVersionNumber(S2);
+    if N1 > N2 then
+    begin
+      Result := 1;
+      Exit;
+    end
+    else if N1 < N2 then
+    begin
+      Result := -1;
+      Exit;
+    end;
+  end;
+
+  Result := CompareText(S1, S2);
+end;
+
+// Retrieves the installed version from Windows Uninstall registry keys or existing executable.
+function GetInstalledVersion(var InstalledVer: string): Boolean;
+var
+  UninstallKey: string;
+begin
+  Result := False;
+  InstalledVer := '';
+  UninstallKey := 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{8F4E9A2B-5C7D-4E1A-9B3F-2D6C8A1E5F09}_is1';
+
+  if IsWin64 then
+  begin
+    if RegQueryStringValue(HKLM64, UninstallKey, 'DisplayVersion', InstalledVer) and (Trim(InstalledVer) <> '') then
+    begin
+      Result := True;
+      Exit;
+    end;
+    if RegQueryStringValue(HKLM32, UninstallKey, 'DisplayVersion', InstalledVer) and (Trim(InstalledVer) <> '') then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+
+  if RegQueryStringValue(HKLM, UninstallKey, 'DisplayVersion', InstalledVer) and (Trim(InstalledVer) <> '') then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  if IsWin64 then
+  begin
+    if RegQueryStringValue(HKCU64, UninstallKey, 'DisplayVersion', InstalledVer) and (Trim(InstalledVer) <> '') then
+    begin
+      Result := True;
+      Exit;
+    end;
+    if RegQueryStringValue(HKCU32, UninstallKey, 'DisplayVersion', InstalledVer) and (Trim(InstalledVer) <> '') then
+    begin
+      Result := True;
+      Exit;
+    end;
+  end;
+
+  if RegQueryStringValue(HKCU, UninstallKey, 'DisplayVersion', InstalledVer) and (Trim(InstalledVer) <> '') then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  if FileExists(ExpandConstant('{app}\{#MyAppExeName}')) then
+  begin
+    if GetVersionNumbersString(ExpandConstant('{app}\{#MyAppExeName}'), InstalledVer) then
+      Result := (Trim(InstalledVer) <> '');
+  end;
+end;
+
+// Validates whether to proceed when advancing from the Welcome page.
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  InstalledVer: string;
+  Cmp: Integer;
+  PromptMsg: string;
+begin
+  Result := True;
+
+  if (CurPageID = wpWelcome) and (not VersionPromptAccepted) and (not WizardSilent) then
+  begin
+    if GetInstalledVersion(InstalledVer) then
+    begin
+      Cmp := CompareVersionStrings(InstalledVer, '{#AppVersion}');
+      if Cmp = 0 then
+      begin
+        PromptMsg := FmtMessage(ExpandConstant('{cm:ReinstallQuestion}'), [InstalledVer]);
+        if MsgBox(PromptMsg, mbConfirmation, MB_YESNO or MB_DEFBUTTON1) <> IDYES then
+        begin
+          Result := False;
+          Exit;
+        end;
+      end
+      else if Cmp < 0 then
+      begin
+        PromptMsg := FmtMessage(ExpandConstant('{cm:UpgradeQuestion}'), [InstalledVer, '{#AppVersion}']);
+        if MsgBox(PromptMsg, mbConfirmation, MB_YESNO or MB_DEFBUTTON1) <> IDYES then
+        begin
+          Result := False;
+          Exit;
+        end;
+      end
+      else
+      begin
+        PromptMsg := FmtMessage(ExpandConstant('{cm:DowngradeQuestion}'), [InstalledVer, '{#AppVersion}']);
+        if MsgBox(PromptMsg, mbConfirmation, MB_YESNO or MB_DEFBUTTON2) <> IDYES then
+        begin
+          Result := False;
+          Exit;
+        end;
+      end;
+
+      VersionPromptAccepted := True;
+    end;
+  end;
+end;
+
 // During interactive uninstall, ask if user wants to remove %LOCALAPPDATA%\WinPDF
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
