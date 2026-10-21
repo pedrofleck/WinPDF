@@ -1011,8 +1011,9 @@ public sealed partial class ShellViewModel : ObservableObject
         IsSearchOpen = false;
         IsAnnotationToolbarOpen = false;
         IsAnnotationNoticeOpen = false;
-        IsPresentationMode = true;
         IsFullScreen = true;
+        CurrentDocument.IsPresentationMode = true;
+        IsPresentationMode = true;
         CurrentDocument.IsDoublePage = false;
         CurrentDocument.IsContinuous = false;
         ViewMode = ViewMode.Paged;

@@ -15,6 +15,10 @@ public sealed class WindowContext : IWindowContext
     public nint WindowHandle => _window is not null ? WindowNative.GetWindowHandle(_window) : nint.Zero;
 
     /// <inheritdoc/>
+    public Microsoft.UI.WindowId WindowId => _window?.AppWindow?.Id
+        ?? (_window is not null ? Microsoft.UI.Win32Interop.GetWindowIdFromWindow(WindowHandle) : default);
+
+    /// <inheritdoc/>
     public XamlRoot? XamlRoot => _window?.Content?.XamlRoot;
 
     /// <inheritdoc/>

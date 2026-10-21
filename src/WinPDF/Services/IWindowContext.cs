@@ -15,6 +15,11 @@ public interface IWindowContext
     nint WindowHandle { get; }
 
     /// <summary>
+    /// Gets the <see cref="Microsoft.UI.WindowId"/> of the active application window.
+    /// </summary>
+    Microsoft.UI.WindowId WindowId { get; }
+
+    /// <summary>
     /// Gets the <see cref="XamlRoot"/> of the active window content for hosting dialogs and flyouts.
     /// </summary>
     XamlRoot? XamlRoot { get; }

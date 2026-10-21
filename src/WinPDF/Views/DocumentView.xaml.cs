@@ -466,25 +466,8 @@ public sealed partial class DocumentView : Page
                 _presentationHideTimer.Stop();
                 _presentationHideTimer.Start();
 
-                ExecuteFitVertical(force: true);
-                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
-                {
-                    if (ViewModel.IsPresentationMode)
-                    {
-                        ExecuteFitVertical(force: true);
-                    }
-                });
-                _ = Task.Run(async () =>
-                {
-                    await Task.Delay(120).ConfigureAwait(false);
-                    DispatcherQueue.TryEnqueue(() =>
-                    {
-                        if (ViewModel.IsPresentationMode)
-                        {
-                            ExecuteFitVertical(force: true);
-                        }
-                    });
-                });
+                var (fsWidth, fsHeight) = GetFullScreenDimensionsDip();
+                ExecuteFitVertical(fsWidth > 0 ? fsWidth : null, fsHeight > 0 ? fsHeight : null, force: true);
             }
             else if (_wasInPresentationMode)
             {
@@ -1344,10 +1327,13 @@ public sealed partial class DocumentView : Page
             var page = doc.Pages[cur];
 
             bool isPres = ViewModel.IsPresentationMode;
+            bool isContinuous = doc.IsContinuous && !isPres;
+            bool isDoublePage = doc.IsDoublePage && !isPres;
+
             // RepeaterMargin in continuous mode is 24 on left and 24 on right (48 total).
             // Add safety margin so page fits comfortably with clean padding and never triggers horizontal scrollbar.
-            double marginW = isPres ? 0.0 : (!doc.IsContinuous ? 32.0 : 64.0);
-            double marginH = isPres ? 0.0 : (!doc.IsContinuous ? 32.0 : 48.0);
+            double marginW = isPres ? 0.0 : (!isContinuous ? 32.0 : 64.0);
+            double marginH = isPres ? 0.0 : (!isContinuous ? 32.0 : 48.0);
 
             double rawWidth = ContinuousScrollViewer.ActualWidth > 0
                 ? ContinuousScrollViewer.ActualWidth
@@ -1363,19 +1349,35 @@ public sealed partial class DocumentView : Page
                     ? ContinuousScrollViewer.ActualHeight
                     : (_lastHandledScrollViewerSize.Height > 0 ? _lastHandledScrollViewerSize.Height : ContinuousScrollViewer.ViewportHeight));
 
+            if (isPres)
+            {
+                var (fsWidth, fsHeight) = GetFullScreenDimensionsDip();
+                if (fsWidth > 0 && fsHeight > 0)
+                {
+                    if (!viewportW.HasValue || viewportW.Value <= 0 || vWidth < fsWidth)
+                    {
+                        vWidth = fsWidth;
+                    }
+                    if (!viewportH.HasValue || viewportH.Value <= 0 || vHeight < fsHeight)
+                    {
+                        vHeight = fsHeight;
+                    }
+                }
+            }
+
             double availW = Math.Max(100.0, vWidth - marginW);
             double availH = Math.Max(100.0, vHeight - marginH);
-            double targetW = doc.IsDoublePage ? (page.DisplayWidthDip * 2.0 + 16.0) : page.DisplayWidthDip;
+            double targetW = isDoublePage ? (page.DisplayWidthDip * 2.0 + 16.0) : page.DisplayWidthDip;
             double targetH = page.DisplayHeightDip;
             double targetZoom = Math.Clamp(Math.Min(availH / targetH, availW / targetW), DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
 
             double hOffset = 0.0;
             double vOffset = 0.0;
 
-            if (doc.IsContinuous)
+            if (isContinuous)
             {
                 double targetY = 24.0;
-                int step = doc.IsDoublePage ? 2 : 1;
+                int step = isDoublePage ? 2 : 1;
                 int targetRow = cur / step;
                 for (int r = 0; r < targetRow && r * step < doc.Pages.Count; r++)
                 {
@@ -1406,7 +1408,7 @@ public sealed partial class DocumentView : Page
             {
                 try
                 {
-                    if (doc.IsContinuous)
+                    if (isContinuous)
                     {
                         ContinuousScrollViewer.ChangeView(hOffset, vOffset, null, disableAnimation: true);
                     }
@@ -1466,13 +1468,16 @@ public sealed partial class DocumentView : Page
             var page = doc.Pages[cur];
 
             bool isPres = ViewModel.IsPresentationMode;
+            bool isContinuous = doc.IsContinuous && !isPres;
+            bool isDoublePage = doc.IsDoublePage && !isPres;
+
             // Continuous mode has RepeaterMargin of 24 on left and 24 on right = 48 DIPs.
             // We include the margin in base content width plus extra breathing room so horizontal scrollbar never appears.
-            double baseMargin = (isPres || !doc.IsContinuous) ? 0.0 : 48.0;
-            double targetW = (doc.IsDoublePage ? (page.DisplayWidthDip * 2.0 + 16.0) : page.DisplayWidthDip) + baseMargin;
+            double baseMargin = (isPres || !isContinuous) ? 0.0 : 48.0;
+            double targetW = (isDoublePage ? (page.DisplayWidthDip * 2.0 + 16.0) : page.DisplayWidthDip) + baseMargin;
 
             // Extra safety margin (at least 32 DIPs total: 16 on each side) to guarantee ExtentWidth < ViewportWidth
-            double safetyPadding = 32.0;
+            double safetyPadding = isPres ? 0.0 : 32.0;
 
             double rawWidth = ContinuousScrollViewer.ActualWidth > 0
                 ? ContinuousScrollViewer.ActualWidth
@@ -1482,11 +1487,20 @@ public sealed partial class DocumentView : Page
                 ? viewportW.Value
                 : GetAvailableDocumentWidthDip(rawWidth);
 
+            if (isPres)
+            {
+                var (fsWidth, _) = GetFullScreenDimensionsDip();
+                if (fsWidth > 0 && (!viewportW.HasValue || viewportW.Value <= 0 || vWidth < fsWidth))
+                {
+                    vWidth = fsWidth;
+                }
+            }
+
             double availW = Math.Max(100.0, vWidth - safetyPadding);
             double targetZoom = Math.Clamp(availW / targetW, DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
 
             double? targetVOffset = null;
-            if (doc.IsContinuous)
+            if (isContinuous)
             {
                 double targetY = 24.0;
                 int step = doc.IsDoublePage ? 2 : 1;
@@ -2697,6 +2711,46 @@ public sealed partial class DocumentView : Page
         return Math.Max(120.0, rawViewerWidth - unsubtractedLeftW);
     }
 
+    /// <summary>
+    /// Gets the display dimensions in DIPs for the monitor hosting the active window.
+    /// Used in presentation mode to eliminate initial render size discrepancy and prevent flicker.
+    /// </summary>
+    private (double WidthDip, double HeightDip) GetFullScreenDimensionsDip()
+    {
+        try
+        {
+            var windowId = _windowContext.WindowId;
+            if (windowId.Value == 0 && _windowContext.WindowHandle != 0)
+            {
+                windowId = Microsoft.UI.Win32Interop.GetWindowIdFromWindow(_windowContext.WindowHandle);
+            }
+
+            if (windowId.Value != 0)
+            {
+                var displayArea = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(windowId, Microsoft.UI.Windowing.DisplayAreaFallback.Primary);
+                if (displayArea is not null)
+                {
+                    double scale = (XamlRoot?.RasterizationScale > 0)
+                        ? XamlRoot.RasterizationScale
+                        : ((_windowContext.XamlRoot?.RasterizationScale > 0) ? _windowContext.XamlRoot.RasterizationScale : 1.0);
+
+                    if (scale <= 0.0)
+                    {
+                        scale = 1.0;
+                    }
+
+                    return (displayArea.OuterBounds.Width / scale, displayArea.OuterBounds.Height / scale);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"DocumentView.GetFullScreenDimensionsDip: Failed to query display bounds: {ex.Message}");
+        }
+
+        return (0.0, 0.0);
+    }
+
     private void OnNightModeMenuItemLoaded(object sender, RoutedEventArgs e)
     {
         if (sender is DependencyObject root)
@@ -2843,7 +2897,7 @@ public sealed partial class DocumentView : Page
         }
 
         double leftW = (ViewModel.HasDocument && ViewModel.IsSidebarOpen && !ViewModel.IsPresentationMode) ? _currentSidebarWidthDip : 0.0;
-        double zoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
+        double zoom = (ContinuousScrollViewer?.ZoomFactor > 0.05) ? ContinuousScrollViewer.ZoomFactor : (ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
 
         double targetDocOffsetDip = GetTargetDocumentOffsetDip(zoom);
         double targetRepeaterX = targetDocOffsetDip / Math.Max(0.05, zoom);
