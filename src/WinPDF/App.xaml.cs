@@ -207,11 +207,16 @@ public partial class App : Application
         {
             try
             {
-                string candidate = cmdArgs[1].Trim('\"', ' ');
-                if (!candidate.StartsWith('-') && System.IO.File.Exists(candidate) &&
-                    string.Equals(System.IO.Path.GetExtension(candidate), ".pdf", StringComparison.OrdinalIgnoreCase))
+                string? launchFilePath = cmdArgs
+                    .Skip(1)
+                    .Select(arg => arg.Trim('\"', ' '))
+                    .FirstOrDefault(arg => !arg.StartsWith('-') &&
+                                           arg.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) &&
+                                           System.IO.File.Exists(arg));
+
+                if (!string.IsNullOrWhiteSpace(launchFilePath))
                 {
-                    startupPdf = System.IO.Path.GetFullPath(candidate);
+                    startupPdf = System.IO.Path.GetFullPath(launchFilePath);
                 }
             }
             catch

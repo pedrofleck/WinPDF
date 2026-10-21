@@ -569,6 +569,54 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Initializes startup document loading, inspecting command-line launch arguments
+    /// and restoring the previous session document if configured.
+    /// </summary>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        string[] cmdArgs = Environment.GetCommandLineArgs();
+        string? launchFilePath = cmdArgs
+            .Skip(1)
+            .Select(arg => arg.Trim('\"', ' '))
+            .FirstOrDefault(arg => !arg.StartsWith('-') &&
+                                   arg.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) &&
+                                   System.IO.File.Exists(arg));
+
+        if (!string.IsNullOrWhiteSpace(launchFilePath))
+        {
+            await OpenFilePathAsync(launchFilePath, cancellationToken);
+            return;
+        }
+
+        if (_settingsService.Settings.ReopenLastDocument &&
+            !string.IsNullOrWhiteSpace(_settingsService.Settings.LastOpenedFilePath))
+        {
+            string lastPath = _settingsService.Settings.LastOpenedFilePath;
+            if (System.IO.File.Exists(lastPath))
+            {
+                int pageToRestore = Math.Max(0, _settingsService.Settings.LastOpenedPageIndex);
+                await OpenFilePathAsync(lastPath, cancellationToken, isStartupSessionRestore: true, initialPageIndex: pageToRestore);
+            }
+            else
+            {
+                string missingFileName = System.IO.Path.GetFileName(lastPath);
+                if (string.IsNullOrWhiteSpace(missingFileName))
+                {
+                    missingFileName = lastPath;
+                }
+
+                _settingsService.Update(s =>
+                {
+                    s.LastOpenedFilePath = null;
+                    s.LastOpenedPageIndex = 0;
+                });
+                ShowMissingLastDocumentNotification(missingFileName);
+            }
+        }
+    }
+
+    /// <summary>
     /// Prompts the user to pick and open a PDF document.
     /// </summary>
     [RelayCommand]

@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Drawing
 
-# Caminho ABSOLUTO (as classes .NET nao usam o diretorio atual do PowerShell)
+# ABSOLUTE path (.NET classes do not use PowerShell's current directory)
 $assetsDir = Join-Path (Get-Location).Path "src\WinPDF\Assets"
 New-Item -ItemType Directory -Force -Path $assetsDir | Out-Null
 $icoPath = Join-Path $assetsDir "appicon.ico"
@@ -17,7 +17,7 @@ function New-AppIconBitmap([int]$size) {
 
     $rect = New-Object System.Drawing.Rectangle 0, 0, $size, $size
 
-    # 1. Squircle de fundo
+    # 1. Background squircle
     $path = New-Object System.Drawing.Drawing2D.GraphicsPath
     $radius = [int]($size * 0.22)
     $d = $radius * 2
@@ -34,12 +34,12 @@ function New-AppIconBitmap([int]$size) {
         [System.Drawing.Drawing2D.LinearGradientMode]::Vertical)
     $g.FillPath($brush, $path)
 
-    # Borda translucida
+    # Translucent border
     $penWidth = [single][Math]::Max(1.0, $size / 64.0)
     $pen = [System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(40, 255, 255, 255), $penWidth)
     $g.DrawPath($pen, $path)
 
-    # 2. Texto "PDF" (fonte em PIXELS, senao ela estoura o icone)
+    # 2. "PDF" text (font size in PIXELS, otherwise it overflows the icon)
     $fontSize = [single]($size * 0.34)
     $font = [System.Drawing.Font]::new(
         "Segoe UI", $fontSize,
@@ -50,12 +50,12 @@ function New-AppIconBitmap([int]$size) {
     $sf.Alignment = [System.Drawing.StringAlignment]::Center
     $sf.LineAlignment = [System.Drawing.StringAlignment]::Center
 
-    # Sombra
+    # Shadow
     $shadowBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(80, 0, 0, 0))
     $shadowRect = New-Object System.Drawing.RectangleF ([single](2 * $size / 128)), ([single](3 * $size / 128)), ([single]$size), ([single]$size)
     $g.DrawString("PDF", $font, $shadowBrush, $shadowRect, $sf)
 
-    # Texto branco
+    # White text
     $whiteBrush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::White)
     $rectF = New-Object System.Drawing.RectangleF 0, 0, ([single]$size), ([single]$size)
     $g.DrawString("PDF", $font, $whiteBrush, $rectF, $sf)
@@ -66,7 +66,7 @@ function New-AppIconBitmap([int]$size) {
     return , $bmp
 }
 
-# Gera cada tamanho e ja converte para PNG (bytes)
+# Generates each size and converts it to PNG (bytes)
 $sizes = @(16, 32, 48, 64, 128, 256)
 $pngList = New-Object System.Collections.Generic.List[byte[]]
 
@@ -79,40 +79,40 @@ foreach ($s in $sizes) {
     $bmp.Dispose()
 }
 
-# Salva tambem versao PNG para a UI do WinUI 3 (TitleBar, etc.)
+# Also saves a PNG version for the WinUI 3 UI (TitleBar, etc.)
 $pngPath = Join-Path $assetsDir "appicon.png"
 [System.IO.File]::WriteAllBytes($pngPath, $pngList[-1])
 
-# Monta o arquivo .ico
+# Assembles the .ico file
 $fileStream = [System.IO.File]::Create($icoPath)
 $writer = New-Object System.IO.BinaryWriter $fileStream
 
 try {
-    # Cabecalho ICONDIR
-    $writer.Write([UInt16]0)               # Reservado
-    $writer.Write([UInt16]1)               # Tipo 1 = icone
-    $writer.Write([UInt16]$sizes.Count)    # Quantidade de imagens
+    # ICONDIR header
+    $writer.Write([UInt16]0)               # Reserved
+    $writer.Write([UInt16]1)               # Type 1 = icon
+    $writer.Write([UInt16]$sizes.Count)    # Image count
 
     $offset = 6 + (16 * $sizes.Count)
 
-    # Entradas ICONDIRENTRY
+    # ICONDIRENTRY entries
     for ($i = 0; $i -lt $sizes.Count; $i++) {
         $s = $sizes[$i]
-        $dim = if ($s -ge 256) { [byte]0 } else { [byte]$s }   # 0 = 256px (precisa ser Byte!)
+        $dim = if ($s -ge 256) { [byte]0 } else { [byte]$s }   # 0 = 256px (must be Byte!)
 
-        $writer.Write([byte]$dim)                       # Largura
-        $writer.Write([byte]$dim)                       # Altura
-        $writer.Write([byte]0)                          # Paleta
-        $writer.Write([byte]0)                          # Reservado
-        $writer.Write([UInt16]1)                        # Planos
-        $writer.Write([UInt16]32)                       # Bits por pixel
-        $writer.Write([UInt32]$pngList[$i].Length)      # Tamanho dos dados
+        $writer.Write([byte]$dim)                       # Width
+        $writer.Write([byte]$dim)                       # Height
+        $writer.Write([byte]0)                          # Palette
+        $writer.Write([byte]0)                          # Reserved
+        $writer.Write([UInt16]1)                        # Color planes
+        $writer.Write([UInt16]32)                       # Bits per pixel
+        $writer.Write([UInt32]$pngList[$i].Length)      # Data size
         $writer.Write([UInt32]$offset)                  # Offset
 
         $offset += $pngList[$i].Length
     }
 
-    # Dados das imagens
+    # Image data
     for ($i = 0; $i -lt $sizes.Count; $i++) {
         $writer.Write($pngList[$i])
     }
@@ -123,4 +123,7 @@ finally {
 }
 
 $info = Get-Item $icoPath
-Write-Host "Icone gerado com sucesso: $($info.FullName) ($($info.Length) bytes)" -ForegroundColor Green
+Write-Host "Icon generated successfully: $($info.FullName) ($($info.Length) bytes)" -ForegroundColor Green
+
+# Automatically generates installer visual assets
+& "$PSScriptRoot\Generate-InstallerAssets.ps1"

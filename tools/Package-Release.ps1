@@ -1,21 +1,28 @@
 <#
 .SYNOPSIS
-    Packages a self-contained portable release of WinPDF for testing or deployment.
+    Packages a self-contained release and installer of WinPDF.
 .DESCRIPTION
-    Builds and publishes WinPDF in self-contained Release configuration, verifies all required
-    native binaries, and creates a clean zip file compatible with standard Windows Explorer extraction.
+    Builds and publishes WinPDF in self-contained Release configuration, generates
+    installer visual assets, creates a clean portable zip file, and compiles the
+    official Inno Setup 7 installer.
 #>
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Release',
     [string]$Platform = 'x64',
-    [string]$Version = 'v0.5.2-alpha.5'
+    [string]$Version = '0.5.2-alpha.5'
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path "$PSScriptRoot\..").Path
+$cleanVersion = $Version.TrimStart('v')
+
+# 1. Ensure installer visual assets are up to date
+Write-Host "Generating installer assets..." -ForegroundColor Cyan
+& pwsh "$PSScriptRoot\Generate-InstallerAssets.ps1"
+
 $publishDir = Join-Path $repoRoot 'publish'
-$targetFolderName = "WinPDF-$Version-win-$Platform"
+$targetFolderName = "WinPDF-$cleanVersion-win-$Platform"
 $targetFolderPath = Join-Path $publishDir $targetFolderName
 $targetZipPath = Join-Path $publishDir "$targetFolderName.zip"
 
@@ -79,3 +86,31 @@ Write-Host "Extraction test PASSED 100%!" -ForegroundColor Green
 Write-Host "Archive created successfully ($entryCount entries, $((Get-Item $targetZipPath).Length / 1MB | ForEach-Object { '{0:N2} MB' -f $_ })):" -ForegroundColor Green
 Write-Host "  Folder: $targetFolderPath" -ForegroundColor Gray
 Write-Host "  Zip:    $targetZipPath" -ForegroundColor Gray
+
+# 2. Compile official installer using Inno Setup 7
+$installerOutDir = Join-Path $repoRoot "artifacts\installer"
+if (-not (Test-Path $installerOutDir)) {
+    New-Item -ItemType Directory -Force -Path $installerOutDir | Out-Null
+}
+
+$IsccPaths = @(
+    "${env:ProgramFiles}\Inno Setup 7\ISCC.exe",
+    "${env:ProgramFiles(x86)}\Inno Setup 7\ISCC.exe",
+    "$env:LOCALAPPDATA\Programs\Inno Setup 7\ISCC.exe",
+    "${env:ProgramFiles}\Inno Setup 6\ISCC.exe",
+    "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+)
+$IsccExe = $IsccPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if ($IsccExe) {
+    Write-Host "Compiling installer with Inno Setup ($IsccExe)..." -ForegroundColor Cyan
+    $IssPath = Join-Path $repoRoot "installer\WinPDF.iss"
+    & $IsccExe "/DAppVersion=$cleanVersion" "/DAppArch=$Platform" "/DPublishDir=$targetFolderPath" $IssPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "ISCC.exe failed with exit code $LASTEXITCODE"
+    }
+    Write-Host "Installer generated successfully at $installerOutDir" -ForegroundColor Green
+} else {
+    Write-Warning "Inno Setup 7 (ISCC.exe) not found. Install with: winget install --id JRSoftware.InnoSetup.7 -e -s winget"
+}

@@ -37,6 +37,7 @@ TestResults/
 
 # Publish
 publish/
+artifacts/
 
 # local stuff
 local-todo.md
