@@ -114,6 +114,11 @@ public sealed partial class MainWindow : Window
     [LibraryImport("comctl32.dll")]
     private static partial IntPtr DefSubclassProc(IntPtr hWnd, uint uMsg, UIntPtr wParam, IntPtr lParam);
 
+    private const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
+
+    [LibraryImport("dwmapi.dll")]
+    private static partial int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, in int pvAttribute, int cbAttribute);
+
     /// <summary>
     /// Gets the shell view model orchestrating window state, documents, and navigation.
     /// </summary>
@@ -703,6 +708,22 @@ public sealed partial class MainWindow : Window
         if (MainContentFrame.Content is DocumentView docView)
         {
             docView.HandleWindowPreviewKeyDown(e);
+        }
+        else
+        {
+            if (e.Key == Windows.System.VirtualKey.F11)
+            {
+                e.Handled = true;
+                ViewModel.ToggleFullScreen();
+                return;
+            }
+
+            if (e.Key == Windows.System.VirtualKey.Escape && ViewModel.IsFullScreen)
+            {
+                e.Handled = true;
+                ViewModel.ToggleFullScreen();
+                return;
+            }
         }
     }
 
@@ -1766,12 +1787,49 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void SetDwmTransitionsEnabled(bool enabled)
+    {
+        try
+        {
+            if (_hwnd == IntPtr.Zero)
+            {
+                _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            }
+
+            if (_hwnd != IntPtr.Zero)
+            {
+                int forceDisable = enabled ? 0 : 1;
+                _ = DwmSetWindowAttribute(_hwnd, DWMWA_TRANSITIONS_FORCEDISABLED, in forceDisable, sizeof(int));
+            }
+        }
+        catch
+        {
+        }
+    }
+
     private bool _sidebarOpenBeforeFullScreen;
+    private bool _wasMaximizedBeforeFullScreen;
 
     private void UpdateFullScreenState(bool isFullScreen)
     {
         if (isFullScreen)
         {
+            if (AppWindow.Presenter is OverlappedPresenter op)
+            {
+                _wasMaximizedBeforeFullScreen = op.State == OverlappedPresenterState.Maximized;
+                if (_wasMaximizedBeforeFullScreen)
+                {
+                    // Temporarily disable DWM transition animations so restoring to normal
+                    // window bounds prior to FullScreen does not play a shrink animation.
+                    SetDwmTransitionsEnabled(false);
+                    op.Restore();
+                }
+            }
+            else
+            {
+                _wasMaximizedBeforeFullScreen = false;
+            }
+
             if (!ViewModel.IsPresentationMode)
             {
                 _sidebarOpenBeforeFullScreen = ViewModel.IsSidebarOpen;
@@ -1784,14 +1842,41 @@ public sealed partial class MainWindow : Window
             AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
             DispatcherQueue.TryEnqueue(() =>
             {
+                SetDwmTransitionsEnabled(true);
                 UpdateTitleBarInsets();
                 UpdateTitleBarNonClientRegions();
             });
         }
         else
         {
+            if (_wasMaximizedBeforeFullScreen)
+            {
+                // Temporarily disable DWM transition animations so restoring back
+                // to maximized does not animate/zoom from a small window layout.
+                SetDwmTransitionsEnabled(false);
+            }
+
             AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Default);
             UpdateWindowMinimumSize();
+
+            if (_wasMaximizedBeforeFullScreen)
+            {
+                _wasMaximizedBeforeFullScreen = false;
+                if (AppWindow.Presenter is OverlappedPresenter overlappedPresenter)
+                {
+                    overlappedPresenter.Maximize();
+                }
+            }
+
+            ExtendsContentIntoTitleBar = true;
+            SetTitleBar(TitleBarDragRegion);
+
+            if (AppWindowTitleBar.IsCustomizationSupported())
+            {
+                AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
+                UpdateTitleBarTheme();
+            }
+
             if (!ViewModel.IsPresentationMode && _sidebarOpenBeforeFullScreen)
             {
                 _sidebarOpenBeforeFullScreen = false;
@@ -1807,6 +1892,7 @@ public sealed partial class MainWindow : Window
 
             DispatcherQueue.TryEnqueue(() =>
             {
+                SetDwmTransitionsEnabled(true);
                 UpdateTitleBarInsets();
                 UpdateTitleBarNonClientRegions();
             });

@@ -475,15 +475,41 @@ public static partial class AutoTestRunner
             MemoryMetrics.Capture()));
         LogLive($"[AUTOTEST] Phase 10 {(textPass ? "PASS" : "FAIL")}: Matches={matchCount}, Selected='{rangeSel?.SelectedText}'");
 
-        // Phase 11: Final Memory Reclamation & LOH Check
-        LogLive("[AUTOTEST] Phase 11: Final memory stabilization and reclamation check...");
+        // Phase 11: Maximized FullScreen Transition & TitleBar Caption Restoration
+        LogLive("[AUTOTEST] Phase 11: Testing FullScreen toggle from Maximized window state...");
+        if (window.AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter op)
+        {
+            op.Maximize();
+        }
+        await Task.Delay(500);
+
+        shell.ToggleFullScreen();
+        await Task.Delay(500);
+
+        shell.ToggleFullScreen();
+        await Task.Delay(500);
+
+        var pAfter = window.AppWindow.Presenter as Microsoft.UI.Windowing.OverlappedPresenter;
+        var tbAfter = window.AppWindow.TitleBar;
+        bool fullScreenRestorePass = pAfter?.State == Microsoft.UI.Windowing.OverlappedPresenterState.Maximized &&
+                                     tbAfter?.RightInset > 40;
+
+        s_steps.Add(new StepResult(
+            "Phase 11: Maximized FullScreen & Caption Button Restoration",
+            fullScreenRestorePass,
+            $"State={pAfter?.State}, RightInset={tbAfter?.RightInset}, Height={tbAfter?.Height}",
+            MemoryMetrics.Capture()));
+        LogLive($"[AUTOTEST] Phase 11 {(fullScreenRestorePass ? "PASS" : "FAIL")}: State={pAfter?.State}, RightInset={tbAfter?.RightInset}");
+
+        // Phase 12: Final Memory Reclamation & LOH Check
+        LogLive("[AUTOTEST] Phase 12: Final memory stabilization and reclamation check...");
         shell.SetZoom(1.0);
         doc.GoToPage(0);
         await Task.Delay(400);
 
         MemoryMetrics finalReclaimedMem = MemoryMetrics.Capture();
-        s_steps.Add(new StepResult("Phase 11: Final Reclamation", true, $"Final Memory: {finalReclaimedMem}", finalReclaimedMem));
-        LogLive($"[AUTOTEST] Phase 11 PASS: Final Memory = {finalReclaimedMem}");
+        s_steps.Add(new StepResult("Phase 12: Final Reclamation", true, $"Final Memory: {finalReclaimedMem}", finalReclaimedMem));
+        LogLive($"[AUTOTEST] Phase 12 PASS: Final Memory = {finalReclaimedMem}");
 
         return true;
     }
