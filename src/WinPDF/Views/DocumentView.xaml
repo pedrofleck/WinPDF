@@ -395,6 +395,7 @@
                 <InfoBar
                     x:Name="FullScreenInfoBar"
                     x:Uid="FullScreenInfoBar"
+                    Severity="Informational"
                     IsOpen="False"
                     IsIconVisible="False"
                     IsClosable="True"
@@ -404,7 +405,16 @@
                     VerticalAlignment="Top"
                     Margin="0,24,0,0"
                     Canvas.ZIndex="100"
-                    CloseButtonClick="OnFullScreenInfoBarCloseButtonClick" />
+                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="8"
+                    CloseButtonClick="OnFullScreenInfoBarCloseButtonClick">
+                    <InfoBar.Resources>
+                        <StaticResource x:Key="InfoBarInformationalSeverityBackgroundBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
+                        <StaticResource x:Key="InfoBarBackgroundFillColorDefaultBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
+                    </InfoBar.Resources>
+                </InfoBar>
 
                 <!-- 80 DIPs top clickable zone to exit presentation with subtle hover button -->
                 <Grid
