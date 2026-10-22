@@ -8,7 +8,7 @@
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <RootNamespace>WinPDF</RootNamespace>
     <AssemblyName>WinPDF</AssemblyName>
-    <Version>0.5.2</Version>
+    <Version>0.5.3-alpha.5</Version>
     <Product>WinPDF</Product>
     <AssemblyTitle>WinPDF</AssemblyTitle>
     <Description>Lightweight Fluent 2 PDF Reader</Description>
@@ -32,8 +32,12 @@
 
     <!-- Prevent generated Debugger.Break on unhandled exceptions so App.UnhandledException handles them gracefully -->
     <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_BREAK_ON_UNHANDLED_EXCEPTION</DefineConstants>
+
+    <!-- Ahead-of-Time ReadyToRun compilation in Release builds for faster cold startup -->
+    <PublishReadyToRun Condition="'$(Configuration)' == 'Release'">true</PublishReadyToRun>
   </PropertyGroup>
 
+  
   <!-- Default to x64 when no platform is supplied (WinUI cannot build as AnyCPU). -->
   <PropertyGroup Condition="'$(Platform)' == '' Or '$(Platform)' == 'AnyCPU'">
     <Platform>x64</Platform>

@@ -147,6 +147,7 @@ public sealed class ThumbnailPresenter : Grid
         UnsubscribeFromItem();
         _image.Source = null;
         _image.Visibility = Visibility.Collapsed;
+        _reusableBitmap = null;
     }
 
     private static void OnItemPropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -198,6 +199,7 @@ public sealed class ThumbnailPresenter : Grid
             _observedItem = null;
             _image.Source = null;
             _image.Visibility = Visibility.Collapsed;
+            _reusableBitmap = null;
         }
     }
 
@@ -294,6 +296,7 @@ public sealed class ThumbnailPresenter : Grid
         {
             _image.Source = null;
             _image.Visibility = Visibility.Collapsed;
+            _reusableBitmap = null;
             return;
         }
 

@@ -157,6 +157,263 @@ public sealed partial class MainWindow : Window
     [LibraryImport("dwmapi.dll")]
     private static partial int DwmFlush();
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PROCESS_POWER_THROTTLING_STATE
+    {
+        public uint Version;
+        public uint ControlMask;
+        public uint StateMask;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MEMORY_PRIORITY_INFORMATION
+    {
+        public uint MemoryPriority;
+    }
+
+    private const int ProcessMemoryPriority = 0;
+    private const int ProcessPowerThrottling = 4;
+    private const uint PROCESS_POWER_THROTTLING_CURRENT_VERSION = 1;
+    private const uint PROCESS_POWER_THROTTLING_EXECUTION_SPEED = 1;
+    private const uint MEMORY_PRIORITY_VERY_LOW = 1;
+    private const uint MEMORY_PRIORITY_NORMAL = 5;
+
+    private const uint WM_SIZE = 0x0005;
+    private const uint WM_ACTIVATE = 0x0006;
+    private const uint WA_INACTIVE = 0;
+    private const uint WM_MOUSEWHEEL = 0x020A;
+    private const uint WM_MOUSEHWHEEL = 0x020E;
+    private const uint WM_LBUTTONDOWN = 0x0201;
+    private const uint WM_RBUTTONDOWN = 0x0204;
+    private const uint WM_MBUTTONDOWN = 0x0207;
+    private const uint WM_POINTERDOWN = 0x0246;
+    private const uint WM_POINTERWHEEL = 0x024E;
+    private const uint WM_POINTERHWHEEL = 0x024F;
+    private const uint SIZE_RESTORED = 0;
+    private const uint SIZE_MINIMIZED = 1;
+    private const uint SIZE_MAXIMIZED = 2;
+
+    [LibraryImport("kernel32.dll")]
+    private static partial IntPtr GetCurrentProcess();
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetProcessInformation(
+        IntPtr hProcess,
+        int processInformationClass,
+        in PROCESS_POWER_THROTTLING_STATE processInformation,
+        uint processInformationSize);
+
+    [LibraryImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetProcessInformation(
+        IntPtr hProcess,
+        int processInformationClass,
+        in MEMORY_PRIORITY_INFORMATION processInformation,
+        uint processInformationSize);
+
+    private static void SetBackgroundMode(bool on)
+    {
+        try
+        {
+            IntPtr h = GetCurrentProcess();
+
+            if (!on)
+            {
+                // Restore normal CPU scheduling priority first so window restoration is instantaneous
+                using System.Diagnostics.Process pRestore = System.Diagnostics.Process.GetCurrentProcess();
+                pRestore.PriorityClass = System.Diagnostics.ProcessPriorityClass.Normal;
+            }
+
+            PROCESS_POWER_THROTTLING_STATE power = new()
+            {
+                Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+                ControlMask = PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
+                StateMask = on ? PROCESS_POWER_THROTTLING_EXECUTION_SPEED : 0u,
+            };
+            _ = SetProcessInformation(h, ProcessPowerThrottling, in power, (uint)Marshal.SizeOf<PROCESS_POWER_THROTTLING_STATE>());
+
+            if (!on)
+            {
+                // Also clear ControlMask back to OS default after explicitly clearing StateMask
+                PROCESS_POWER_THROTTLING_STATE defaultPower = new()
+                {
+                    Version = PROCESS_POWER_THROTTLING_CURRENT_VERSION,
+                    ControlMask = 0u,
+                    StateMask = 0u,
+                };
+                _ = SetProcessInformation(h, ProcessPowerThrottling, in defaultPower, (uint)Marshal.SizeOf<PROCESS_POWER_THROTTLING_STATE>());
+            }
+
+            MEMORY_PRIORITY_INFORMATION mem = new()
+            {
+                MemoryPriority = on ? MEMORY_PRIORITY_VERY_LOW : MEMORY_PRIORITY_NORMAL,
+            };
+            _ = SetProcessInformation(h, ProcessMemoryPriority, in mem, (uint)Marshal.SizeOf<MEMORY_PRIORITY_INFORMATION>());
+
+            if (on)
+            {
+                using System.Diagnostics.Process pIdle = System.Diagnostics.Process.GetCurrentProcess();
+                pIdle.PriorityClass = System.Diagnostics.ProcessPriorityClass.Idle;
+            }
+        }
+        catch
+        {
+            // Ignore permission or platform variations gracefully
+        }
+    }
+
+    private bool _isWindowLoaded;
+    private bool _isWindowMinimized;
+    private bool _isWindowDeactivated;
+    private bool _isInEfficiencyMode;
+    private CancellationTokenSource? _inactiveEfficiencyCts;
+
+    private void CancelInactiveEfficiencyTimer()
+    {
+        _inactiveEfficiencyCts?.Cancel();
+        _inactiveEfficiencyCts?.Dispose();
+        _inactiveEfficiencyCts = null;
+    }
+
+    private void ScheduleInactiveEfficiencyMode()
+    {
+        CancelInactiveEfficiencyTimer();
+        if (_isWindowMinimized || !_isWindowDeactivated || ViewModel.IsPresentationMode)
+        {
+            return;
+        }
+
+        _inactiveEfficiencyCts = new CancellationTokenSource();
+        CancellationToken ct = _inactiveEfficiencyCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            if (ct.IsCancellationRequested || !_isWindowDeactivated || _isWindowMinimized)
+            {
+                return;
+            }
+
+            DispatcherQueue?.TryEnqueue(() =>
+            {
+                if (_isWindowDeactivated && !_isWindowMinimized && !ViewModel.IsPresentationMode)
+                {
+                    ApplyEfficiencyModeCore(true);
+                }
+            });
+        }, ct);
+    }
+
+    private void EnterMinimizedEfficiencyMode()
+    {
+        CancelInactiveEfficiencyTimer();
+        _isWindowMinimized = true;
+        ApplyEfficiencyModeCore(true);
+    }
+
+    private void ExitMinimizedEfficiencyMode()
+    {
+        if (!_isWindowMinimized)
+        {
+            return;
+        }
+
+        CancelInactiveEfficiencyTimer();
+        _isWindowMinimized = false;
+        ApplyEfficiencyModeCore(false);
+        if (_isWindowDeactivated && _isWindowLoaded)
+        {
+            ScheduleInactiveEfficiencyMode();
+        }
+    }
+
+    private void OnWindowActivatedStateChanged(bool isDeactivated)
+    {
+        _isWindowDeactivated = isDeactivated;
+        if (!_isWindowLoaded)
+        {
+            return;
+        }
+
+        if (!isDeactivated)
+        {
+            CancelInactiveEfficiencyTimer();
+            if (!_isWindowMinimized)
+            {
+                ApplyEfficiencyModeCore(false);
+            }
+        }
+        else if (!_isWindowMinimized)
+        {
+            ScheduleInactiveEfficiencyMode();
+        }
+    }
+
+    private void OnInactiveWindowUserInteraction()
+    {
+        if (_isWindowMinimized)
+        {
+            return;
+        }
+
+        if (_isInEfficiencyMode)
+        {
+            ApplyEfficiencyModeCore(false);
+        }
+
+        if (_isWindowDeactivated)
+        {
+            ScheduleInactiveEfficiencyMode();
+        }
+    }
+
+    private void ApplyEfficiencyModeCore(bool enable)
+    {
+        if (_isInEfficiencyMode == enable)
+        {
+            return;
+        }
+
+        _isInEfficiencyMode = enable;
+        SetBackgroundMode(enable);
+
+        if (enable)
+        {
+            DispatcherQueue?.TryEnqueue(() =>
+            {
+                _ellipsisWaveStoryboard?.Stop();
+
+                ViewModel.HandleWindowMinimized();
+
+                if (MainContentFrame.Content is DocumentView docView)
+                {
+                    docView.OnWindowMinimized();
+                }
+            });
+        }
+        else
+        {
+            DispatcherQueue?.TryEnqueue(() =>
+            {
+                ViewModel.HandleWindowRestored();
+
+                if (MainContentFrame.Content is DocumentView docView)
+                {
+                    docView.OnWindowRestored();
+                }
+            });
+        }
+    }
+
     /// <summary>
     /// Gets the shell view model orchestrating window state, documents, and navigation.
     /// </summary>
@@ -288,6 +545,7 @@ public sealed partial class MainWindow : Window
                 }
 
                 SelectSidebarTab(ViewModel.SidebarTab);
+                _isWindowLoaded = true;
 
                 if (root.XamlRoot is not null)
                 {
@@ -484,6 +742,31 @@ public sealed partial class MainWindow : Window
                 }
             }
         }
+        else if (uMsg == WM_SIZE && _isWindowLoaded)
+        {
+            uint sizeType = (uint)(wParam.ToUInt64() & 0xFFFF);
+            if (sizeType == SIZE_MINIMIZED)
+            {
+                EnterMinimizedEfficiencyMode();
+            }
+            else if (sizeType is SIZE_RESTORED or SIZE_MAXIMIZED)
+            {
+                ExitMinimizedEfficiencyMode();
+            }
+        }
+        else if (uMsg == WM_ACTIVATE && _isWindowLoaded)
+        {
+            uint activateState = (uint)(wParam.ToUInt64() & 0xFFFF);
+            OnWindowActivatedStateChanged(isDeactivated: activateState == WA_INACTIVE);
+        }
+        else if (_isWindowLoaded && uMsg is WM_MOUSEWHEEL or WM_MOUSEHWHEEL or WM_POINTERWHEEL or WM_POINTERHWHEEL
+                      or WM_LBUTTONDOWN or WM_RBUTTONDOWN or WM_MBUTTONDOWN or WM_POINTERDOWN)
+        {
+            if (_isInEfficiencyMode || _isWindowDeactivated)
+            {
+                OnInactiveWindowUserInteraction();
+            }
+        }
         else if (uMsg == WM_DPICHANGED)
         {
             DispatcherQueue?.TryEnqueue(() => UpdateWindowMinimumSize());
@@ -648,6 +931,11 @@ public sealed partial class MainWindow : Window
 
     private void OnMainWindowSizeChanged(object sender, WindowSizeChangedEventArgs args)
     {
+        if (_isWindowMinimized || args.Size.Width <= 0 || args.Size.Height <= 0)
+        {
+            return;
+        }
+
         if (args.Size.Width == _lastWindowSize.Width && args.Size.Height == _lastWindowSize.Height)
         {
             return;
@@ -1842,6 +2130,19 @@ public sealed partial class MainWindow : Window
 
     private void OnAppWindowChanged(Microsoft.UI.Windowing.AppWindow sender, Microsoft.UI.Windowing.AppWindowChangedEventArgs args)
     {
+        if (_isWindowLoaded && AppWindow.Presenter is OverlappedPresenter overlapped)
+        {
+            if (overlapped.State == OverlappedPresenterState.Minimized)
+            {
+                EnterMinimizedEfficiencyMode();
+                return;
+            }
+            else if (_isWindowMinimized)
+            {
+                ExitMinimizedEfficiencyMode();
+            }
+        }
+
         if (args.DidPresenterChange)
         {
             if (_isFullScreenTransitionRunning)

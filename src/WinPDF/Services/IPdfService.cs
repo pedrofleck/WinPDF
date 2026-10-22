@@ -35,6 +35,26 @@ public interface IPdfService : IDisposable
     Task SetPageCacheCapacityAsync(int capacity, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Trims cached page handles on the dedicated PDFium worker thread outside [currentPage - margin, currentPage + margin].
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="currentPage">Active page index to retain.</param>
+    /// <param name="margin">Margin of adjacent pages to keep around the active page (default 1).</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>A task that completes when page handles have been trimmed.</returns>
+    Task TrimPageCacheAsync(
+        long documentId,
+        int currentPage,
+        int margin = 1,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Immediately cancels all pending low-priority background jobs (such as queued thumbnails and prefetches)
+    /// when the window is minimized so the worker thread enters a zero-CPU wait state.
+    /// </summary>
+    void CancelPendingBackgroundJobs();
+
+    /// <summary>
     /// Reads the hierarchical table of contents (bookmarks).
     /// </summary>
     /// <param name="documentId">Document id.</param>

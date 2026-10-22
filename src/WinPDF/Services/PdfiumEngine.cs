@@ -107,6 +107,14 @@ internal sealed unsafe class PdfiumEngine : IDisposable
         _pageCache.SetCapacity(capacity);
     }
 
+    /// <summary>
+    /// Trims cached page handles outside [currentPage - margin, currentPage + margin].
+    /// </summary>
+    internal void TrimPagesOutside(long documentId, int currentPage, int margin = 1)
+    {
+        _pageCache.TrimPagesOutside(documentId, currentPage, margin);
+    }
+
     /// <summary>Closes a document; its cached pages are closed first.</summary>
     internal void CloseDocument(long documentId)
     {

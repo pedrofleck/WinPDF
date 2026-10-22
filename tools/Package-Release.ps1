@@ -10,7 +10,7 @@
 param(
     [string]$Configuration = 'Release',
     [string]$Platform = 'x64',
-    [string]$Version = '0.5.2'
+    [string]$Version = '0.5.3-alpha.5'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -111,6 +111,7 @@ if ($IsccExe) {
         throw "ISCC.exe failed with exit code $LASTEXITCODE"
     }
     Write-Host "Installer generated successfully at $installerOutDir" -ForegroundColor Green
-} else {
+}
+else {
     Write-Warning "Inno Setup 7 (ISCC.exe) not found. Install with: winget install --id JRSoftware.InnoSetup.7 -e -s winget"
 }

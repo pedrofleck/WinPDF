@@ -71,6 +71,8 @@ public sealed partial class ThumbnailsTabPage : Page
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        _userScrollDebounceTimer.Tick -= OnUserScrollDebounceTimerTick;
+        _userScrollDebounceTimer.Tick += OnUserScrollDebounceTimerTick;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         SubscribeToDocument(ViewModel.CurrentDocument);
@@ -136,6 +138,20 @@ public sealed partial class ThumbnailsTabPage : Page
 
             RefreshAfterVisibilityRestored();
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RefreshAfterVisibilityRestored);
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.IsWindowMinimized))
+        {
+            if (ViewModel.IsWindowMinimized)
+            {
+                _springVelocity = 0.0;
+                _isCatchingUp = false;
+                StopSmoothScrollLoop();
+                _userScrollDebounceTimer.Stop();
+            }
+            else if (ViewModel.IsSidebarOpen && !ViewModel.IsSettingsOpen && ViewModel.SidebarTab == Models.SidebarTab.Thumbnails)
+            {
+                RefreshAfterVisibilityRestored();
+            }
         }
         else if (e.PropertyName is nameof(ShellViewModel.IsSidebarOpen) or nameof(ShellViewModel.SidebarTab) or nameof(ShellViewModel.IsSettingsOpen))
         {
@@ -655,19 +671,41 @@ public sealed partial class ThumbnailsTabPage : Page
         }
     }
 
+    private static void ClearPresenterRecursive(DependencyObject parent)
+    {
+        int count = VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
+            if (child is WinPDF.Controls.ThumbnailPresenter presenter)
+            {
+                presenter.Item = null;
+                return;
+            }
+
+            ClearPresenterRecursive(child);
+        }
+    }
+
     private void OnThumbnailsElementClearing(ItemsRepeater sender, ItemsRepeaterElementClearingEventArgs args)
     {
-        if (args.Element is FrameworkElement { DataContext: ThumbnailItemViewModel thumbnail })
+        if (args.Element is FrameworkElement fe)
         {
-            thumbnail.NotifyRecycled();
-        }
-        else if (ViewModel.CurrentDocument is not null)
-        {
-            int index = ThumbnailsRepeater.GetElementIndex(args.Element);
-            if (index >= 0 && index < ViewModel.CurrentDocument.Thumbnails.Count)
+            if (fe.DataContext is ThumbnailItemViewModel thumbnail)
             {
-                ViewModel.CurrentDocument.Thumbnails[index].NotifyRecycled();
+                thumbnail.NotifyRecycled();
             }
+            else if (ViewModel.CurrentDocument is not null)
+            {
+                int index = ThumbnailsRepeater.GetElementIndex(fe);
+                if (index >= 0 && index < ViewModel.CurrentDocument.Thumbnails.Count)
+                {
+                    ViewModel.CurrentDocument.Thumbnails[index].NotifyRecycled();
+                }
+            }
+
+            ClearPresenterRecursive(fe);
+            fe.DataContext = null;
         }
     }
 }

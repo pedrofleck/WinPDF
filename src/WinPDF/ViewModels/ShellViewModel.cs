@@ -21,6 +21,7 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly TileCache _tileCache;
     private readonly IWindowContext _windowContext;
     private readonly ISettingsService _settingsService;
+    private readonly Microsoft.UI.Dispatching.DispatcherQueue? _uiDispatcherQueue;
     private readonly bool _isInitializingSettings;
     private string? _pendingNotificationTitle;
     private string? _pendingNotificationMessage;
@@ -49,6 +50,26 @@ public sealed partial class ShellViewModel : ObservableObject
     /// Event raised when the user changes the default zoom preference in Settings.
     /// </summary>
     public event Action<int>? DefaultZoomPreferenceChanged;
+
+    /// <summary>
+    /// Event raised when a 30-second background cache trim has completed, notifying UI components
+    /// (such as <see cref="Controls.PdfPageCanvas"/>) to clear off-screen detail patches and buffers.
+    /// </summary>
+    public event Action? BackgroundTrimRequested;
+
+    /// <summary>
+    /// Gets a value indicating whether the application window is currently minimized to the taskbar.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsWindowMinimized { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether Windows battery saver / energy saver mode is currently active.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsEnergySaverActive { get; set; }
+
+    private CancellationTokenSource? _minimizeTrimCts;
 
     /// <summary>
     /// Gets or sets a value indicating whether the navigation sidebar pane is visible.
@@ -81,7 +102,13 @@ public sealed partial class ShellViewModel : ObservableObject
 
     partial void OnIsSidebarOpenChanged(bool value)
     {
-        CurrentDocument?.SetThumbnailsActive(!IsSettingsOpen && value && SidebarTab == SidebarTab.Thumbnails);
+        bool thumbnailsActive = !IsSettingsOpen && value && SidebarTab == SidebarTab.Thumbnails;
+        CurrentDocument?.SetThumbnailsActive(thumbnailsActive);
+        if (!thumbnailsActive && CurrentDocument is { } doc)
+        {
+            doc.TrimThumbnailsForBackground(doc.CurrentPageIndex, margin: 1);
+        }
+
         if (!_isInitializingSettings && !IsPresentationMode && !IsFullScreen && IsSidebarAllowed && !SuppressSidebarSettingsPersistence)
         {
             _settingsService.Update(s => s.IsSidebarOpen = value);
@@ -90,7 +117,12 @@ public sealed partial class ShellViewModel : ObservableObject
 
     partial void OnSidebarTabChanged(SidebarTab value)
     {
-        CurrentDocument?.SetThumbnailsActive(!IsSettingsOpen && IsSidebarOpen && value == SidebarTab.Thumbnails);
+        bool thumbnailsActive = !IsSettingsOpen && IsSidebarOpen && value == SidebarTab.Thumbnails;
+        CurrentDocument?.SetThumbnailsActive(thumbnailsActive);
+        if (!thumbnailsActive && CurrentDocument is { } doc)
+        {
+            doc.TrimThumbnailsForBackground(doc.CurrentPageIndex, margin: 1);
+        }
     }
 
     /// <summary>
@@ -400,6 +432,7 @@ public sealed partial class ShellViewModel : ObservableObject
         _tileCache = tileCache;
         _windowContext = windowContext;
         _settingsService = settingsService;
+        _uiDispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 
         _isInitializingSettings = true;
         CurrentTheme = _settingsService.Settings.Theme;
@@ -410,6 +443,178 @@ public sealed partial class ShellViewModel : ObservableObject
 
         Title = ResourceStrings.Get(ResourceKeys.AppDisplayName);
         UpdateFormattedStrings();
+
+        try
+        {
+            IsEnergySaverActive = Windows.System.Power.PowerManager.EnergySaverStatus == Windows.System.Power.EnergySaverStatus.On;
+            Windows.System.Power.PowerManager.EnergySaverStatusChanged += (_, _) =>
+            {
+                try
+                {
+                    var dispatcher = _windowContext.DispatcherQueue ?? _uiDispatcherQueue;
+                    dispatcher?.TryEnqueue(() =>
+                    {
+                        try
+                        {
+                            bool active = Windows.System.Power.PowerManager.EnergySaverStatus == Windows.System.Power.EnergySaverStatus.On;
+                            if (IsEnergySaverActive != active)
+                            {
+                                IsEnergySaverActive = active;
+                                if (CurrentDocument is not null)
+                                {
+                                    _ = _pdfService.SetPageCacheCapacityAsync(active ? 3 : 8);
+                                }
+                            }
+                        }
+                        catch
+                        {
+                        }
+                    });
+                }
+                catch
+                {
+                }
+            };
+        }
+        catch
+        {
+            // Gracefully ignore on hardware/configurations where PowerManager is unsupported (e.g. desktop PCs without battery)
+        }
+    }
+
+    /// <summary>
+    /// Handles application window minimization: immediately pauses background tasks (thumbnail generation, prefetch,
+    /// low-priority PDFium queue) and schedules a 30-second debounced cache trim and single compacting GC.
+    /// </summary>
+    public void HandleWindowMinimized()
+    {
+        if (IsWindowMinimized)
+        {
+            return;
+        }
+
+        IsWindowMinimized = true;
+
+        // 1. Immediately halt background work: pause sidebar thumbnail generation and drain pending low-priority jobs
+        CurrentDocument?.SetThumbnailsActive(false);
+        _pdfService.CancelPendingBackgroundJobs();
+
+        // 2. Schedule debounced cache trimming after 30 seconds
+        _minimizeTrimCts?.Cancel();
+        _minimizeTrimCts?.Dispose();
+        _minimizeTrimCts = new CancellationTokenSource();
+        CancellationToken ct = _minimizeTrimCts.Token;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(30), ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            if (ct.IsCancellationRequested || !IsWindowMinimized)
+            {
+                return;
+            }
+
+            await PerformBackgroundCacheTrimAsync(ct).ConfigureAwait(false);
+        }, ct);
+    }
+
+    /// <summary>
+    /// Handles application window restoration: cancels pending trim and resumes normal foreground operations.
+    /// </summary>
+    public void HandleWindowRestored()
+    {
+        if (!IsWindowMinimized)
+        {
+            return;
+        }
+
+        IsWindowMinimized = false;
+
+        // Cancel scheduled 30s trim if restored in time
+        _minimizeTrimCts?.Cancel();
+        _minimizeTrimCts?.Dispose();
+        _minimizeTrimCts = null;
+
+        // Resume sidebar thumbnails if sidebar is currently visible
+        CurrentDocument?.SetThumbnailsActive(!IsSettingsOpen && IsSidebarOpen && SidebarTab == SidebarTab.Thumbnails);
+    }
+
+    private async Task PerformBackgroundCacheTrimAsync(CancellationToken ct)
+    {
+        DocumentViewModel? doc = CurrentDocument;
+        long docId = doc?.DocumentId ?? -1;
+        int curPage = doc?.CurrentPageIndex ?? 0;
+
+        // 1. First release UI-held references (off-range PdfPageCanvas bitmaps, slide buffer, staging buffer, thumbnails)
+        //    on the UI thread so their ref-counts drop before TileCache eviction and GC run.
+        TaskCompletionSource uiTrimTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        var dispatcher = _windowContext.DispatcherQueue ?? _uiDispatcherQueue;
+        bool enqueued = dispatcher?.TryEnqueue(() =>
+        {
+            try
+            {
+                doc?.TrimThumbnailsForBackground(curPage, margin: 1);
+                BackgroundTrimRequested?.Invoke();
+            }
+            finally
+            {
+                uiTrimTcs.TrySetResult();
+            }
+        }) ?? false;
+
+        if (enqueued)
+        {
+            await uiTrimTcs.Task.ConfigureAwait(false);
+        }
+
+        if (ct.IsCancellationRequested || !IsWindowMinimized)
+        {
+            return;
+        }
+
+        // 2. Trim TileCache: discard cached bitmaps/thumbnails outside current page ± 2
+        if (docId > 0)
+        {
+            _tileCache.TrimPagesOutside(docId, curPage, margin: 2);
+        }
+        else
+        {
+            _tileCache.Clear();
+        }
+
+        // 3. Trim PdfiumPageCache on the PDFium worker thread: close FPDF_PAGE, FPDF_TEXTPAGE, and FPDF_PAGELINK handles outside current page ± 2
+        if (docId > 0)
+        {
+            try
+            {
+                await _pdfService.TrimPageCacheAsync(docId, curPage, margin: 2, ct).ConfigureAwait(false);
+            }
+            catch
+            {
+            }
+        }
+
+        if (ct.IsCancellationRequested || !IsWindowMinimized)
+        {
+            return;
+        }
+
+        // 4. Perform a single compacting GC collection now that all managed and native wrappers are unrooted (Strictly NO EmptyWorkingSet!)
+        try
+        {
+            System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect(2, GCCollectionMode.Forced, blocking: false, compacting: true);
+        }
+        catch
+        {
+        }
     }
 
     /// <summary>

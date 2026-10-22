@@ -202,6 +202,14 @@ public sealed partial class DocumentView : Page
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         EnsureScrollViewerWheelHook();
+        _presentationHideTimer.Tick -= OnPresentationHideTimerTick;
+        _presentationHideTimer.Tick += OnPresentationHideTimerTick;
+        _topNotificationTimer.Tick -= OnTopNotificationTimerTick;
+        _topNotificationTimer.Tick += OnTopNotificationTimerTick;
+        _viewportDebounceTimer.Tick -= OnViewportDebounceTimerTick;
+        _viewportDebounceTimer.Tick += OnViewportDebounceTimerTick;
+        _searchDebounceTimer.Tick -= OnSearchDebounceTimerTick;
+        _searchDebounceTimer.Tick += OnSearchDebounceTimerTick;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         ViewModel.SearchFocusRequested -= OnSearchFocusRequested;
@@ -212,6 +220,8 @@ public sealed partial class DocumentView : Page
         ViewModel.DefaultZoomPreferenceChanged += OnDefaultZoomPreferenceChanged;
         ViewModel.PrintRequested -= OnPrintRequestedAsync;
         ViewModel.PrintRequested += OnPrintRequestedAsync;
+        ViewModel.BackgroundTrimRequested -= OnBackgroundTrimRequested;
+        ViewModel.BackgroundTrimRequested += OnBackgroundTrimRequested;
         SubscribeToDocument(ViewModel.CurrentDocument);
 
         if (ViewModel.TryConsumePendingNotification(out string title, out string message))
@@ -266,6 +276,7 @@ public sealed partial class DocumentView : Page
         ViewModel.NotificationRequested -= OnNotificationRequested;
         ViewModel.DefaultZoomPreferenceChanged -= OnDefaultZoomPreferenceChanged;
         ViewModel.PrintRequested -= OnPrintRequestedAsync;
+        ViewModel.BackgroundTrimRequested -= OnBackgroundTrimRequested;
         StopAutoScroll();
         _transitionStoryboard?.Stop();
         _searchBarStoryboard?.Stop();
@@ -273,6 +284,75 @@ public sealed partial class DocumentView : Page
         _statusBarCompactStoryboard?.Stop();
         _isHorizontalPushAnimating = false;
         UnsubscribeFromDocument();
+    }
+
+    /// <summary>
+    /// Pauses active timers, auto-scroll loops, and in-flight background prefetches when the window is minimized.
+    /// Does not stop HoldEnd transition storyboards or wipe realized viewport pages.
+    /// </summary>
+    public void OnWindowMinimized()
+    {
+        StopAutoScroll();
+        _viewportDebounceTimer.Stop();
+        _searchDebounceTimer.Stop();
+        _presentationHideTimer.Stop();
+        _topNotificationTimer.Stop();
+
+        foreach (PdfPageCanvas canvas in _activeCanvases.ToArray())
+        {
+            canvas.SuspendForBackground();
+        }
+    }
+
+    /// <summary>
+    /// Resumes viewport rendering when the window is restored from the taskbar.
+    /// </summary>
+    public void OnWindowRestored()
+    {
+        if (DocumentAreaGrid is not null && ViewModel.HasDocument)
+        {
+            DocumentAreaGrid.Opacity = 1.0;
+            if (DocumentAreaTransform is not null)
+            {
+                DocumentAreaTransform.TranslateY = 0.0;
+            }
+        }
+
+        if (ViewModel.CurrentDocument is { } doc)
+        {
+            double activeZoom = ContinuousScrollViewer.ZoomFactor > 0.05
+                ? ContinuousScrollViewer.ZoomFactor
+                : doc.ZoomFactor;
+            UpdateViewportPages(activeZoom);
+        }
+    }
+
+    private void OnBackgroundTrimRequested()
+    {
+        int curPage = ViewModel.CurrentDocument?.CurrentPageIndex ?? -1;
+
+        // Trim only non-current prefetched slides in the presentation slide buffer so the active slide is never disposed
+        PdfPageCanvas.TrimSlideBuffer(curPage);
+        PdfPageCanvas.ReleaseReusableBuffer();
+
+        if (curPage >= 0 && _activeCanvases.Count > 0)
+        {
+            foreach (PdfPageCanvas canvas in _activeCanvases.ToArray())
+            {
+                if (canvas.PageInfo is { } info)
+                {
+                    int distance = Math.Abs(info.Index - curPage);
+                    bool isVisibleInViewport = !canvas.GetVisibleRectInPageDips().IsEmpty;
+                    if (!isVisibleInViewport && distance > 1)
+                    {
+                        // Keep Level 0 base bitmap on all realized canvases in the visual tree so pages never turn blank,
+                        // and never trim any page currently visible in the viewport (e.g. Dual-Page or multi-page zoom);
+                        // only release off-screen high-resolution detail patches.
+                        canvas.TrimForBackground(keepBaseBitmap: true);
+                    }
+                }
+            }
+        }
     }
 
     private void OnCanvasLoaded(PdfPageCanvas canvas)
@@ -2665,6 +2745,20 @@ public sealed partial class DocumentView : Page
         Storyboard.SetTargetProperty(scaleYAnim, "ScaleY");
         sb.Children.Add(scaleYAnim);
 
+        sb.Completed += (_, _) =>
+        {
+            if (EmptyStatePanel is not null)
+            {
+                EmptyStatePanel.Opacity = 1.0;
+            }
+            if (EmptyStateTransform is not null)
+            {
+                EmptyStateTransform.TranslateY = 0.0;
+                EmptyStateTransform.ScaleX = 1.0;
+                EmptyStateTransform.ScaleY = 1.0;
+            }
+        };
+
         _transitionStoryboard = sb;
         sb.Begin();
     }
@@ -2693,6 +2787,18 @@ public sealed partial class DocumentView : Page
         Storyboard.SetTarget(translateAnim, DocumentAreaTransform);
         Storyboard.SetTargetProperty(translateAnim, "TranslateY");
         sb.Children.Add(translateAnim);
+
+        sb.Completed += (_, _) =>
+        {
+            if (DocumentAreaGrid is not null)
+            {
+                DocumentAreaGrid.Opacity = 1.0;
+            }
+            if (DocumentAreaTransform is not null)
+            {
+                DocumentAreaTransform.TranslateY = 0.0;
+            }
+        };
 
         _transitionStoryboard = sb;
         sb.Begin();
@@ -3368,6 +3474,18 @@ public sealed partial class DocumentView : Page
         Storyboard.SetTarget(translateAnim, FloatingSearchBarTransform);
         Storyboard.SetTargetProperty(translateAnim, "TranslateY");
         sb.Children.Add(translateAnim);
+
+        sb.Completed += (_, _) =>
+        {
+            if (FloatingSearchBar is not null)
+            {
+                FloatingSearchBar.Opacity = 1.0;
+            }
+            if (FloatingSearchBarTransform is not null)
+            {
+                FloatingSearchBarTransform.TranslateY = 0.0;
+            }
+        };
 
         _searchBarStoryboard = sb;
         sb.Begin();

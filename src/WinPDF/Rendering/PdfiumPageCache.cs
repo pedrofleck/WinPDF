@@ -240,6 +240,29 @@ internal sealed class PdfiumPageCache : IDisposable
         }
     }
 
+    /// <summary>
+    /// Closes every cached page of a document outside [currentPage - margin, currentPage + margin].
+    /// </summary>
+    /// <param name="documentId">Engine-assigned document id.</param>
+    /// <param name="currentPage">Zero-based active page index.</param>
+    /// <param name="margin">Number of adjacent pages to retain (default 1).</param>
+    internal void TrimPagesOutside(long documentId, int currentPage, int margin = 1)
+    {
+        LinkedListNode<Entry>? node = _lru.First;
+        while (node is not null)
+        {
+            LinkedListNode<Entry>? next = node.Next;
+            if (node.Value.DocumentId == documentId && Math.Abs(node.Value.PageIndex - currentPage) > margin)
+            {
+                _map.Remove((documentId, node.Value.PageIndex));
+                _lru.Remove(node);
+                node.Value.DisposeHandles();
+            }
+
+            node = next;
+        }
+    }
+
     /// <summary>Closes every cached page of every document.</summary>
     internal void Clear()
     {

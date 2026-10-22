@@ -83,6 +83,32 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
             highPriority: true);
 
     /// <inheritdoc/>
+    public Task TrimPageCacheAsync(
+        long documentId,
+        int currentPage,
+        int margin = 1,
+        CancellationToken cancellationToken = default)
+        => Enqueue<bool>(
+            new PdfiumJob<bool>(
+                PdfJobPriority.Critical,
+                (engine, _) =>
+                {
+                    engine.TrimPagesOutside(documentId, currentPage, margin);
+                    return true;
+                },
+                cancellationToken),
+            highPriority: true);
+
+    /// <inheritdoc/>
+    public void CancelPendingBackgroundJobs()
+    {
+        while (_lowPriorityChannel.Reader.TryRead(out IPdfiumJob? job))
+        {
+            job.Cancel();
+        }
+    }
+
+    /// <inheritdoc/>
     public Task<IReadOnlyList<OutlineItem>> GetOutlineAsync(long documentId, CancellationToken cancellationToken = default)
         => Enqueue<IReadOnlyList<OutlineItem>>(
             new PdfiumJob<IReadOnlyList<OutlineItem>>(

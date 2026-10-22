@@ -129,6 +129,7 @@ public sealed partial class PdfPageCanvas : Grid
     private volatile bool _isUnloaded;
     private bool _isResourcesCreated;
     private bool _needsLevel0Render;
+    private bool _isBaseRenderInFlight;
 
     // Interactive text selection & link hit-testing state (zero idle overhead)
     private InputSystemCursorShape _currentCursorShape = InputSystemCursorShape.Arrow;
@@ -1369,6 +1370,12 @@ public sealed partial class PdfPageCanvas : Grid
             }
 
             // 3. Draw Level 0 base bitmap.
+            if (_level0Entry is { IsDisposed: true })
+            {
+                _level0Entry = null;
+                _level0Bitmap = null;
+            }
+
             if (_level0Bitmap is { } baseBmp)
             {
                 try
@@ -1388,11 +1395,18 @@ public sealed partial class PdfPageCanvas : Grid
                 }
                 catch (Exception ex) when (ex is ObjectDisposedException or COMException)
                 {
+                    _level0Entry?.Release();
+                    _level0Entry = null;
                     _level0Bitmap = null;
                     _tileCache.RemovePage(EffectiveDocumentId, PageInfo.Index);
                     _needsLevel0Render = true;
                     DispatcherQueue.TryEnqueue(() => UpdateRender());
                 }
+            }
+            else if (!_isBaseRenderInFlight && !_isUnloaded && IsLoaded)
+            {
+                _needsLevel0Render = true;
+                DispatcherQueue.TryEnqueue(() => UpdateRender());
             }
         }
         finally
@@ -1428,6 +1442,8 @@ public sealed partial class PdfPageCanvas : Grid
         catch (Exception ex) when (ex is ObjectDisposedException or COMException)
         {
             _detailBitmap = null;
+            ReleaseHighResPatch();
+            DispatcherQueue.TryEnqueue(() => UpdateViewport(EffectiveZoom));
             return;
         }
 
@@ -1541,20 +1557,46 @@ public sealed partial class PdfPageCanvas : Grid
         Rect srcRect,
         CanvasImageInterpolation interpolation = CanvasImageInterpolation.Linear)
     {
-        try
+        if (IsNightMode)
         {
-            if (IsNightMode)
-            {
-                using var invert = new InvertEffect { Source = bitmap };
-                ds.DrawImage(invert, destRect, invert.GetBounds(ds), 1.0f, interpolation);
-            }
-            else
-            {
-                ds.DrawImage(bitmap, destRect, srcRect, 1.0f, interpolation);
-            }
+            using var invert = new InvertEffect { Source = bitmap };
+            ds.DrawImage(invert, destRect, invert.GetBounds(ds), 1.0f, interpolation);
         }
-        catch (Exception ex) when (ex is ObjectDisposedException or COMException)
+        else
         {
+            ds.DrawImage(bitmap, destRect, srcRect, 1.0f, interpolation);
+        }
+    }
+
+    /// <summary>
+    /// Immediately cancels in-flight background prefetch and detail debounce tasks when the window is minimized,
+    /// without interrupting any essential Level 0 base page render.
+    /// </summary>
+    public void SuspendForBackground()
+    {
+        _prefetchCts?.Cancel();
+        _prefetchCts?.Dispose();
+        _prefetchCts = null;
+
+        _detailDebounceCts?.Cancel();
+        _detailDebounceCts?.Dispose();
+        _detailDebounceCts = null;
+    }
+
+    /// <summary>
+    /// Trims cached bitmaps on this canvas after the window has remained minimized for 30 seconds.
+    /// Always releases the high-resolution detail patch; optionally releases the Level 0 base bitmap
+    /// for pages outside the active page ± 1 window.
+    /// </summary>
+    /// <param name="keepBaseBitmap">True to keep the Level 0 base bitmap (for currentPage ± 1); false to release all bitmaps.</param>
+    public void TrimForBackground(bool keepBaseBitmap)
+    {
+        CancelInFlightRenders();
+        ReleaseHighResPatch();
+        if (!keepBaseBitmap)
+        {
+            ReleaseBitmaps();
+            _needsLevel0Render = true;
         }
     }
 
@@ -1728,8 +1770,12 @@ public sealed partial class PdfPageCanvas : Grid
         // Expand the horizontal prefetch margin generously (up to 75% of viewport width) and vertical margin (up to 40% of viewport height)
         // so that scrolling/panning laterally across high-resolution pages maintains crisp detail without exposing the low-res base bitmap,
         // while strictly bounding within maxAllowedPatch to keep memory controlled and prevent downsampling below native pixel scale.
-        double marginX = Math.Min(visibleDip.Width * 0.75, Math.Max(0.0, (maxAllowedPatchW - visibleDip.Width) / 2.0));
-        double marginY = Math.Min(visibleDip.Height * 0.40, Math.Max(0.0, (maxAllowedPatchH - visibleDip.Height) / 2.0));
+        // Under Windows Energy Saver (battery saver mode), bypass generous margins to conserve CPU and memory.
+        ShellViewModel? shell = App.CurrentApp.Services.GetService<ShellViewModel>();
+        bool isEnergySaver = shell?.IsEnergySaverActive == true;
+
+        double marginX = isEnergySaver ? 0.0 : Math.Min(visibleDip.Width * 0.75, Math.Max(0.0, (maxAllowedPatchW - visibleDip.Width) / 2.0));
+        double marginY = isEnergySaver ? 0.0 : Math.Min(visibleDip.Height * 0.40, Math.Max(0.0, (maxAllowedPatchH - visibleDip.Height) / 2.0));
 
         double patchX = Math.Max(0, visibleDip.X - marginX);
         double patchY = Math.Max(0, visibleDip.Y - marginY);
@@ -1777,9 +1823,11 @@ public sealed partial class PdfPageCanvas : Grid
     {
         if (PageInfo is not { } pageInfo || EffectiveDocumentId <= 0)
         {
+            _isBaseRenderInFlight = false;
             return;
         }
 
+        _isBaseRenderInFlight = true;
         int targetPageIndex = pageInfo.Index;
         long targetDocId = EffectiveDocumentId;
 
@@ -1818,6 +1866,7 @@ public sealed partial class PdfPageCanvas : Grid
                     _level0Bitmap = canvasEntry.Bitmap;
                     _baseCanvas.Invalidate();
 
+                    _isBaseRenderInFlight = false;
                     if (EffectiveZoom > DetailZoomThreshold)
                     {
                         UpdateViewport(EffectiveZoom);
@@ -1845,24 +1894,28 @@ public sealed partial class PdfPageCanvas : Grid
         }
         catch (OperationCanceledException)
         {
+            _isBaseRenderInFlight = false;
             return;
         }
         catch (Exception ex)
         {
+            _isBaseRenderInFlight = false;
             Debug.WriteLine($"Base bitmap render failed: {ex.Message}");
             return;
         }
 
         if (ct.IsCancellationRequested || _isUnloaded)
         {
+            _isBaseRenderInFlight = false;
             lease.Dispose();
             return;
         }
 
-        DispatcherQueue.TryEnqueue(() =>
+        bool enqueued = DispatcherQueue.TryEnqueue(() =>
         {
             try
             {
+                _isBaseRenderInFlight = false;
                 if (ct.IsCancellationRequested || _isUnloaded || !IsLoaded || PageInfo?.Index != targetPageIndex || EffectiveDocumentId != targetDocId)
                 {
                     lease.Dispose();
@@ -1902,6 +1955,12 @@ public sealed partial class PdfPageCanvas : Grid
                 Debug.WriteLine($"Base bitmap upload failed: {ex.Message}");
             }
         });
+
+        if (!enqueued)
+        {
+            _isBaseRenderInFlight = false;
+            lease.Dispose();
+        }
     }
 
     private async Task RenderDetailPatchAsync(Rect patchDip, double pixelScale, double currentZoom, double rasterScale)
@@ -1975,7 +2034,7 @@ public sealed partial class PdfPageCanvas : Grid
             return;
         }
 
-        DispatcherQueue.TryEnqueue(() =>
+        bool enqueued = DispatcherQueue.TryEnqueue(() =>
         {
             try
             {
@@ -2063,6 +2122,11 @@ public sealed partial class PdfPageCanvas : Grid
                 Debug.WriteLine($"Detail patch upload failed: {ex.Message}");
             }
         });
+
+        if (!enqueued)
+        {
+            lease.Dispose();
+        }
     }
 
     /// <summary>
@@ -2189,6 +2253,7 @@ public sealed partial class PdfPageCanvas : Grid
         _baseCts?.Cancel();
         _baseCts?.Dispose();
         _baseCts = null;
+        _isBaseRenderInFlight = false;
 
         _detailCts?.Cancel();
         _detailCts?.Dispose();
@@ -2213,6 +2278,11 @@ public sealed partial class PdfPageCanvas : Grid
         bool isPresentation = shell?.IsPresentationMode == true;
         bool isSinglePage = !doc.IsContinuous;
         if (!isPresentation && !isSinglePage)
+        {
+            return;
+        }
+
+        if (shell?.IsEnergySaverActive == true || shell?.IsWindowMinimized == true)
         {
             return;
         }
@@ -2321,7 +2391,7 @@ public sealed partial class PdfPageCanvas : Grid
                     break;
                 }
 
-                DispatcherQueue.TryEnqueue(() =>
+                bool enqueued = DispatcherQueue.TryEnqueue(() =>
                 {
                     try
                     {
@@ -2360,6 +2430,11 @@ public sealed partial class PdfPageCanvas : Grid
                         Debug.WriteLine($"Prefetch upload failed for page {pageIndex}: {ex.Message}");
                     }
                 });
+
+                if (!enqueued)
+                {
+                    lease.Dispose();
+                }
             }
         }, ct);
     }
@@ -2373,6 +2448,36 @@ public sealed partial class PdfPageCanvas : Grid
     public static void ReleaseReusableBuffer()
     {
         s_reusableBuffer = null;
+    }
+
+    /// <summary>
+    /// Trims prefetched slide bitmaps from the presentation buffer while preserving the currently displayed page's bitmap.
+    /// </summary>
+    /// <param name="activePageIndex">The active page index to preserve.</param>
+    public static void TrimSlideBuffer(int activePageIndex)
+    {
+        lock (s_slideBufferLock)
+        {
+            List<int>? toRemove = null;
+            foreach (int key in s_slideBuffer.Keys)
+            {
+                if (key != activePageIndex)
+                {
+                    (toRemove ??= new List<int>()).Add(key);
+                }
+            }
+
+            if (toRemove is not null)
+            {
+                foreach (int key in toRemove)
+                {
+                    if (s_slideBuffer.Remove(key, out CanvasBitmap? bmp))
+                    {
+                        try { bmp?.Dispose(); } catch { }
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>

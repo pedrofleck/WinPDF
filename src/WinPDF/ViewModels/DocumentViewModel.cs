@@ -1597,6 +1597,36 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         RequestThumbnail(item, _thumbnailScale);
     }
 
+    /// <summary>
+    /// Releases cached thumbnail bitmaps outside <c>[currentPage - margin, currentPage + margin]</c>
+    /// when the application has been minimized in the background. Realized thumbnails will automatically
+    /// re-render when <see cref="SetThumbnailsActive"/> is re-enabled upon window restoration.
+    /// </summary>
+    /// <param name="currentPage">Zero-based active page index.</param>
+    /// <param name="margin">Adjacent page margin to retain (default 1).</param>
+    public void TrimThumbnailsForBackground(int currentPage, int margin = 1)
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        foreach (ThumbnailItemViewModel item in Thumbnails)
+        {
+            if (Math.Abs(item.PageIndex - currentPage) > margin)
+            {
+                if (item.LoadCancellation is not null)
+                {
+                    item.LoadCancellation.Cancel();
+                    item.LoadCancellation.Dispose();
+                    item.LoadCancellation = null;
+                }
+
+                item.ClearImage();
+            }
+        }
+    }
+
     internal void OnThumbnailRecycled(ThumbnailItemViewModel item)
     {
         item.IsRealized = false;

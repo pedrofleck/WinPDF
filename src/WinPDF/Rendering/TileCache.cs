@@ -298,6 +298,18 @@ public sealed class TileCache : IDisposable
         => RemoveWhere(key => key.DocumentId == documentId && key.PageIndex == pageIndex);
 
     /// <summary>
+    /// Trims entries for pages outside <c>[currentPage - margin, currentPage + margin]</c>.
+    /// Level 0 and tiles outside the immediate viewing window are evicted to reduce RAM.
+    /// </summary>
+    /// <param name="documentId">Engine-assigned document id.</param>
+    /// <param name="currentPage">Zero-based active page index.</param>
+    /// <param name="margin">Number of adjacent pages to retain (default 1).</param>
+    public void TrimPagesOutside(long documentId, int currentPage, int margin = 1)
+    {
+        RemoveWhere(key => (documentId <= 0 || key.DocumentId == documentId) && Math.Abs(key.PageIndex - currentPage) > margin);
+    }
+
+    /// <summary>
     /// Drops all GPU-bound entries after <c>CanvasDevice.DeviceLost</c>; CPU-backed entries survive.
     /// </summary>
     public void HandleDeviceLost() => RemoveWhere(static (_, entry) => entry.IsDeviceBound);
