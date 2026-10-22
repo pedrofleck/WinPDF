@@ -100,9 +100,135 @@ public sealed partial class DocumentView : Page
     private const double SlideSwipeMinFlickVelocityDipPerSec = 480.0;
     private const double SlideSwipeMinFlickDistanceDip = 24.0;
     private const double SlideSwipeRubberBandFactor = 0.26;
-    private const double TouchpadWheelToDipScale = 1.20;
-    private readonly DispatcherTimer _touchpadSwipeEndTimer = new() { Interval = TimeSpan.FromMilliseconds(90) };
+    private const double TouchpadWheelToDipScale = 1.10;
+    private const uint WM_ACTIVATE = 0x0006;
+    private const uint WM_INPUT = 0x00FF;
+    private const uint RID_INPUT = 0x10000003;
+    private const uint RIDI_PREPARSEDDATA = 0x20000005;
+    private const uint RIM_TYPEHID = 2;
+    private const uint RIDEV_INPUTSINK = 0x00000100;
+    private const ushort HID_USAGE_PAGE_DIGITIZER = 0x000D;
+    private const ushort HID_USAGE_DIGITIZER_TOUCH_PAD = 0x0005;
+    private const ushort HID_USAGE_DIGITIZER_TIP_SWITCH = 0x0042;
+    private const ushort HID_USAGE_DIGITIZER_CONTACT_ID = 0x0051;
+    private const ushort HID_USAGE_DIGITIZER_CONTACT_COUNT = 0x0054;
+    private const int HIDP_STATUS_SUCCESS = 0x00110000;
+    private static readonly UIntPtr TouchpadRawInputSubclassId = new(0x57505450);
+
+    private delegate IntPtr TouchpadSubclassProc(IntPtr hWnd, uint uMsg, UIntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, UIntPtr dwRefData);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RAWINPUTDEVICE
+    {
+        public ushort usUsagePage;
+        public ushort usUsage;
+        public uint dwFlags;
+        public IntPtr hwndTarget;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RAWINPUTHEADER
+    {
+        public uint dwType;
+        public uint dwSize;
+        public IntPtr hDevice;
+        public IntPtr wParam;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private unsafe struct HIDP_CAPS
+    {
+        public ushort Usage;
+        public ushort UsagePage;
+        public ushort InputReportByteLength;
+        public ushort OutputReportByteLength;
+        public ushort FeatureReportByteLength;
+        public fixed ushort Reserved[17];
+        public ushort NumberLinkCollectionNodes;
+        public ushort NumberInputButtonCaps;
+        public ushort NumberInputValueCaps;
+        public ushort NumberInputDataIndices;
+        public ushort NumberOutputButtonCaps;
+        public ushort NumberOutputValueCaps;
+        public ushort NumberOutputDataIndices;
+        public ushort NumberFeatureButtonCaps;
+        public ushort NumberFeatureValueCaps;
+        public ushort NumberFeatureDataIndices;
+    }
+
+    private sealed class TouchpadHidDeviceInfo
+    {
+        public required byte[] PreparsedData { get; init; }
+        public required ushort MaxLinkCollection { get; init; }
+    }
+
+    [DllImport("comctl32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetWindowSubclass(IntPtr hWnd, IntPtr pfnSubclass, UIntPtr uIdSubclass, UIntPtr dwRefData);
+
+    [DllImport("comctl32.dll")]
+    private static extern IntPtr DefSubclassProc(IntPtr hWnd, uint uMsg, UIntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsChild(IntPtr hWndParent, IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool RegisterRawInputDevices(in RAWINPUTDEVICE pRawInputDevices, uint uiNumDevices, uint cbSize);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetRawInputData(IntPtr hRawInput, uint uiCommand, IntPtr pData, ref uint pcbSize, uint cbSizeHeader);
+
+    [DllImport("user32.dll", EntryPoint = "GetRawInputDeviceInfoW", SetLastError = true)]
+    private static extern uint GetRawInputDeviceInfo(IntPtr hDevice, uint uiCommand, IntPtr pData, ref uint pcbSize);
+
+    [DllImport("hid.dll")]
+    private static extern int HidP_GetCaps(IntPtr PreparsedData, out HIDP_CAPS Capabilities);
+
+    [DllImport("hid.dll")]
+    private static extern unsafe int HidP_GetUsages(
+        int ReportType,
+        ushort UsagePage,
+        ushort LinkCollection,
+        ushort* UsageList,
+        ref uint UsageLength,
+        IntPtr PreparsedData,
+        IntPtr Report,
+        uint ReportLength);
+
+    [DllImport("hid.dll")]
+    private static extern int HidP_GetUsageValue(
+        int ReportType,
+        ushort UsagePage,
+        ushort LinkCollection,
+        ushort Usage,
+        out uint UsageValue,
+        IntPtr PreparsedData,
+        IntPtr Report,
+        uint ReportLength);
+
+    private readonly DispatcherTimer _touchpadSwipeEndTimer = new() { Interval = TimeSpan.FromMilliseconds(115) };
     private readonly HashSet<uint> _activeTouchPointerIds = new();
+    private readonly Dictionary<IntPtr, TouchpadHidDeviceInfo?> _touchpadHidDevices = new();
+    private readonly Dictionary<uint, long> _activeHybridTouchpadContacts = new();
+    private readonly ushort[] _hidUsageBuffer = new ushort[32];
+    private byte[] _rawInputBuffer = new byte[512];
+    private IntPtr _touchpadRawInputHwnd;
+    private TouchpadSubclassProc? _touchpadSubclassDelegate;
+    private IntPtr _touchpadSubclassPtr;
+    private bool _hasReceivedTouchpadRawInput;
+    private int _activeTouchpadFingerCount;
+    private long _lastTouchpadRawInputTick;
+    private bool _touchpadSwipeCompletedSinceLastTwoFingerDown;
+    private int _tpFrameExpectedContacts;
+    private int _tpFrameSlotsSeen;
+    private int _tpFrameActiveTips;
+    private Point _lastMousePointerPosition;
+    private bool _hasLastMousePointerPosition;
     private PointerRoutedEventArgs? _lastProcessedWheelEventArgs;
     private Pointer? _firstTouchPointer;
     private PointerEventHandler? _slideSwipePointerPressedHandler;
@@ -116,15 +242,22 @@ public sealed partial class DocumentView : Page
     private double _manipCumulativeDy;
     private bool _isSlideSwipeActive;
     private bool _isSlideSwipeAnimating;
+    private bool _isSlideSwipeAnimatingCommit;
     private bool _isCommittingSlideSwipe;
     private bool _isManipulatingSlideSwipe;
     private bool _isTouchSwipeTracking;
     private bool _isTouchSwipeEngaged;
     private bool _isTouchpadWheelSwipeActive;
+    private bool _isTouchpadSmoothingSubscribed;
+    private double _touchpadTargetDeltaX;
+    private long _lastTouchpadSmoothingRenderTicks;
     private bool _isDrainingTouchpadInertia;
     private int _committedTouchpadWheelSign;
     private long _lastTouchpadInertiaDrainTick;
     private long _touchpadInertiaDrainStartTick;
+    private long _lastTouchpadHorizontalPacketTick;
+    private double _touchpadDrainSmoothedAbsDelta;
+    private int _touchpadFreshSurgeCount;
     private bool _isSmoothZoomRenderingSubscribed;
     private double _smoothZoomTargetFactor;
     private Point _smoothZoomPivotPoint;
@@ -284,6 +417,7 @@ public sealed partial class DocumentView : Page
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         EnsureScrollViewerWheelHook();
+        EnsureTouchpadRawInputHook();
         _presentationHideTimer.Tick -= OnPresentationHideTimerTick;
         _presentationHideTimer.Tick += OnPresentationHideTimerTick;
         _topNotificationTimer.Tick -= OnTopNotificationTimerTick;
@@ -380,6 +514,9 @@ public sealed partial class DocumentView : Page
     /// </summary>
     public void OnWindowMinimized()
     {
+        _activeTouchpadFingerCount = 0;
+        _tpFrameExpectedContacts = 0;
+        _activeHybridTouchpadContacts.Clear();
         CancelInteractiveSlideSwipeImmediate();
         StopAutoScroll();
         _viewportDebounceTimer.Stop();
@@ -660,10 +797,29 @@ public sealed partial class DocumentView : Page
                 PdfPageCanvas.ReleaseReusableBuffer();
 
                 RestoreAfterPresentationExit();
+                SyncPagedScrollViewerModes();
                 DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
                 {
-                    RestoreAfterPresentationExit();
                     _isRestoringFromPresentation = false;
+                    RestoreAfterPresentationExit();
+                    SyncPagedScrollViewerModes();
+                });
+                _ = Task.Run(async () =>
+                {
+                    await Task.Delay(85).ConfigureAwait(false);
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        if (!ViewModel.IsPresentationMode && ViewModel.CurrentDocument is { } activeDoc)
+                        {
+                            _isRestoringFromPresentation = false;
+                            if (!activeDoc.IsContinuous && _isFittedVertically)
+                            {
+                                ExecuteFitVertical(force: true);
+                            }
+
+                            SyncPagedScrollViewerModes();
+                        }
+                    });
                 });
             }
         }
@@ -924,6 +1080,13 @@ public sealed partial class DocumentView : Page
             _isApplyingZoom = false;
             _isSwitchingMode = false;
         }
+
+        if (!doc.IsContinuous && _isFittedVertically)
+        {
+            ExecuteFitVertical(force: true);
+        }
+
+        SyncPagedScrollViewerModes();
     }
 
     private void OnDocumentModeChanged(object? sender, EventArgs e)
@@ -1057,7 +1220,7 @@ public sealed partial class DocumentView : Page
                 UpdateZoomSlider(_observedDocument.ZoomFactor);
             }
 
-            if (_isApplyingZoom || _isUpdatingZoomFromScrollViewer || _isApplyingFitZoom)
+            if (_isApplyingZoom || _isUpdatingZoomFromScrollViewer || _isApplyingFitZoom || _isRestoringFromPresentation || (_wasInPresentationMode && !ViewModel.IsPresentationMode))
             {
                 return;
             }
@@ -1171,6 +1334,7 @@ public sealed partial class DocumentView : Page
     private void OnScrollViewerSizeChanged(object sender, SizeChangedEventArgs e)
     {
         EnsureScrollViewerWheelHook();
+        EnsureTouchpadRawInputHook();
         if (e.NewSize.Width <= 0 || e.NewSize.Height <= 0)
         {
             return;
@@ -1186,7 +1350,12 @@ public sealed partial class DocumentView : Page
 
         if (_isRestoringFromPresentation)
         {
-            DispatcherQueue.TryEnqueue(RestoreAfterPresentationExit);
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                _isRestoringFromPresentation = false;
+                RestoreAfterPresentationExit();
+                SyncPagedScrollViewerModes();
+            });
             return;
         }
 
@@ -1783,6 +1952,7 @@ public sealed partial class DocumentView : Page
 
     private void OnScrollViewerPointerWheelChanged(object sender, PointerRoutedEventArgs e)
     {
+        EnsureTouchpadRawInputHook();
         if (_isAutoScrolling)
         {
             StopAutoScroll();
@@ -1911,8 +2081,8 @@ public sealed partial class DocumentView : Page
 
         if (!doc.IsContinuous || ViewModel.IsPresentationMode)
         {
-            // If an interactive horizontal touchpad swipe is currently active, ignore stray vertical wheel jitter
-            if (_isSlideSwipeActive || _isSlideSwipeAnimating)
+            // If an interactive horizontal touchpad swipe or its inertia drain is active, ignore stray vertical wheel jitter
+            if (_isSlideSwipeActive || _isSlideSwipeAnimating || _isDrainingTouchpadInertia)
             {
                 e.Handled = true;
                 return;
@@ -1935,7 +2105,7 @@ public sealed partial class DocumentView : Page
                     if (!isDiscreteMouseWheel)
                     {
                         long nowTick = Environment.TickCount64;
-                        if (nowTick < _ignoreTouchpadVerticalFlipUntilTick)
+                        if (nowTick < _ignoreTouchpadVerticalFlipUntilTick || (nowTick - _lastTouchpadHorizontalPacketTick < 360))
                         {
                             return;
                         }
@@ -4270,7 +4440,8 @@ public sealed partial class DocumentView : Page
             ContinuousScrollViewer.HorizontalScrollBarVisibility = targetHBar;
         }
 
-        bool isPagedOrPres = CanUseInteractiveSlideSwipe();
+        bool isPagedOrPres = ViewModel?.CurrentDocument is { Pages.Count: > 0 } doc &&
+                             (!doc.IsContinuous || ViewModel.IsPresentationMode);
         if (isPagedOrPres && !_isApplyingFitZoom && !_isApplyingZoom &&
             ContinuousScrollViewer.ScrollableWidth <= 4.0 && ContinuousScrollViewer.ScrollableHeight <= 4.0 &&
             isPres)
@@ -4298,6 +4469,30 @@ public sealed partial class DocumentView : Page
         foreach (PdfPageCanvas canvas in _activeCanvases.ToArray())
         {
             canvas.SyncTouchManipulationMode(useCustomSwipeManip);
+        }
+
+        SyncCanvasesManipulationInTree(ContinuousPagesRepeater, useCustomSwipeManip);
+    }
+
+    private static void SyncCanvasesManipulationInTree(DependencyObject? parent, bool useCustomSwipeManip)
+    {
+        if (parent is null)
+        {
+            return;
+        }
+
+        int count = VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            DependencyObject child = VisualTreeHelper.GetChild(parent, i);
+            if (child is PdfPageCanvas canvas)
+            {
+                canvas.SyncTouchManipulationMode(useCustomSwipeManip);
+            }
+            else
+            {
+                SyncCanvasesManipulationInTree(child, useCustomSwipeManip);
+            }
         }
     }
 
@@ -4495,6 +4690,14 @@ public sealed partial class DocumentView : Page
         if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse)
         {
             _isMouseButtonDown = pt.Properties.IsLeftButtonPressed || pt.Properties.IsRightButtonPressed || pt.Properties.IsMiddleButtonPressed;
+            _lastMousePointerPosition = pt.Position;
+            _hasLastMousePointerPosition = true;
+            if (_isTouchpadWheelSwipeActive && _isSlideSwipeActive && !_isSlideSwipeAnimating)
+            {
+                _activeTouchpadFingerCount = 0;
+                CompleteInteractiveSlideSwipe(fromTouchpad: true);
+            }
+
             return;
         }
 
@@ -4503,6 +4706,7 @@ public sealed partial class DocumentView : Page
             return;
         }
 
+        _activeTouchpadFingerCount = 0;
         _isMouseButtonDown = false;
         _activeTouchPointerIds.Add(e.Pointer.PointerId);
 
@@ -4565,6 +4769,31 @@ public sealed partial class DocumentView : Page
         {
             var mousePt = e.GetCurrentPoint(ScrollViewerContentRoot);
             _isMouseButtonDown = mousePt.Properties.IsLeftButtonPressed || mousePt.Properties.IsRightButtonPressed || mousePt.Properties.IsMiddleButtonPressed;
+            Point curMousePos = mousePt.Position;
+            if (_hasLastMousePointerPosition)
+            {
+                double mdx = curMousePos.X - _lastMousePointerPosition.X;
+                double mdy = curMousePos.Y - _lastMousePointerPosition.Y;
+                if (((mdx * mdx) + (mdy * mdy)) > 3.0 &&
+                    _isTouchpadWheelSwipeActive &&
+                    _isSlideSwipeActive &&
+                    !_isSlideSwipeAnimating &&
+                    (Environment.TickCount64 - _lastTouchpadHorizontalPacketTick > 45))
+                {
+                    _lastMousePointerPosition = curMousePos;
+                    _activeTouchpadFingerCount = 0;
+                    if (Math.Abs(_touchpadTargetDeltaX) > Math.Abs(_swipeRawDeltaX))
+                    {
+                        UpdateInteractiveSlideSwipeDelta(_touchpadTargetDeltaX);
+                    }
+
+                    CompleteInteractiveSlideSwipe(fromTouchpad: true);
+                    return;
+                }
+            }
+
+            _lastMousePointerPosition = curMousePos;
+            _hasLastMousePointerPosition = true;
             return;
         }
 
@@ -4888,9 +5117,374 @@ public sealed partial class DocumentView : Page
         _touchGestureAxis = PagedTouchGestureAxis.Undecided;
     }
 
+    private void EnsureTouchpadRawInputHook()
+    {
+        if (_touchpadRawInputHwnd != IntPtr.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            IntPtr hwnd = _windowContext.WindowHandle;
+            if (hwnd == IntPtr.Zero)
+            {
+                return;
+            }
+
+            _touchpadRawInputHwnd = hwnd;
+            _touchpadSubclassDelegate = TouchpadRawInputSubclassProc;
+            _touchpadSubclassPtr = Marshal.GetFunctionPointerForDelegate(_touchpadSubclassDelegate);
+            _ = SetWindowSubclass(hwnd, _touchpadSubclassPtr, TouchpadRawInputSubclassId, UIntPtr.Zero);
+
+            RAWINPUTDEVICE rid = new()
+            {
+                usUsagePage = HID_USAGE_PAGE_DIGITIZER,
+                usUsage = HID_USAGE_DIGITIZER_TOUCH_PAD,
+                dwFlags = RIDEV_INPUTSINK,
+                hwndTarget = hwnd,
+            };
+            _ = RegisterRawInputDevices(in rid, 1, (uint)Marshal.SizeOf<RAWINPUTDEVICE>());
+        }
+        catch
+        {
+        }
+    }
+
+    private IntPtr TouchpadRawInputSubclassProc(IntPtr hWnd, uint uMsg, UIntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, UIntPtr dwRefData)
+    {
+        if (uMsg == WM_INPUT && lParam != IntPtr.Zero && IsLoaded)
+        {
+            IntPtr fg = GetForegroundWindow();
+            if (fg == hWnd || (fg != IntPtr.Zero && IsChild(hWnd, fg)))
+            {
+                try
+                {
+                    ProcessTouchpadRawInput(lParam);
+                }
+                catch
+                {
+                }
+            }
+        }
+        else if (uMsg == WM_ACTIVATE)
+        {
+            uint activateState = (uint)(wParam.ToUInt64() & 0xFFFF);
+            if (activateState == 0)
+            {
+                _activeTouchpadFingerCount = 0;
+                _tpFrameExpectedContacts = 0;
+                _activeHybridTouchpadContacts.Clear();
+                if (_isTouchpadWheelSwipeActive && _isSlideSwipeActive && !_isSlideSwipeAnimating)
+                {
+                    CompleteInteractiveSlideSwipe(fromTouchpad: true);
+                }
+            }
+        }
+
+        return DefSubclassProc(hWnd, uMsg, wParam, lParam);
+    }
+
+    private bool TryGetTouchpadPreparsedInfo(IntPtr hDevice, out TouchpadHidDeviceInfo? info)
+    {
+        if (_touchpadHidDevices.TryGetValue(hDevice, out info))
+        {
+            return info is not null;
+        }
+
+        info = null;
+        uint preparsedSize = 0;
+        if (GetRawInputDeviceInfo(hDevice, RIDI_PREPARSEDDATA, IntPtr.Zero, ref preparsedSize) != 0 ||
+            preparsedSize == 0 ||
+            preparsedSize > 65536)
+        {
+            _touchpadHidDevices[hDevice] = null;
+            return false;
+        }
+
+        byte[] preparsedBytes = new byte[preparsedSize];
+        unsafe
+        {
+            fixed (byte* pBytes = preparsedBytes)
+            {
+                uint copied = GetRawInputDeviceInfo(hDevice, RIDI_PREPARSEDDATA, (IntPtr)pBytes, ref preparsedSize);
+                if (copied == unchecked((uint)-1) || copied == 0)
+                {
+                    _touchpadHidDevices[hDevice] = null;
+                    return false;
+                }
+
+                if (HidP_GetCaps((IntPtr)pBytes, out HIDP_CAPS caps) != HIDP_STATUS_SUCCESS)
+                {
+                    _touchpadHidDevices[hDevice] = null;
+                    return false;
+                }
+
+                ushort maxLc = (ushort)Math.Clamp((int)caps.NumberLinkCollectionNodes, 1, 16);
+                info = new TouchpadHidDeviceInfo
+                {
+                    PreparsedData = preparsedBytes,
+                    MaxLinkCollection = maxLc,
+                };
+                _touchpadHidDevices[hDevice] = info;
+                return true;
+            }
+        }
+    }
+
+    private void ProcessTouchpadRawInput(IntPtr hRawInput)
+    {
+        uint headerSize = (uint)Marshal.SizeOf<RAWINPUTHEADER>();
+        uint dataSize = 0;
+        if (GetRawInputData(hRawInput, RID_INPUT, IntPtr.Zero, ref dataSize, headerSize) != 0 ||
+            dataSize <= headerSize + 8 ||
+            dataSize > 65536)
+        {
+            return;
+        }
+
+        if (_rawInputBuffer.Length < dataSize)
+        {
+            _rawInputBuffer = new byte[Math.Max((int)dataSize, 512)];
+        }
+
+        long nowTick = Environment.TickCount64;
+
+        unsafe
+        {
+            fixed (byte* bufPtr = _rawInputBuffer)
+            {
+                uint copied = GetRawInputData(hRawInput, RID_INPUT, (IntPtr)bufPtr, ref dataSize, headerSize);
+                if (copied == unchecked((uint)-1) || copied <= headerSize + 8)
+                {
+                    return;
+                }
+
+                RAWINPUTHEADER* hdr = (RAWINPUTHEADER*)bufPtr;
+                if (hdr->dwType != RIM_TYPEHID || hdr->hDevice == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                uint dwSizeHid = *(uint*)(bufPtr + headerSize);
+                uint dwCount = *(uint*)(bufPtr + headerSize + 4);
+                if (dwSizeHid == 0 || dwCount == 0 || headerSize + 8 + (dwSizeHid * dwCount) > copied)
+                {
+                    return;
+                }
+
+                if (!TryGetTouchpadPreparsedInfo(hdr->hDevice, out TouchpadHidDeviceInfo? devInfo) || devInfo is null)
+                {
+                    return;
+                }
+
+                fixed (byte* preparsedPtr = devInfo.PreparsedData)
+                fixed (ushort* usageBufPtr = _hidUsageBuffer)
+                {
+                    IntPtr preparsedIntPtr = (IntPtr)preparsedPtr;
+                    byte* reportsBase = bufPtr + headerSize + 8;
+                    ushort maxLc = devInfo.MaxLinkCollection;
+
+                    for (uint r = 0; r < dwCount; r++)
+                    {
+                        IntPtr reportPtr = (IntPtr)(reportsBase + (r * dwSizeHid));
+                        int validContactCollections = 0;
+                        int activeTipsInReport = 0;
+                        uint lastContactId = 0;
+                        bool hasContactId = false;
+
+                        for (ushort lc = 1; lc <= maxLc; lc++)
+                        {
+                            uint usageLen = (uint)_hidUsageBuffer.Length;
+                            int status = HidP_GetUsages(
+                                0,
+                                HID_USAGE_PAGE_DIGITIZER,
+                                lc,
+                                usageBufPtr,
+                                ref usageLen,
+                                preparsedIntPtr,
+                                reportPtr,
+                                dwSizeHid);
+
+                            if (status == HIDP_STATUS_SUCCESS)
+                            {
+                                validContactCollections++;
+                                bool tipSwitch = false;
+                                for (uint u = 0; u < usageLen; u++)
+                                {
+                                    if (usageBufPtr[u] == HID_USAGE_DIGITIZER_TIP_SWITCH)
+                                    {
+                                        tipSwitch = true;
+                                        break;
+                                    }
+                                }
+
+                                if (tipSwitch)
+                                {
+                                    activeTipsInReport++;
+                                }
+
+                                if (HidP_GetUsageValue(
+                                        0,
+                                        HID_USAGE_PAGE_DIGITIZER,
+                                        lc,
+                                        HID_USAGE_DIGITIZER_CONTACT_ID,
+                                        out uint contactId,
+                                        preparsedIntPtr,
+                                        reportPtr,
+                                        dwSizeHid) == HIDP_STATUS_SUCCESS)
+                                {
+                                    lastContactId = contactId;
+                                    hasContactId = true;
+                                }
+                            }
+                        }
+
+                        if (validContactCollections == 0)
+                        {
+                            continue;
+                        }
+
+                        int ccStatus = HidP_GetUsageValue(
+                            0,
+                            HID_USAGE_PAGE_DIGITIZER,
+                            0,
+                            HID_USAGE_DIGITIZER_CONTACT_COUNT,
+                            out uint reportedContactCount,
+                            preparsedIntPtr,
+                            reportPtr,
+                            dwSizeHid);
+
+                        if (validContactCollections >= 2)
+                        {
+                            // Parallel report mode: all contact slots are present in this single report
+                            _activeHybridTouchpadContacts.Clear();
+                            if (ccStatus == HIDP_STATUS_SUCCESS && reportedContactCount > (uint)validContactCollections)
+                            {
+                                _tpFrameExpectedContacts = (int)reportedContactCount;
+                                _tpFrameSlotsSeen = validContactCollections;
+                                _tpFrameActiveTips = activeTipsInReport;
+                            }
+                            else if (ccStatus == HIDP_STATUS_SUCCESS && reportedContactCount == 0 &&
+                                     _tpFrameExpectedContacts > 0 && _tpFrameSlotsSeen < _tpFrameExpectedContacts)
+                            {
+                                _tpFrameSlotsSeen += validContactCollections;
+                                _tpFrameActiveTips += activeTipsInReport;
+                                if (_tpFrameSlotsSeen >= _tpFrameExpectedContacts)
+                                {
+                                    int totalActive = _tpFrameActiveTips;
+                                    _tpFrameExpectedContacts = 0;
+                                    UpdateTouchpadActiveFingerCount(totalActive, nowTick);
+                                }
+                            }
+                            else
+                            {
+                                _tpFrameExpectedContacts = 0;
+                                UpdateTouchpadActiveFingerCount(activeTipsInReport, nowTick);
+                            }
+                        }
+                        else
+                        {
+                            // Single-slot / Hybrid report mode: track per-contactId tip state across packets in the frame
+                            if (hasContactId)
+                            {
+                                if (activeTipsInReport > 0)
+                                {
+                                    _activeHybridTouchpadContacts[lastContactId] = nowTick;
+                                }
+                                else
+                                {
+                                    _activeHybridTouchpadContacts.Remove(lastContactId);
+                                }
+                            }
+
+                            if (ccStatus == HIDP_STATUS_SUCCESS && reportedContactCount > 1)
+                            {
+                                _tpFrameExpectedContacts = (int)reportedContactCount;
+                                _tpFrameSlotsSeen = 1;
+                                _tpFrameActiveTips = activeTipsInReport;
+                            }
+                            else if (_tpFrameExpectedContacts > 0 && _tpFrameSlotsSeen < _tpFrameExpectedContacts)
+                            {
+                                _tpFrameSlotsSeen++;
+                                _tpFrameActiveTips += activeTipsInReport;
+                                if (_tpFrameSlotsSeen >= _tpFrameExpectedContacts)
+                                {
+                                    int totalActive = hasContactId ? _activeHybridTouchpadContacts.Count : _tpFrameActiveTips;
+                                    _tpFrameExpectedContacts = 0;
+                                    UpdateTouchpadActiveFingerCount(totalActive, nowTick);
+                                }
+                            }
+                            else
+                            {
+                                _tpFrameExpectedContacts = 0;
+                                int totalActive = hasContactId ? _activeHybridTouchpadContacts.Count : activeTipsInReport;
+                                UpdateTouchpadActiveFingerCount(totalActive, nowTick);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void UpdateTouchpadActiveFingerCount(int fingerCount, long nowTick)
+    {
+        _hasReceivedTouchpadRawInput = true;
+        _lastTouchpadRawInputTick = nowTick;
+
+        bool wasTwoOrMore = _activeTouchpadFingerCount >= 2;
+        bool isTwoOrMore = fingerCount >= 2;
+        _activeTouchpadFingerCount = fingerCount;
+
+        if (isTwoOrMore)
+        {
+            if (!wasTwoOrMore)
+            {
+                // User just placed 2+ fingers on the touchpad: unlock for a fresh gesture
+                _touchpadSwipeCompletedSinceLastTwoFingerDown = false;
+                _isDrainingTouchpadInertia = false;
+                _touchpadFreshSurgeCount = 0;
+            }
+
+            // While 2+ fingers are physically touching the touchpad, keep the slide held and never let the release timer fire
+            if (_isTouchpadWheelSwipeActive && _isSlideSwipeActive && !_isSlideSwipeAnimating)
+            {
+                _touchpadSwipeEndTimer.Stop();
+            }
+        }
+        else if (wasTwoOrMore)
+        {
+            // User just lifted their fingers off the touchpad (< 2 fingers remaining)!
+            if (_isTouchpadWheelSwipeActive && _isSlideSwipeActive && !_isSlideSwipeAnimating)
+            {
+                if (Math.Abs(_touchpadTargetDeltaX) >= 24.0 || (nowTick - _lastTouchpadHorizontalPacketTick) > 65)
+                {
+                    // Finger drag distance is already established (or user held the slide still and then lifted):
+                    // release and animate immediately on the exact frame the fingers leave the touchpad!
+                    _touchpadSwipeEndTimer.Stop();
+                    StopTouchpadSwipeSmoothingLoop();
+                    if (Math.Abs(_touchpadTargetDeltaX) > Math.Abs(_swipeRawDeltaX))
+                    {
+                        UpdateInteractiveSlideSwipeDelta(_touchpadTargetDeltaX);
+                    }
+
+                    CompleteInteractiveSlideSwipe(fromTouchpad: true);
+                }
+                else
+                {
+                    // Ultra-fast micro-flick where < 24 DIPs arrived before finger lift: wait 28ms once for in-flight flick packets
+                    _touchpadSwipeEndTimer.Stop();
+                    _touchpadSwipeEndTimer.Interval = TimeSpan.FromMilliseconds(28);
+                    _touchpadSwipeEndTimer.Start();
+                }
+            }
+        }
+    }
+
     private void HandleTouchpadHorizontalSlideSwipe(int wheelDelta)
     {
-        if (_isManipulatingSlideSwipe || !CanUseInteractiveSlideSwipe())
+        if (_isManipulatingSlideSwipe || !CanUseInteractiveSlideSwipe() || ViewModel?.CurrentDocument is not { Pages.Count: > 0 } doc)
         {
             return;
         }
@@ -4908,42 +5502,106 @@ public sealed partial class DocumentView : Page
         _lastTouchpadVerticalPacketTick = nowTick;
         _touchpadHorizontalWheelAccum += wheelDelta;
 
-        // 1. If a slide transition animation is currently playing, NEVER abort it on incoming touchpad inertia packets;
-        // let the animation play smoothly to completion while absorbing same-direction inertia.
-        if (_isSlideSwipeAnimating)
+        bool isPrecisionTouchpadSession = _hasReceivedTouchpadRawInput &&
+            (_activeTouchpadFingerCount >= 2 || (nowTick - _lastTouchpadRawInputTick < 600));
+
+        // If the Precision Touchpad reports that < 2 fingers are on the pad and we already completed the swipe
+        // for the previous 2-finger touch, any incoming WM_MOUSEHWHEEL packet is 100% OS inertia and must be ignored.
+        if (isPrecisionTouchpadSession && _activeTouchpadFingerCount < 2 && _touchpadSwipeCompletedSinceLastTwoFingerDown)
         {
             _lastTouchpadInertiaDrainTick = nowTick;
             return;
         }
 
-        // 2. Drain OS touchpad inertia tail after a swipe has already committed or bounced so a single fast flick
-        // flips at most ONE slide with full animation instead of skipping multiple pages.
-        if (_isDrainingTouchpadInertia)
+        // 1. If a slide transition animation is currently playing:
+        if (_isSlideSwipeAnimating)
         {
-            bool sameDirection = wheelSign == _committedTouchpadWheelSign;
-            long gapSinceLastPacket = nowTick - _lastTouchpadInertiaDrainTick;
-            long elapsedSinceDrainStart = nowTick - _touchpadInertiaDrainStartTick;
-
-            if (sameDirection && gapSinceLastPacket < 135 && elapsedSinceDrainStart < 620)
+            if (_isSlideSwipeAnimatingCommit)
             {
-                // Allow breaking out early ONLY if enough time passed, inertia had already decayed to near-zero,
-                // and the user clearly started a fresh deliberate push (surge >= 3x from <= 5).
-                if (elapsedSinceDrainStart > 240 && _lastTouchpadWheelAbsDelta <= 5 && absDelta >= 18)
+                // If user physically put 2 fingers back down on the touchpad for a brand-new swipe, finish current commit immediately
+                if (isPrecisionTouchpadSession && _activeTouchpadFingerCount >= 2 && !_touchpadSwipeCompletedSinceLastTwoFingerDown)
                 {
-                    _isDrainingTouchpadInertia = false;
+                    CompleteSlideSwipeAnimationImmediate();
                 }
                 else
                 {
-                    _lastTouchpadWheelAbsDelta = Math.Min(_lastTouchpadWheelAbsDelta, absDelta);
                     _lastTouchpadInertiaDrainTick = nowTick;
+                    _touchpadDrainSmoothedAbsDelta = (0.75 * _touchpadDrainSmoothedAbsDelta) + (0.25 * absDelta);
                     return;
                 }
             }
             else
             {
-                _isDrainingTouchpadInertia = false;
+                // A bounce-back animation is playing: only catch it in-flight if 2 fingers are actually on the touchpad!
+                if (isPrecisionTouchpadSession && _activeTouchpadFingerCount < 2)
+                {
+                    return;
+                }
+
+                double catchZoom = Math.Max(0.05, ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor);
+                double catchBaseOffsetDip = GetTargetDocumentOffsetDip(catchZoom);
+                double inFlightScreenDeltaX = PagesRepeaterPushTransform is not null
+                    ? ((PagesRepeaterPushTransform.TranslateX * catchZoom) - catchBaseOffsetDip)
+                    : _swipeVisualDeltaX;
+
+                _slideSwipeStoryboard?.Stop();
+                _slideSwipeStoryboard = null;
+                _isSlideSwipeAnimating = false;
+                _isSlideSwipeActive = true;
+                _isTouchpadWheelSwipeActive = true;
+                _swipeRawDeltaX = inFlightScreenDeltaX;
+                _swipeVisualDeltaX = inFlightScreenDeltaX;
+                _touchpadTargetDeltaX = inFlightScreenDeltaX;
             }
         }
+
+        // 2. Drain OS touchpad inertia tail after a completed swipe when fingers are not on the pad
+        if (_isDrainingTouchpadInertia)
+        {
+            if (isPrecisionTouchpadSession && _activeTouchpadFingerCount >= 2)
+            {
+                _isDrainingTouchpadInertia = false;
+                _touchpadFreshSurgeCount = 0;
+            }
+            else
+            {
+                bool sameDirection = wheelSign == _committedTouchpadWheelSign;
+                long gapSinceLastPacket = nowTick - _lastTouchpadInertiaDrainTick;
+                long elapsedSinceDrainStart = nowTick - _touchpadInertiaDrainStartTick;
+
+                if (sameDirection && gapSinceLastPacket < 155)
+                {
+                    if (!isPrecisionTouchpadSession && elapsedSinceDrainStart > 360 && _touchpadDrainSmoothedAbsDelta <= 4.5 && absDelta >= 18)
+                    {
+                        _touchpadFreshSurgeCount++;
+                        if (_touchpadFreshSurgeCount >= 2)
+                        {
+                            _isDrainingTouchpadInertia = false;
+                            _touchpadFreshSurgeCount = 0;
+                        }
+                        else
+                        {
+                            _lastTouchpadInertiaDrainTick = nowTick;
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        _touchpadFreshSurgeCount = 0;
+                        _touchpadDrainSmoothedAbsDelta = (0.75 * _touchpadDrainSmoothedAbsDelta) + (0.25 * absDelta);
+                        _lastTouchpadInertiaDrainTick = nowTick;
+                        return;
+                    }
+                }
+                else
+                {
+                    _isDrainingTouchpadInertia = false;
+                    _touchpadFreshSurgeCount = 0;
+                }
+            }
+        }
+
+        _lastTouchpadHorizontalPacketTick = nowTick;
 
         long nowPerf = System.Diagnostics.Stopwatch.GetTimestamp();
         double dt = _touchpadLastWheelTimestamp > 0
@@ -4963,7 +5621,10 @@ public sealed partial class DocumentView : Page
             _isTouchpadWheelSwipeActive = true;
             _touchpadDecayingFrameCount = 0;
             _lastTouchpadWheelAbsDelta = absDelta;
+            _touchpadDrainSmoothedAbsDelta = absDelta;
+            _touchpadFreshSurgeCount = 0;
             BeginInteractiveSlideSwipe();
+            _touchpadTargetDeltaX = 0.0;
         }
         else
         {
@@ -4971,12 +5632,13 @@ public sealed partial class DocumentView : Page
             {
                 _touchpadDecayingFrameCount++;
             }
-            else if (absDelta > _lastTouchpadWheelAbsDelta)
+            else if (absDelta > _lastTouchpadWheelAbsDelta + 2)
             {
                 _touchpadDecayingFrameCount = 0;
             }
 
             _lastTouchpadWheelAbsDelta = absDelta;
+            _touchpadDrainSmoothedAbsDelta = (0.70 * _touchpadDrainSmoothedAbsDelta) + (0.30 * absDelta);
         }
 
         // In Windows WM_MOUSEHWHEEL (IsHorizontalMouseWheel == true), positive wheelDelta (> 0) means scroll right
@@ -4986,38 +5648,120 @@ public sealed partial class DocumentView : Page
         double instantVx = stepDip / dt;
         _swipeVelocityX = Math.Abs(_swipeVelocityX) < 1.0
             ? instantVx
-            : (0.60 * instantVx) + (0.40 * _swipeVelocityX);
+            : (0.55 * instantVx) + (0.45 * _swipeVelocityX);
 
-        UpdateInteractiveSlideSwipeDelta(_swipeRawDeltaX + stepDip);
-
-        // If the user executed a fast two-finger flick on the touchpad (crossing commit distance at high velocity
-        // followed by decaying inertia frames), commit once to the smooth slide animation and latch inertia drain.
         double rawW = ContinuousScrollViewer.ActualWidth > 0 ? ContinuousScrollViewer.ActualWidth : ContinuousScrollViewer.ViewportWidth;
-        double availW = GetAvailableDocumentWidthDip(rawW);
-        if (_swipeTargetPageIndex >= 0 &&
-            _touchpadDecayingFrameCount >= 2 &&
-            Math.Abs(_swipeRawDeltaX) >= Math.Max(72.0, availW * 0.25) &&
-            Math.Abs(_swipeVelocityX) >= 540.0 &&
-            Math.Sign(_swipeVelocityX) == Math.Sign(_swipeRawDeltaX))
+        double availW = Math.Max(200.0, GetAvailableDocumentWidthDip(rawW));
+        double curZoom = Math.Max(0.05, ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor);
+        double maxStrideDip = ComputeSlideSwipeStrideScreenDip(doc, curZoom, availW);
+
+        _touchpadTargetDeltaX = Math.Clamp(_touchpadTargetDeltaX + stepDip, -maxStrideDip, maxStrideDip);
+        StartTouchpadSwipeSmoothingLoop();
+
+        if (isPrecisionTouchpadSession)
         {
+            if (_activeTouchpadFingerCount >= 2)
+            {
+                // 2+ fingers are physically touching the touchpad: hold the page under the fingers and DO NOT start a release timer!
+                _touchpadSwipeEndTimer.Stop();
+            }
+            else if (!_touchpadSwipeEndTimer.IsEnabled)
+            {
+                // Fingers already lifted during an ultra-fast flick: start a single 32ms completion timer without resetting it on inertia
+                _touchpadSwipeEndTimer.Interval = TimeSpan.FromMilliseconds(32);
+                _touchpadSwipeEndTimer.Start();
+            }
+        }
+        else
+        {
+            // Fallback when raw input is unavailable: use 115ms only when OS inertia decay is detected, and 600ms when holding fingers still
+            int fallbackMs = _touchpadDecayingFrameCount >= 3 ? 115 : 600;
             _touchpadSwipeEndTimer.Stop();
-            _isDrainingTouchpadInertia = true;
-            _committedTouchpadWheelSign = wheelSign;
-            _lastTouchpadInertiaDrainTick = nowTick;
-            _touchpadInertiaDrainStartTick = nowTick;
-            CompleteInteractiveSlideSwipe(fromTouchpad: true);
+            _touchpadSwipeEndTimer.Interval = TimeSpan.FromMilliseconds(fallbackMs);
+            _touchpadSwipeEndTimer.Start();
+        }
+    }
+
+    private void StartTouchpadSwipeSmoothingLoop()
+    {
+        _lastTouchpadSmoothingRenderTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (!_isTouchpadSmoothingSubscribed)
+        {
+            CompositionTarget.Rendering += OnTouchpadSwipeSmoothingRendering;
+            _isTouchpadSmoothingSubscribed = true;
+        }
+    }
+
+    private void StopTouchpadSwipeSmoothingLoop()
+    {
+        if (_isTouchpadSmoothingSubscribed)
+        {
+            CompositionTarget.Rendering -= OnTouchpadSwipeSmoothingRendering;
+            _isTouchpadSmoothingSubscribed = false;
+        }
+    }
+
+    private void OnTouchpadSwipeSmoothingRendering(object? sender, object e)
+    {
+        if (!_isTouchpadWheelSwipeActive || !_isSlideSwipeActive || _isSlideSwipeAnimating)
+        {
+            StopTouchpadSwipeSmoothingLoop();
             return;
         }
 
-        _touchpadSwipeEndTimer.Stop();
-        _touchpadSwipeEndTimer.Start();
+        long nowTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        double dt = (double)(nowTicks - _lastTouchpadSmoothingRenderTicks) / System.Diagnostics.Stopwatch.Frequency;
+        _lastTouchpadSmoothingRenderTicks = nowTicks;
+        dt = Math.Clamp(dt, 0.002, 0.050);
+
+        // If the user is holding their 2 fingers still on the touchpad (> 90ms without wheel packets), decay velocity to 0
+        if (Environment.TickCount64 - _lastTouchpadHorizontalPacketTick > 90)
+        {
+            _swipeVelocityX *= Math.Exp(-25.0 * dt);
+            if (Math.Abs(_swipeVelocityX) < 5.0)
+            {
+                _swipeVelocityX = 0.0;
+            }
+        }
+
+        double diff = _touchpadTargetDeltaX - _swipeRawDeltaX;
+        if (Math.Abs(diff) <= 0.25)
+        {
+            UpdateInteractiveSlideSwipeDelta(_touchpadTargetDeltaX);
+            if (Math.Abs(_swipeVelocityX) < 5.0)
+            {
+                // Unsubscribe while fingers are held completely motionless so idle CPU is 0.0%
+                StopTouchpadSwipeSmoothingLoop();
+            }
+
+            return;
+        }
+
+        // High-response VSync exponential smoothing (eliminates quantized WM_MOUSEHWHEEL stepping while tracking fingers tightly)
+        double alpha = 1.0 - Math.Exp(-42.0 * dt);
+        double nextRawX = _swipeRawDeltaX + (diff * alpha);
+        UpdateInteractiveSlideSwipeDelta(nextRawX);
     }
 
     private void OnTouchpadSwipeEndTimerTick(object? sender, object e)
     {
+        if (_hasReceivedTouchpadRawInput && _activeTouchpadFingerCount >= 2)
+        {
+            // Never release while 2+ fingers are still physically touching the touchpad
+            _touchpadSwipeEndTimer.Stop();
+            return;
+        }
+
         _touchpadSwipeEndTimer.Stop();
+        StopTouchpadSwipeSmoothingLoop();
         if (_isTouchpadWheelSwipeActive && _isSlideSwipeActive && !_isSlideSwipeAnimating)
         {
+            // Ensure final target delta is reflected before evaluating commit vs bounce
+            if (Math.Abs(_touchpadTargetDeltaX) > Math.Abs(_swipeRawDeltaX))
+            {
+                UpdateInteractiveSlideSwipeDelta(_touchpadTargetDeltaX);
+            }
+
             CompleteInteractiveSlideSwipe(fromTouchpad: true);
         }
     }
@@ -5236,6 +5980,13 @@ public sealed partial class DocumentView : Page
             return;
         }
 
+        long nowTick = Environment.TickCount64;
+        if (fromTouchpad && (nowTick - _lastTouchpadHorizontalPacketTick > 95))
+        {
+            // User held their fingers still on the touchpad before lifting: release velocity is zero
+            _swipeVelocityX = 0.0;
+        }
+
         double rawViewerW = ContinuousScrollViewer.ActualWidth > 0 ? ContinuousScrollViewer.ActualWidth : ContinuousScrollViewer.ViewportWidth;
         double availW = Math.Max(200.0, GetAvailableDocumentWidthDip(rawViewerW));
 
@@ -5256,13 +6007,16 @@ public sealed partial class DocumentView : Page
                             !reversedAtEnd &&
                             (distanceCommitted || flickCommitted);
 
+        StopTouchpadSwipeSmoothingLoop();
+
         if (fromTouchpad)
         {
-            long nowTick = Environment.TickCount64;
+            _touchpadSwipeCompletedSinceLastTwoFingerDown = true;
             _isDrainingTouchpadInertia = true;
             _committedTouchpadWheelSign = _swipeRawDeltaX < 0 ? 1 : -1;
             _lastTouchpadInertiaDrainTick = nowTick;
             _touchpadInertiaDrainStartTick = nowTick;
+            _touchpadFreshSurgeCount = 0;
         }
 
         AnimateSlideSwipeToCompletion(shouldCommit, _swipeTargetPageIndex);
@@ -5309,6 +6063,7 @@ public sealed partial class DocumentView : Page
 
         _slideSwipeStoryboard?.Stop();
         _isSlideSwipeAnimating = true;
+        _isSlideSwipeAnimatingCommit = commit;
 
         var sb = new Storyboard();
         var duration = new Duration(TimeSpan.FromMilliseconds(durationMs));
@@ -5377,7 +6132,9 @@ public sealed partial class DocumentView : Page
     {
         _slideSwipeStoryboard = null;
         _isSlideSwipeAnimating = false;
+        _isSlideSwipeAnimatingCommit = false;
         _isSlideSwipeActive = false;
+        _touchpadTargetDeltaX = 0.0;
         _swipeRawDeltaX = 0.0;
         _swipeVisualDeltaX = 0.0;
         _swipeVelocityX = 0.0;
@@ -5458,11 +6215,14 @@ public sealed partial class DocumentView : Page
     private void CancelInteractiveSlideSwipeImmediate()
     {
         StopSmoothWheelZoom();
+        StopTouchpadSwipeSmoothingLoop();
         _touchpadSwipeEndTimer.Stop();
         _slideSwipeStoryboard?.Stop();
         _slideSwipeStoryboard = null;
         _isSlideSwipeAnimating = false;
+        _isSlideSwipeAnimatingCommit = false;
         _isSlideSwipeActive = false;
+        _touchpadTargetDeltaX = 0.0;
         _isManipulatingSlideSwipe = false;
         _isTouchSwipeTracking = false;
         _isTouchSwipeEngaged = false;
