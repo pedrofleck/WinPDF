@@ -295,6 +295,13 @@ public sealed partial class ShellViewModel : ObservableObject
     public partial string FormattedZoomPercent { get; set; } = "100%";
 
     /// <summary>
+    /// Gets or sets an optional transition coordinator registered by the host window so that
+    /// full-screen and presentation state mutations execute only after the fade-out curtain is 100% opaque.
+    /// Parameters: (targetFullScreen, isPresentationTransition, applyStateAction).
+    /// </summary>
+    public Action<bool, bool, Action>? FullScreenTransitionRunner { get; set; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether the window is in full screen mode (F11).
     /// </summary>
     [ObservableProperty]
@@ -302,7 +309,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
     partial void OnIsFullScreenChanged(bool value)
     {
-        if (!value)
+        if (!value && IsPresentationMode)
         {
             IsPresentationMode = false;
         }
@@ -353,9 +360,17 @@ public sealed partial class ShellViewModel : ObservableObject
 
             if (_sidebarOpenBeforePresentation)
             {
-                if (IsSidebarAllowed)
+                SuppressSidebarSettingsPersistence = true;
+                try
                 {
-                    IsSidebarOpen = true;
+                    if (IsSidebarAllowed)
+                    {
+                        IsSidebarOpen = true;
+                    }
+                }
+                finally
+                {
+                    SuppressSidebarSettingsPersistence = false;
                 }
                 _sidebarOpenBeforePresentation = false;
             }
@@ -1040,32 +1055,57 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     public void StartPresentation()
     {
-        if (CurrentDocument is null)
+        if (CurrentDocument is null || IsPresentationMode)
         {
             return;
         }
 
-        if (!IsPresentationMode)
+        void ApplyStartPresentationState()
         {
-            _hasSavedPresentationState = true;
-            _sidebarOpenBeforePresentation = IsSidebarOpen;
-            _viewModeBeforePresentation = ViewMode;
-            _dualPageBeforePresentation = IsDualPage;
-            _zoomBeforePresentation = CurrentDocument.ZoomFactor > 0.05 ? CurrentDocument.ZoomFactor : 1.0;
+            if (CurrentDocument is null)
+            {
+                return;
+            }
+
+            if (!IsPresentationMode)
+            {
+                _hasSavedPresentationState = true;
+                _sidebarOpenBeforePresentation = IsSidebarOpen;
+                _viewModeBeforePresentation = ViewMode;
+                _dualPageBeforePresentation = IsDualPage;
+                _zoomBeforePresentation = CurrentDocument.ZoomFactor > 0.05 ? CurrentDocument.ZoomFactor : 1.0;
+            }
+
+            int preservedPage = CurrentDocument.CurrentPageIndex;
+            SuppressSidebarSettingsPersistence = true;
+            try
+            {
+                IsSearchOpen = false;
+                IsAnnotationToolbarOpen = false;
+                IsAnnotationNoticeOpen = false;
+                CurrentDocument.IsPresentationMode = true;
+                IsPresentationMode = true;
+                IsFullScreen = true;
+                IsSidebarOpen = false;
+                CurrentDocument.IsDoublePage = false;
+                CurrentDocument.IsContinuous = false;
+                ViewMode = ViewMode.Paged;
+                CurrentDocument.GoToPage(preservedPage);
+            }
+            finally
+            {
+                SuppressSidebarSettingsPersistence = false;
+            }
         }
 
-        int preservedPage = CurrentDocument.CurrentPageIndex;
-        IsSidebarOpen = false;
-        IsSearchOpen = false;
-        IsAnnotationToolbarOpen = false;
-        IsAnnotationNoticeOpen = false;
-        CurrentDocument.IsPresentationMode = true;
-        IsPresentationMode = true;
-        IsFullScreen = true;
-        CurrentDocument.IsDoublePage = false;
-        CurrentDocument.IsContinuous = false;
-        ViewMode = ViewMode.Paged;
-        CurrentDocument.GoToPage(preservedPage);
+        if (FullScreenTransitionRunner is not null)
+        {
+            FullScreenTransitionRunner(true, true, ApplyStartPresentationState);
+        }
+        else
+        {
+            ApplyStartPresentationState();
+        }
     }
 
     /// <summary>
@@ -1074,8 +1114,33 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     public void ExitPresentation()
     {
-        IsFullScreen = false;
-        IsPresentationMode = false;
+        if (!IsPresentationMode && !IsFullScreen)
+        {
+            return;
+        }
+
+        void ApplyExitPresentationState()
+        {
+            SuppressSidebarSettingsPersistence = true;
+            try
+            {
+                IsFullScreen = false;
+                IsPresentationMode = false;
+            }
+            finally
+            {
+                SuppressSidebarSettingsPersistence = false;
+            }
+        }
+
+        if (FullScreenTransitionRunner is not null)
+        {
+            FullScreenTransitionRunner(false, true, ApplyExitPresentationState);
+        }
+        else
+        {
+            ApplyExitPresentationState();
+        }
     }
 
     /// <summary>
@@ -1490,10 +1555,33 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     public void ToggleFullScreen()
     {
-        IsFullScreen = !IsFullScreen;
-        if (!IsFullScreen)
+        bool targetFullScreen = !IsFullScreen;
+        bool isPresentationTransition = IsPresentationMode;
+
+        void ApplyToggleFullScreenState()
         {
-            IsPresentationMode = false;
+            SuppressSidebarSettingsPersistence = true;
+            try
+            {
+                IsFullScreen = targetFullScreen;
+                if (!targetFullScreen && IsPresentationMode)
+                {
+                    IsPresentationMode = false;
+                }
+            }
+            finally
+            {
+                SuppressSidebarSettingsPersistence = false;
+            }
+        }
+
+        if (FullScreenTransitionRunner is not null)
+        {
+            FullScreenTransitionRunner(targetFullScreen, isPresentationTransition, ApplyToggleFullScreenState);
+        }
+        else
+        {
+            ApplyToggleFullScreenState();
         }
     }
 

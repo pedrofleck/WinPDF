@@ -37,7 +37,11 @@ public sealed partial class MainWindow : Window
     private const double DefaultSidebarWidth = 260.0;
     private const double SidebarToggleSlotWidthDip = 44.0;
     private const uint WM_GETMINMAXINFO = 0x0024;
+    private const uint WM_WINDOWPOSCHANGING = 0x0046;
     private const uint WM_DPICHANGED = 0x02E0;
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SW_SHOWMAXIMIZED = 3;
     private const int SM_CXSIZEFRAME = 32;
     private const int SM_CYSIZEFRAME = 33;
     private const int SM_CXPADDEDBORDER = 92;
@@ -69,6 +73,29 @@ public sealed partial class MainWindow : Window
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WINDOWPOS
+    {
+        public IntPtr hwnd;
+        public IntPtr hwndInsertAfter;
+        public int x;
+        public int y;
+        public int cx;
+        public int cy;
+        public uint flags;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WINDOWPLACEMENT
+    {
+        public uint length;
+        public uint flags;
+        public uint showCmd;
+        public POINT ptMinPosition;
+        public POINT ptMaxPosition;
+        public RECT rcNormalPosition;
     }
 
     private readonly Windows.UI.ViewManagement.UISettings _uiSettings = new();
@@ -114,10 +141,21 @@ public sealed partial class MainWindow : Window
     [LibraryImport("comctl32.dll")]
     private static partial IntPtr DefSubclassProc(IntPtr hWnd, uint uMsg, UIntPtr wParam, IntPtr lParam);
 
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool SetWindowPlacement(IntPtr hWnd, in WINDOWPLACEMENT lpwndpl);
+
     private const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
 
     [LibraryImport("dwmapi.dll")]
     private static partial int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, in int pvAttribute, int cbAttribute);
+
+    [LibraryImport("dwmapi.dll")]
+    private static partial int DwmFlush();
 
     /// <summary>
     /// Gets the shell view model orchestrating window state, documents, and navigation.
@@ -186,6 +224,7 @@ public sealed partial class MainWindow : Window
 
         // Window size and layout events
         SizeChanged += OnMainWindowSizeChanged;
+        ViewModel.FullScreenTransitionRunner = ExecuteFullScreenTransition;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         RegisterTitleBarAnimatedIconPointerHandlers();
 
@@ -396,8 +435,33 @@ public sealed partial class MainWindow : Window
         minHeightPx = (int)Math.Ceiling(MinWindowHeightDip * scale) + extraH;
     }
 
+    private bool _isLockingWindowPos;
+    private RECT _lockedWindowPosRect;
+    private bool _hasMaximizedRectBeforeFullScreen;
+    private RECT _maximizedRectBeforeFullScreen;
+    private bool _hasSavedPlacementBeforeFullScreen;
+    private WINDOWPLACEMENT _savedPlacementBeforeFullScreen;
+
     private IntPtr WindowSubclassProc(IntPtr hWnd, uint uMsg, UIntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, UIntPtr dwRefData)
     {
+        if (uMsg == WM_WINDOWPOSCHANGING && _isLockingWindowPos && lParam != IntPtr.Zero)
+        {
+            int targetW = _lockedWindowPosRect.Right - _lockedWindowPosRect.Left;
+            int targetH = _lockedWindowPosRect.Bottom - _lockedWindowPosRect.Top;
+            if (targetW > 0 && targetH > 0)
+            {
+                unsafe
+                {
+                    WINDOWPOS* wp = (WINDOWPOS*)lParam;
+                    wp->x = _lockedWindowPosRect.Left;
+                    wp->y = _lockedWindowPosRect.Top;
+                    wp->cx = targetW;
+                    wp->cy = targetH;
+                    wp->flags &= ~(SWP_NOMOVE | SWP_NOSIZE);
+                }
+            }
+        }
+
         IntPtr result = DefSubclassProc(hWnd, uMsg, wParam, lParam);
 
         if (uMsg == WM_GETMINMAXINFO && lParam != IntPtr.Zero)
@@ -616,7 +680,14 @@ public sealed partial class MainWindow : Window
         if (ViewModel.IsCompactChrome != isCompact)
         {
             ViewModel.IsCompactChrome = isCompact;
-            AnimateTitleBarCompactMode(isCompact);
+            if (_isFullScreenTransitionRunning)
+            {
+                ApplyTitleBarCompactStateImmediate(isCompact);
+            }
+            else
+            {
+                AnimateTitleBarCompactMode(isCompact);
+            }
         }
 
         // 2. < 950 DIPs Sidebar & Sidebar Toggle Button auto-hide with animation,
@@ -626,13 +697,13 @@ public sealed partial class MainWindow : Window
         if (sidebarAllowedChanged)
         {
             ViewModel.IsSidebarAllowed = isSidebarAllowed;
-            if (ViewModel.HasDocument)
+            if (ViewModel.HasDocument && !_isFullScreenTransitionRunning)
             {
                 AnimateSidebarToggleButton(collapse: !isSidebarAllowed);
             }
             else
             {
-                ApplySidebarToggleStateImmediate(collapse: true);
+                ApplySidebarToggleStateImmediate(collapse: !ViewModel.HasDocument || !isSidebarAllowed);
             }
         }
 
@@ -641,17 +712,17 @@ public sealed partial class MainWindow : Window
             if (ViewModel.IsSidebarOpen)
             {
                 _wasSidebarClosedByNarrowWindow = true;
-                SetSidebarOpenFromWindowThreshold(false, animate: true);
+                SetSidebarOpenFromWindowThreshold(false, animate: !_isFullScreenTransitionRunning);
             }
         }
         else
         {
             ApplyEffectiveSidebarWidthForWindow(widthDip);
 
-            if (_wasSidebarClosedByNarrowWindow && !ViewModel.IsSidebarOpen)
+            if (_wasSidebarClosedByNarrowWindow && !ViewModel.IsSidebarOpen && !ViewModel.IsFullScreen && !ViewModel.IsPresentationMode)
             {
                 _wasSidebarClosedByNarrowWindow = false;
-                SetSidebarOpenFromWindowThreshold(true, animate: true);
+                SetSidebarOpenFromWindowThreshold(true, animate: !_isFullScreenTransitionRunning);
             }
         }
     }
@@ -1428,7 +1499,7 @@ public sealed partial class MainWindow : Window
             MainContentBackdropBorder.BorderThickness = new Thickness(1, 1, 0, 0);
         }
 
-        if (!animate || !ViewModel.HasDocument || ViewModel.IsSettingsOpen || ViewModel.IsPresentationMode)
+        if (!animate || !ViewModel.HasDocument || ViewModel.IsSettingsOpen || ViewModel.IsPresentationMode || _isFullScreenTransitionRunning)
         {
             _sidebarStoryboard?.Stop();
             _isSidebarOpenCloseAnimating = false;
@@ -1727,12 +1798,12 @@ public sealed partial class MainWindow : Window
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsSidebarOpen))
         {
-            if (!_isNarrowWindowSidebarToggle && !_suppressSidebarAnimation)
+            if (!_isNarrowWindowSidebarToggle && !_suppressSidebarAnimation && !_isFullScreenTransitionRunning)
             {
                 _wasSidebarClosedByNarrowWindow = false;
             }
 
-            UpdateSidebarLayout(animate: !_suppressSidebarAnimation);
+            UpdateSidebarLayout(animate: !_suppressSidebarAnimation && !_isFullScreenTransitionRunning);
         }
         else if (e.PropertyName == nameof(ShellViewModel.HasDocument))
         {
@@ -1773,6 +1844,11 @@ public sealed partial class MainWindow : Window
     {
         if (args.DidPresenterChange)
         {
+            if (_isFullScreenTransitionRunning)
+            {
+                return;
+            }
+
             bool isFullScreen = AppWindow.Presenter.Kind == Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen;
             if (ViewModel.IsFullScreen != isFullScreen)
             {
@@ -1814,17 +1890,27 @@ public sealed partial class MainWindow : Window
     private Storyboard? _activeFadeStoryboard;
     private Action? _activeFadeOnCompleted;
 
+    private Brush GetSolidThemeBackgroundBrush()
+    {
+        if (Application.Current.Resources.TryGetValue("SolidBackgroundFillColorBaseBrush", out var brushObj) && brushObj is Brush brush)
+        {
+            return brush;
+        }
+
+        return RootGrid.ActualTheme == ElementTheme.Dark
+            ? new SolidColorBrush(Windows.UI.Color.FromArgb(255, 32, 32, 32))
+            : new SolidColorBrush(Windows.UI.Color.FromArgb(255, 243, 243, 243));
+    }
+
     /// <summary>
-    /// Executes a smooth, full-screen hardware-accelerated fade-in and fade-out transition.
-    /// Operates across the full window area with locked opacity so intermediate window
-    /// adjustments occur entirely behind the curtain without any small-window blinking.
+    /// Executes a coordinated Fade-Out -> State &amp; Presenter Change Behind Opaque Curtain -> Fade-In transition.
+    /// Ensures that no UI layout changes, sidebar movements, or presenter swaps happen until the curtain is 100% opaque.
     /// </summary>
-    /// <param name="stateChangeAction">Action to perform while the screen is 100% solid.</param>
-    /// <param name="isDarkBackground">Whether to use pure black (presentation) or theme background.</param>
-    /// <param name="onCompleted">Optional callback invoked after the full-screen fade completes.</param>
+    /// <param name="stateChangeAction">Action to perform while the screen is 100% covered by the opaque curtain.</param>
+    /// <param name="isDarkBackground">Whether to use pure black (presentation) or solid theme background.</param>
+    /// <param name="onCompleted">Optional callback invoked after the fade-in completes.</param>
     private void RunFadeTransition(Action stateChangeAction, bool isDarkBackground, Action? onCompleted = null)
     {
-        // Cancel / complete any active in-flight transition storyboard immediately
         if (_activeFadeStoryboard != null)
         {
             try
@@ -1835,8 +1921,9 @@ public sealed partial class MainWindow : Window
             {
             }
             _activeFadeStoryboard = null;
-            _activeFadeOnCompleted?.Invoke();
+            var prevCallback = _activeFadeOnCompleted;
             _activeFadeOnCompleted = null;
+            prevCallback?.Invoke();
         }
 
         if (TransitionFadeOverlay == null)
@@ -1846,79 +1933,79 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        // Configure overlay background brush
-        if (isDarkBackground)
-        {
-            TransitionFadeOverlay.Background = new SolidColorBrush(Microsoft.UI.Colors.Black);
-        }
-        else
-        {
-            if (Application.Current.Resources.TryGetValue("SolidBackgroundFillColorBaseBrush", out var brushObj) && brushObj is Brush brush)
-            {
-                TransitionFadeOverlay.Background = brush;
-            }
-            else
-            {
-                TransitionFadeOverlay.Background = RootGrid.ActualTheme == ElementTheme.Dark
-                    ? new SolidColorBrush(Windows.UI.Color.FromArgb(255, 32, 32, 32))
-                    : new SolidColorBrush(Windows.UI.Color.FromArgb(255, 243, 243, 243));
-            }
-        }
+        Brush solidThemeBrush = GetSolidThemeBackgroundBrush();
+
+        // Keep RootGrid opaque throughout the presenter transition so DWM/Mica rebinding never exposes the desktop
+        RootGrid.Background = isDarkBackground
+            ? new SolidColorBrush(Microsoft.UI.Colors.Black)
+            : solidThemeBrush;
+
+        TransitionFadeOverlay.Background = isDarkBackground
+            ? new SolidColorBrush(Microsoft.UI.Colors.Black)
+            : solidThemeBrush;
 
         TransitionFadeOverlay.Opacity = 0.0;
         TransitionFadeOverlay.Visibility = Visibility.Visible;
 
-        // Step 1: Smooth full-screen Fade IN (160ms, CubicEase EaseInOut)
-        var fadeInAnim = new DoubleAnimation
+        // Phase 1: Fade Out the current scene (overlay Opacity 0.0 -> 1.0, 110ms) BEFORE any state mutation
+        var fadeOutSceneAnim = new DoubleAnimation
         {
             From = 0.0,
             To = 1.0,
-            Duration = new Duration(TimeSpan.FromMilliseconds(160)),
+            Duration = new Duration(TimeSpan.FromMilliseconds(110)),
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
         };
-        Storyboard.SetTarget(fadeInAnim, TransitionFadeOverlay);
-        Storyboard.SetTargetProperty(fadeInAnim, "Opacity");
+        Storyboard.SetTarget(fadeOutSceneAnim, TransitionFadeOverlay);
+        Storyboard.SetTargetProperty(fadeOutSceneAnim, "Opacity");
 
         var fadeInStoryboard = new Storyboard();
-        fadeInStoryboard.Children.Add(fadeInAnim);
+        fadeInStoryboard.Children.Add(fadeOutSceneAnim);
 
         fadeInStoryboard.Completed += async (_, _) =>
         {
-            // Explicitly lock Opacity to 1.0 so the overlay never drops to 0.0 during presenter swap
+            // Lock Opacity at 1.0 so the screen remains 100% covered during presenter and layout mutations
             TransitionFadeOverlay.Opacity = 1.0;
+
+            // Keep RootGrid opaque with the target scene's base background so exiting presentation/fullscreen never flashes transparent
+            RootGrid.Background = GetSolidThemeBackgroundBrush();
 
             try
             {
-                // Step 2: Overlay is 100% solid -> execute window / presenter state change under the curtain
+                // Phase 2: Execute ViewModel, Sidebar, DocumentView, and AppWindow presenter changes behind the 100% solid curtain
                 stateChangeAction();
+                RootGrid.UpdateLayout();
                 TransitionFadeOverlay.UpdateLayout();
+                try { _ = DwmFlush(); } catch { }
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[MainWindow] Fade transition state change error: {ex}");
             }
 
-            // Step 3: Brief settling pause so DirectX presents the new resolution behind the solid curtain
-            await Task.Delay(40);
+            // Phase 3: Allow DirectComposition and PdfPageCanvas swapchain to settle at the new dimensions behind the curtain
+            await Task.Delay(45);
+            RootGrid.UpdateLayout();
+            try { _ = DwmFlush(); } catch { }
 
-            // Step 4: Smooth full-screen Fade OUT (200ms, CubicEase EaseOut)
-            var fadeOutAnim = new DoubleAnimation
+            // Phase 4: Fade In the new scene (overlay Opacity 1.0 -> 0.0, 160ms)
+            var fadeInSceneAnim = new DoubleAnimation
             {
                 From = 1.0,
                 To = 0.0,
-                Duration = new Duration(TimeSpan.FromMilliseconds(200)),
+                Duration = new Duration(TimeSpan.FromMilliseconds(160)),
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
             };
-            Storyboard.SetTarget(fadeOutAnim, TransitionFadeOverlay);
-            Storyboard.SetTargetProperty(fadeOutAnim, "Opacity");
+            Storyboard.SetTarget(fadeInSceneAnim, TransitionFadeOverlay);
+            Storyboard.SetTargetProperty(fadeInSceneAnim, "Opacity");
 
             var fadeOutStoryboard = new Storyboard();
-            fadeOutStoryboard.Children.Add(fadeOutAnim);
+            fadeOutStoryboard.Children.Add(fadeInSceneAnim);
 
             fadeOutStoryboard.Completed += (_, _) =>
             {
                 TransitionFadeOverlay.Opacity = 0.0;
                 TransitionFadeOverlay.Visibility = Visibility.Collapsed;
+                RootGrid.Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent);
                 _activeFadeStoryboard = null;
                 var callback = _activeFadeOnCompleted;
                 _activeFadeOnCompleted = null;
@@ -1933,70 +2020,6 @@ public sealed partial class MainWindow : Window
         _activeFadeStoryboard = fadeInStoryboard;
         _activeFadeOnCompleted = onCompleted;
         fadeInStoryboard.Begin();
-    }
-
-    /// <summary>
-    /// Executes a smooth full-screen fade-out reveal when entering full screen from a windowed state.
-    /// The window is immediately in FullScreen mode covered by the solid curtain, which then fades out.
-    /// </summary>
-    private void RunFullScreenReveal(bool isDarkBackground, Action? onCompleted = null)
-    {
-        if (TransitionFadeOverlay == null)
-        {
-            onCompleted?.Invoke();
-            return;
-        }
-
-        if (_activeFadeStoryboard != null)
-        {
-            try { _activeFadeStoryboard.Stop(); } catch { }
-            _activeFadeStoryboard = null;
-        }
-
-        if (isDarkBackground)
-        {
-            TransitionFadeOverlay.Background = new SolidColorBrush(Microsoft.UI.Colors.Black);
-        }
-        else
-        {
-            if (Application.Current.Resources.TryGetValue("SolidBackgroundFillColorBaseBrush", out var brushObj) && brushObj is Brush brush)
-            {
-                TransitionFadeOverlay.Background = brush;
-            }
-            else
-            {
-                TransitionFadeOverlay.Background = RootGrid.ActualTheme == ElementTheme.Dark
-                    ? new SolidColorBrush(Windows.UI.Color.FromArgb(255, 32, 32, 32))
-                    : new SolidColorBrush(Windows.UI.Color.FromArgb(255, 243, 243, 243));
-            }
-        }
-
-        TransitionFadeOverlay.Opacity = 1.0;
-        TransitionFadeOverlay.Visibility = Visibility.Visible;
-
-        var fadeOutAnim = new DoubleAnimation
-        {
-            From = 1.0,
-            To = 0.0,
-            Duration = new Duration(TimeSpan.FromMilliseconds(220)),
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
-        };
-        Storyboard.SetTarget(fadeOutAnim, TransitionFadeOverlay);
-        Storyboard.SetTargetProperty(fadeOutAnim, "Opacity");
-
-        var sb = new Storyboard();
-        sb.Children.Add(fadeOutAnim);
-
-        sb.Completed += (_, _) =>
-        {
-            TransitionFadeOverlay.Opacity = 0.0;
-            TransitionFadeOverlay.Visibility = Visibility.Collapsed;
-            _activeFadeStoryboard = null;
-            onCompleted?.Invoke();
-        };
-
-        _activeFadeStoryboard = sb;
-        sb.Begin();
     }
 
     private void RestoreSidebarAfterFullScreenIfNeeded()
@@ -2015,6 +2038,198 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void ExecuteFullScreenTransition(bool targetFullScreen, bool isPresentationTransition, Action applyViewModelState)
+    {
+        if (_isFullScreenTransitionRunning)
+        {
+            return;
+        }
+
+        if (targetFullScreen)
+        {
+            _isPresentationFullScreen = isPresentationTransition;
+        }
+
+        bool isDark = isPresentationTransition || _isPresentationFullScreen || ViewModel.IsPresentationMode;
+        _isFullScreenTransitionRunning = true;
+
+        RunFadeTransition(() =>
+        {
+            _sidebarStoryboard?.Stop();
+            _sidebarToggleStoryboard?.Stop();
+            _titleBarCompactStoryboard?.Stop();
+            _isSidebarOpenCloseAnimating = false;
+            _suppressSidebarAnimation = true;
+
+            try
+            {
+                if (_hwnd == IntPtr.Zero)
+                {
+                    _hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+                }
+
+                SetDwmTransitionsEnabled(false);
+
+                if (targetFullScreen)
+                {
+                    if (AppWindow.Presenter is OverlappedPresenter op)
+                    {
+                        _wasMaximizedBeforeFullScreen = op.State == OverlappedPresenterState.Maximized;
+                    }
+                    else
+                    {
+                        _wasMaximizedBeforeFullScreen = false;
+                    }
+
+                    if (_wasMaximizedBeforeFullScreen && _hwnd != IntPtr.Zero)
+                    {
+                        _savedPlacementBeforeFullScreen = new WINDOWPLACEMENT
+                        {
+                            length = (uint)Marshal.SizeOf<WINDOWPLACEMENT>()
+                        };
+                        _hasSavedPlacementBeforeFullScreen = GetWindowPlacement(_hwnd, ref _savedPlacementBeforeFullScreen);
+                        _hasMaximizedRectBeforeFullScreen = GetWindowRect(_hwnd, out _maximizedRectBeforeFullScreen);
+                    }
+                    else
+                    {
+                        _hasSavedPlacementBeforeFullScreen = false;
+                        _hasMaximizedRectBeforeFullScreen = false;
+                    }
+
+                    if (!isPresentationTransition)
+                    {
+                        _sidebarOpenBeforeFullScreen = ViewModel.IsSidebarOpen;
+                        if (ViewModel.IsSidebarOpen)
+                        {
+                            SetSidebarOpenFromWindowThreshold(false, animate: false);
+                        }
+                    }
+
+                    // Apply ViewModel state (PresentationMode, Sidebar, ViewMode, FullScreen) while curtain is 100% opaque
+                    applyViewModelState();
+
+                    // Lock WM_WINDOWPOSCHANGING to the monitor outer bounds when entering FullScreen from Maximized
+                    // so Windows App SDK never shrinks the HWND to Restored bounds before expanding to FullScreen.
+                    if (_wasMaximizedBeforeFullScreen)
+                    {
+                        var displayArea = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary);
+                        if (displayArea is not null)
+                        {
+                            _lockedWindowPosRect = new RECT
+                            {
+                                Left = displayArea.OuterBounds.X,
+                                Top = displayArea.OuterBounds.Y,
+                                Right = displayArea.OuterBounds.X + displayArea.OuterBounds.Width,
+                                Bottom = displayArea.OuterBounds.Y + displayArea.OuterBounds.Height
+                            };
+                            _isLockingWindowPos = true;
+                        }
+                    }
+
+                    try
+                    {
+                        AppWindow.SetPresenter(AppWindowPresenterKind.FullScreen);
+                    }
+                    finally
+                    {
+                        _isLockingWindowPos = false;
+                    }
+
+                    UpdateTitleBarInsets();
+                    UpdateTitleBarNonClientRegions();
+                }
+                else
+                {
+                    // Exiting FullScreen / Presentation:
+                    // 1. Restore presenter first while locking WM_WINDOWPOSCHANGING if returning to Maximized,
+                    //    preventing the intermediate shrink to Restored bounds that exposed the desktop.
+                    bool restoreMaximized = _wasMaximizedBeforeFullScreen;
+                    _wasMaximizedBeforeFullScreen = false;
+
+                    if (restoreMaximized && _hasMaximizedRectBeforeFullScreen)
+                    {
+                        _lockedWindowPosRect = _maximizedRectBeforeFullScreen;
+                        _isLockingWindowPos = true;
+                    }
+
+                    try
+                    {
+                        AppWindow.SetPresenter(AppWindowPresenterKind.Default);
+                    }
+                    finally
+                    {
+                        _isLockingWindowPos = false;
+                    }
+
+                    UpdateWindowMinimumSize();
+
+                    if (restoreMaximized)
+                    {
+                        if (AppWindow.Presenter is OverlappedPresenter overlappedPresenter)
+                        {
+                            overlappedPresenter.Maximize();
+                        }
+
+                        if (_hasSavedPlacementBeforeFullScreen && _hwnd != IntPtr.Zero)
+                        {
+                            var placement = new WINDOWPLACEMENT
+                            {
+                                length = (uint)Marshal.SizeOf<WINDOWPLACEMENT>()
+                            };
+                            if (GetWindowPlacement(_hwnd, ref placement))
+                            {
+                                placement.rcNormalPosition = _savedPlacementBeforeFullScreen.rcNormalPosition;
+                                placement.showCmd = SW_SHOWMAXIMIZED;
+                                _ = SetWindowPlacement(_hwnd, in placement);
+                            }
+                        }
+
+                        _hasSavedPlacementBeforeFullScreen = false;
+                        _hasMaximizedRectBeforeFullScreen = false;
+                    }
+
+                    if (!ExtendsContentIntoTitleBar)
+                    {
+                        ExtendsContentIntoTitleBar = true;
+                    }
+                    SetTitleBar(TitleBarDragRegion);
+
+                    if (AppWindowTitleBar.IsCustomizationSupported())
+                    {
+                        AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
+                        UpdateTitleBarTheme();
+                    }
+
+                    // 2. Apply ViewModel state (exiting PresentationMode, restoring ViewMode, Zoom, and Sidebar) behind the curtain
+                    applyViewModelState();
+                    RestoreSidebarAfterFullScreenIfNeeded();
+                    _isPresentationFullScreen = false;
+
+                    UpdateTitleBarInsets();
+                    UpdateTitleBarNonClientRegions();
+                }
+            }
+            finally
+            {
+                _suppressSidebarAnimation = false;
+                SetDwmTransitionsEnabled(true);
+            }
+
+            UpdateSidebarLayout(animate: false);
+            UpdateMainContainerStyle();
+
+            if (MainContentFrame.Content is DocumentView docView)
+            {
+                docView.SetSidebarStateImmediate(
+                    ViewModel.HasDocument && ViewModel.IsSidebarOpen && ViewModel.IsSidebarAllowed,
+                    _effectiveSidebarWidth);
+            }
+        }, isDarkBackground: isDark, onCompleted: () =>
+        {
+            _isFullScreenTransitionRunning = false;
+        });
+    }
+
     private void UpdateFullScreenState(bool isFullScreen)
     {
         if (_isFullScreenTransitionRunning)
@@ -2022,108 +2237,13 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        bool isPresentation = ViewModel.IsPresentationMode;
-        if (isFullScreen)
+        bool isActualFullScreen = AppWindow.Presenter.Kind == AppWindowPresenterKind.FullScreen;
+        if (isActualFullScreen == isFullScreen)
         {
-            _isPresentationFullScreen = isPresentation;
+            return;
         }
-        bool wasPresentation = _isPresentationFullScreen || isPresentation;
-        bool isDark = wasPresentation;
 
-        if (isFullScreen)
-        {
-            if (AppWindow.Presenter is OverlappedPresenter op)
-            {
-                _wasMaximizedBeforeFullScreen = op.State == OverlappedPresenterState.Maximized;
-            }
-            else
-            {
-                _wasMaximizedBeforeFullScreen = false;
-            }
-
-            if (!ViewModel.IsPresentationMode)
-            {
-                _sidebarOpenBeforeFullScreen = ViewModel.IsSidebarOpen;
-                if (ViewModel.IsSidebarOpen)
-                {
-                    SetSidebarOpenFromWindowThreshold(false, animate: false);
-                }
-            }
-
-            _isFullScreenTransitionRunning = true;
-
-            if (_wasMaximizedBeforeFullScreen)
-            {
-                // Entering from Maximized: Window is already monitor-sized.
-                // Fade in to solid curtain -> Switch to FullScreen directly (NEVER call Restore!) -> Fade out.
-                RunFadeTransition(() =>
-                {
-                    SetDwmTransitionsEnabled(false);
-                    AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
-                    UpdateTitleBarInsets();
-                    UpdateTitleBarNonClientRegions();
-                    SetDwmTransitionsEnabled(true);
-                }, isDarkBackground: isDark, onCompleted: () =>
-                {
-                    _isFullScreenTransitionRunning = false;
-                });
-            }
-            else
-            {
-                // Entering from Windowed: Enter FullScreen directly under the solid full-screen curtain, then fade out.
-                // Full-screen animation: no small window ever appears or flashes.
-                SetDwmTransitionsEnabled(false);
-                AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
-                UpdateTitleBarInsets();
-                UpdateTitleBarNonClientRegions();
-                SetDwmTransitionsEnabled(true);
-
-                RunFullScreenReveal(isDarkBackground: isDark, onCompleted: () =>
-                {
-                    _isFullScreenTransitionRunning = false;
-                });
-            }
-        }
-        else
-        {
-            // Exiting FullScreen: Window is currently FULL SCREEN on the entire display.
-            // Fade in across the entire display to solid curtain, swap presenter under the curtain, and reveal.
-            _isFullScreenTransitionRunning = true;
-
-            RunFadeTransition(() =>
-            {
-                SetDwmTransitionsEnabled(false);
-                AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Default);
-                UpdateWindowMinimumSize();
-
-                if (_wasMaximizedBeforeFullScreen)
-                {
-                    _wasMaximizedBeforeFullScreen = false;
-                    if (AppWindow.Presenter is OverlappedPresenter overlappedPresenter)
-                    {
-                        overlappedPresenter.Maximize();
-                    }
-                }
-
-                ExtendsContentIntoTitleBar = true;
-                SetTitleBar(TitleBarDragRegion);
-
-                if (AppWindowTitleBar.IsCustomizationSupported())
-                {
-                    AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
-                    UpdateTitleBarTheme();
-                }
-
-                RestoreSidebarAfterFullScreenIfNeeded();
-
-                SetDwmTransitionsEnabled(true);
-                UpdateTitleBarInsets();
-                UpdateTitleBarNonClientRegions();
-            }, isDarkBackground: isDark, onCompleted: () =>
-            {
-                _isFullScreenTransitionRunning = false;
-            });
-        }
+        ExecuteFullScreenTransition(isFullScreen, ViewModel.IsPresentationMode, () => { });
     }
 
 

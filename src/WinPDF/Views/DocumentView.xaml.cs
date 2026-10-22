@@ -481,16 +481,14 @@ public sealed partial class DocumentView : Page
                     FullScreenInfoBar.IsOpen = false;
                 }
 
+                PdfPageCanvas.ClearSlideBuffer();
+                PdfPageCanvas.ReleaseReusableBuffer();
+
                 RestoreAfterPresentationExit();
-                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, RestoreAfterPresentationExit);
-                _ = Task.Run(async () =>
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
                 {
-                    await Task.Delay(140).ConfigureAwait(false);
-                    DispatcherQueue.TryEnqueue(() =>
-                    {
-                        RestoreAfterPresentationExit();
-                        _isRestoringFromPresentation = false;
-                    });
+                    RestoreAfterPresentationExit();
+                    _isRestoringFromPresentation = false;
                 });
             }
         }
@@ -707,10 +705,6 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        PdfPageCanvas.ClearSlideBuffer();
-        PdfPageCanvas.ReleaseReusableBuffer();
-        GC.Collect(2, GCCollectionMode.Optimized, false);
-
         int targetPage = Math.Clamp(doc.CurrentPageIndex, 0, doc.Pages.Count - 1);
         double restoreZoom = Math.Clamp(_prePresentationZoom > 0.05 ? _prePresentationZoom : ViewModel.ZoomBeforePresentation, DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
 
@@ -721,6 +715,7 @@ public sealed partial class DocumentView : Page
             ContinuousScrollViewer.UpdateLayout();
             doc.ZoomFactor = restoreZoom;
             UpdateZoomSlider(restoreZoom);
+            SyncPaneOffsetsImmediate();
 
             if (doc.IsContinuous)
             {
@@ -744,6 +739,7 @@ public sealed partial class DocumentView : Page
                 doc.FractionalPageIndex = targetPage;
             }
 
+            SyncPaneOffsetsImmediate();
             UpdateViewportPages(restoreZoom);
             ScheduleViewportUpdate();
         }
