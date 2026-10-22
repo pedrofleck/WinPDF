@@ -1059,9 +1059,9 @@ public sealed partial class ShellViewModel : ObservableObject
         IsSearchOpen = false;
         IsAnnotationToolbarOpen = false;
         IsAnnotationNoticeOpen = false;
-        IsFullScreen = true;
         CurrentDocument.IsPresentationMode = true;
         IsPresentationMode = true;
+        IsFullScreen = true;
         CurrentDocument.IsDoublePage = false;
         CurrentDocument.IsContinuous = false;
         ViewMode = ViewMode.Paged;
@@ -1074,8 +1074,8 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     public void ExitPresentation()
     {
-        IsPresentationMode = false;
         IsFullScreen = false;
+        IsPresentationMode = false;
     }
 
     /// <summary>

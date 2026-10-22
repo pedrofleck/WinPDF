@@ -755,5 +755,17 @@
                 <CompositeTransform x:Name="SettingsFrameTransform" />
             </Frame.RenderTransform>
         </Frame>
+
+        <!-- Full-screen / Presentation Transition Fade Overlay -->
+        <Border
+            x:Name="TransitionFadeOverlay"
+            Grid.RowSpan="2"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch"
+            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+            Opacity="0"
+            IsHitTestVisible="False"
+            Visibility="Collapsed"
+            Canvas.ZIndex="9999" />
     </Grid>
 </Window>

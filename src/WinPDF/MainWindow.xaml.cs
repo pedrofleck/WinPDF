@@ -1809,21 +1809,232 @@ public sealed partial class MainWindow : Window
 
     private bool _sidebarOpenBeforeFullScreen;
     private bool _wasMaximizedBeforeFullScreen;
+    private bool _isPresentationFullScreen;
+    private bool _isFullScreenTransitionRunning;
+    private Storyboard? _activeFadeStoryboard;
+    private Action? _activeFadeOnCompleted;
+
+    /// <summary>
+    /// Executes a smooth, full-screen hardware-accelerated fade-in and fade-out transition.
+    /// Operates across the full window area with locked opacity so intermediate window
+    /// adjustments occur entirely behind the curtain without any small-window blinking.
+    /// </summary>
+    /// <param name="stateChangeAction">Action to perform while the screen is 100% solid.</param>
+    /// <param name="isDarkBackground">Whether to use pure black (presentation) or theme background.</param>
+    /// <param name="onCompleted">Optional callback invoked after the full-screen fade completes.</param>
+    private void RunFadeTransition(Action stateChangeAction, bool isDarkBackground, Action? onCompleted = null)
+    {
+        // Cancel / complete any active in-flight transition storyboard immediately
+        if (_activeFadeStoryboard != null)
+        {
+            try
+            {
+                _activeFadeStoryboard.Stop();
+            }
+            catch
+            {
+            }
+            _activeFadeStoryboard = null;
+            _activeFadeOnCompleted?.Invoke();
+            _activeFadeOnCompleted = null;
+        }
+
+        if (TransitionFadeOverlay == null)
+        {
+            stateChangeAction();
+            onCompleted?.Invoke();
+            return;
+        }
+
+        // Configure overlay background brush
+        if (isDarkBackground)
+        {
+            TransitionFadeOverlay.Background = new SolidColorBrush(Microsoft.UI.Colors.Black);
+        }
+        else
+        {
+            if (Application.Current.Resources.TryGetValue("SolidBackgroundFillColorBaseBrush", out var brushObj) && brushObj is Brush brush)
+            {
+                TransitionFadeOverlay.Background = brush;
+            }
+            else
+            {
+                TransitionFadeOverlay.Background = RootGrid.ActualTheme == ElementTheme.Dark
+                    ? new SolidColorBrush(Windows.UI.Color.FromArgb(255, 32, 32, 32))
+                    : new SolidColorBrush(Windows.UI.Color.FromArgb(255, 243, 243, 243));
+            }
+        }
+
+        TransitionFadeOverlay.Opacity = 0.0;
+        TransitionFadeOverlay.Visibility = Visibility.Visible;
+
+        // Step 1: Smooth full-screen Fade IN (160ms, CubicEase EaseInOut)
+        var fadeInAnim = new DoubleAnimation
+        {
+            From = 0.0,
+            To = 1.0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(160)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
+        };
+        Storyboard.SetTarget(fadeInAnim, TransitionFadeOverlay);
+        Storyboard.SetTargetProperty(fadeInAnim, "Opacity");
+
+        var fadeInStoryboard = new Storyboard();
+        fadeInStoryboard.Children.Add(fadeInAnim);
+
+        fadeInStoryboard.Completed += async (_, _) =>
+        {
+            // Explicitly lock Opacity to 1.0 so the overlay never drops to 0.0 during presenter swap
+            TransitionFadeOverlay.Opacity = 1.0;
+
+            try
+            {
+                // Step 2: Overlay is 100% solid -> execute window / presenter state change under the curtain
+                stateChangeAction();
+                TransitionFadeOverlay.UpdateLayout();
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[MainWindow] Fade transition state change error: {ex}");
+            }
+
+            // Step 3: Brief settling pause so DirectX presents the new resolution behind the solid curtain
+            await Task.Delay(40);
+
+            // Step 4: Smooth full-screen Fade OUT (200ms, CubicEase EaseOut)
+            var fadeOutAnim = new DoubleAnimation
+            {
+                From = 1.0,
+                To = 0.0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(200)),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(fadeOutAnim, TransitionFadeOverlay);
+            Storyboard.SetTargetProperty(fadeOutAnim, "Opacity");
+
+            var fadeOutStoryboard = new Storyboard();
+            fadeOutStoryboard.Children.Add(fadeOutAnim);
+
+            fadeOutStoryboard.Completed += (_, _) =>
+            {
+                TransitionFadeOverlay.Opacity = 0.0;
+                TransitionFadeOverlay.Visibility = Visibility.Collapsed;
+                _activeFadeStoryboard = null;
+                var callback = _activeFadeOnCompleted;
+                _activeFadeOnCompleted = null;
+                callback?.Invoke();
+            };
+
+            _activeFadeStoryboard = fadeOutStoryboard;
+            _activeFadeOnCompleted = onCompleted;
+            fadeOutStoryboard.Begin();
+        };
+
+        _activeFadeStoryboard = fadeInStoryboard;
+        _activeFadeOnCompleted = onCompleted;
+        fadeInStoryboard.Begin();
+    }
+
+    /// <summary>
+    /// Executes a smooth full-screen fade-out reveal when entering full screen from a windowed state.
+    /// The window is immediately in FullScreen mode covered by the solid curtain, which then fades out.
+    /// </summary>
+    private void RunFullScreenReveal(bool isDarkBackground, Action? onCompleted = null)
+    {
+        if (TransitionFadeOverlay == null)
+        {
+            onCompleted?.Invoke();
+            return;
+        }
+
+        if (_activeFadeStoryboard != null)
+        {
+            try { _activeFadeStoryboard.Stop(); } catch { }
+            _activeFadeStoryboard = null;
+        }
+
+        if (isDarkBackground)
+        {
+            TransitionFadeOverlay.Background = new SolidColorBrush(Microsoft.UI.Colors.Black);
+        }
+        else
+        {
+            if (Application.Current.Resources.TryGetValue("SolidBackgroundFillColorBaseBrush", out var brushObj) && brushObj is Brush brush)
+            {
+                TransitionFadeOverlay.Background = brush;
+            }
+            else
+            {
+                TransitionFadeOverlay.Background = RootGrid.ActualTheme == ElementTheme.Dark
+                    ? new SolidColorBrush(Windows.UI.Color.FromArgb(255, 32, 32, 32))
+                    : new SolidColorBrush(Windows.UI.Color.FromArgb(255, 243, 243, 243));
+            }
+        }
+
+        TransitionFadeOverlay.Opacity = 1.0;
+        TransitionFadeOverlay.Visibility = Visibility.Visible;
+
+        var fadeOutAnim = new DoubleAnimation
+        {
+            From = 1.0,
+            To = 0.0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(220)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(fadeOutAnim, TransitionFadeOverlay);
+        Storyboard.SetTargetProperty(fadeOutAnim, "Opacity");
+
+        var sb = new Storyboard();
+        sb.Children.Add(fadeOutAnim);
+
+        sb.Completed += (_, _) =>
+        {
+            TransitionFadeOverlay.Opacity = 0.0;
+            TransitionFadeOverlay.Visibility = Visibility.Collapsed;
+            _activeFadeStoryboard = null;
+            onCompleted?.Invoke();
+        };
+
+        _activeFadeStoryboard = sb;
+        sb.Begin();
+    }
+
+    private void RestoreSidebarAfterFullScreenIfNeeded()
+    {
+        if (_sidebarOpenBeforeFullScreen)
+        {
+            _sidebarOpenBeforeFullScreen = false;
+            if (GetCurrentWindowWidthDip() >= SidebarAutoCloseBreakpoint)
+            {
+                SetSidebarOpenFromWindowThreshold(true, animate: false);
+            }
+            else
+            {
+                _wasSidebarClosedByNarrowWindow = true;
+            }
+        }
+    }
 
     private void UpdateFullScreenState(bool isFullScreen)
     {
+        if (_isFullScreenTransitionRunning)
+        {
+            return;
+        }
+
+        bool isPresentation = ViewModel.IsPresentationMode;
+        if (isFullScreen)
+        {
+            _isPresentationFullScreen = isPresentation;
+        }
+        bool wasPresentation = _isPresentationFullScreen || isPresentation;
+        bool isDark = wasPresentation;
+
         if (isFullScreen)
         {
             if (AppWindow.Presenter is OverlappedPresenter op)
             {
                 _wasMaximizedBeforeFullScreen = op.State == OverlappedPresenterState.Maximized;
-                if (_wasMaximizedBeforeFullScreen)
-                {
-                    // Temporarily disable DWM transition animations so restoring to normal
-                    // window bounds prior to FullScreen does not play a shrink animation.
-                    SetDwmTransitionsEnabled(false);
-                    op.Restore();
-                }
             }
             else
             {
@@ -1839,65 +2050,82 @@ public sealed partial class MainWindow : Window
                 }
             }
 
-            AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
-            DispatcherQueue.TryEnqueue(() =>
+            _isFullScreenTransitionRunning = true;
+
+            if (_wasMaximizedBeforeFullScreen)
             {
-                SetDwmTransitionsEnabled(true);
+                // Entering from Maximized: Window is already monitor-sized.
+                // Fade in to solid curtain -> Switch to FullScreen directly (NEVER call Restore!) -> Fade out.
+                RunFadeTransition(() =>
+                {
+                    SetDwmTransitionsEnabled(false);
+                    AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
+                    UpdateTitleBarInsets();
+                    UpdateTitleBarNonClientRegions();
+                    SetDwmTransitionsEnabled(true);
+                }, isDarkBackground: isDark, onCompleted: () =>
+                {
+                    _isFullScreenTransitionRunning = false;
+                });
+            }
+            else
+            {
+                // Entering from Windowed: Enter FullScreen directly under the solid full-screen curtain, then fade out.
+                // Full-screen animation: no small window ever appears or flashes.
+                SetDwmTransitionsEnabled(false);
+                AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.FullScreen);
                 UpdateTitleBarInsets();
                 UpdateTitleBarNonClientRegions();
-            });
+                SetDwmTransitionsEnabled(true);
+
+                RunFullScreenReveal(isDarkBackground: isDark, onCompleted: () =>
+                {
+                    _isFullScreenTransitionRunning = false;
+                });
+            }
         }
         else
         {
-            if (_wasMaximizedBeforeFullScreen)
+            // Exiting FullScreen: Window is currently FULL SCREEN on the entire display.
+            // Fade in across the entire display to solid curtain, swap presenter under the curtain, and reveal.
+            _isFullScreenTransitionRunning = true;
+
+            RunFadeTransition(() =>
             {
-                // Temporarily disable DWM transition animations so restoring back
-                // to maximized does not animate/zoom from a small window layout.
                 SetDwmTransitionsEnabled(false);
-            }
+                AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Default);
+                UpdateWindowMinimumSize();
 
-            AppWindow.SetPresenter(Microsoft.UI.Windowing.AppWindowPresenterKind.Default);
-            UpdateWindowMinimumSize();
-
-            if (_wasMaximizedBeforeFullScreen)
-            {
-                _wasMaximizedBeforeFullScreen = false;
-                if (AppWindow.Presenter is OverlappedPresenter overlappedPresenter)
+                if (_wasMaximizedBeforeFullScreen)
                 {
-                    overlappedPresenter.Maximize();
+                    _wasMaximizedBeforeFullScreen = false;
+                    if (AppWindow.Presenter is OverlappedPresenter overlappedPresenter)
+                    {
+                        overlappedPresenter.Maximize();
+                    }
                 }
-            }
 
-            ExtendsContentIntoTitleBar = true;
-            SetTitleBar(TitleBarDragRegion);
+                ExtendsContentIntoTitleBar = true;
+                SetTitleBar(TitleBarDragRegion);
 
-            if (AppWindowTitleBar.IsCustomizationSupported())
-            {
-                AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
-                UpdateTitleBarTheme();
-            }
-
-            if (!ViewModel.IsPresentationMode && _sidebarOpenBeforeFullScreen)
-            {
-                _sidebarOpenBeforeFullScreen = false;
-                if (GetCurrentWindowWidthDip() >= SidebarAutoCloseBreakpoint)
+                if (AppWindowTitleBar.IsCustomizationSupported())
                 {
-                    SetSidebarOpenFromWindowThreshold(true, animate: false);
+                    AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;
+                    UpdateTitleBarTheme();
                 }
-                else
-                {
-                    _wasSidebarClosedByNarrowWindow = true;
-                }
-            }
 
-            DispatcherQueue.TryEnqueue(() =>
-            {
+                RestoreSidebarAfterFullScreenIfNeeded();
+
                 SetDwmTransitionsEnabled(true);
                 UpdateTitleBarInsets();
                 UpdateTitleBarNonClientRegions();
+            }, isDarkBackground: isDark, onCompleted: () =>
+            {
+                _isFullScreenTransitionRunning = false;
             });
         }
     }
+
 
     private void UpdateTitleBarTheme()
     {
