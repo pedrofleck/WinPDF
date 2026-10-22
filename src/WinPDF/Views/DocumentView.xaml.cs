@@ -84,6 +84,72 @@ public sealed partial class DocumentView : Page
     private PointerEventHandler? _autoScrollPointerPressedHandler;
     private PointerEventHandler? _autoScrollPointerMovedHandler;
     private PointerEventHandler? _autoScrollPointerReleasedHandler;
+
+    // Interactive horizontal slide swipe state (1-finger Touch & 2-finger Precision Touchpad in Paged/Presentation mode)
+    private enum PagedTouchGestureAxis
+    {
+        Undecided = 0,
+        HorizontalSwipe = 1,
+        PanOrZoom = 2,
+    }
+
+    private const ManipulationModes PagedCustomManipulationMode =
+        ManipulationModes.TranslateX | ManipulationModes.TranslateY | ManipulationModes.Scale;
+    private const double SlideSwipeDirectionLockDip = 6.0;
+    private const double SlideSwipeMinCommitRatio = 0.20;
+    private const double SlideSwipeMinFlickVelocityDipPerSec = 480.0;
+    private const double SlideSwipeMinFlickDistanceDip = 24.0;
+    private const double SlideSwipeRubberBandFactor = 0.26;
+    private const double TouchpadWheelToDipScale = 1.20;
+    private readonly DispatcherTimer _touchpadSwipeEndTimer = new() { Interval = TimeSpan.FromMilliseconds(90) };
+    private readonly HashSet<uint> _activeTouchPointerIds = new();
+    private PointerRoutedEventArgs? _lastProcessedWheelEventArgs;
+    private Pointer? _firstTouchPointer;
+    private PointerEventHandler? _slideSwipePointerPressedHandler;
+    private PointerEventHandler? _slideSwipePointerMovedHandler;
+    private PointerEventHandler? _slideSwipePointerReleasedHandler;
+    private PointerEventHandler? _slideSwipePointerCanceledHandler;
+    private PointerEventHandler? _slideSwipePointerCaptureLostHandler;
+    private Storyboard? _slideSwipeStoryboard;
+    private PagedTouchGestureAxis _touchGestureAxis;
+    private double _manipCumulativeDx;
+    private double _manipCumulativeDy;
+    private bool _isSlideSwipeActive;
+    private bool _isSlideSwipeAnimating;
+    private bool _isCommittingSlideSwipe;
+    private bool _isManipulatingSlideSwipe;
+    private bool _isTouchSwipeTracking;
+    private bool _isTouchSwipeEngaged;
+    private bool _isTouchpadWheelSwipeActive;
+    private bool _isDrainingTouchpadInertia;
+    private int _committedTouchpadWheelSign;
+    private long _lastTouchpadInertiaDrainTick;
+    private long _touchpadInertiaDrainStartTick;
+    private bool _isSmoothZoomRenderingSubscribed;
+    private double _smoothZoomTargetFactor;
+    private Point _smoothZoomPivotPoint;
+    private long _lastSmoothZoomRenderTicks;
+    private bool _isMouseButtonDown;
+    private uint _touchSwipePointerId;
+    private Point _touchSwipeStartPoint;
+    private Point _touchSwipeLastPoint;
+    private long _touchSwipeLastTimestamp;
+    private long _touchpadLastWheelTimestamp;
+    private int _lastTouchpadWheelAbsDelta;
+    private int _touchpadDecayingFrameCount;
+    private double _touchpadVerticalWheelAccum;
+    private double _touchpadHorizontalWheelAccum;
+    private long _lastTouchpadVerticalPacketTick;
+    private long _ignoreTouchpadVerticalFlipUntilTick;
+    private long _lastSlideSwipeCompletedTick;
+    private double _swipeRawDeltaX;
+    private double _swipeVisualDeltaX;
+    private double _swipeVelocityX;
+    private int _swipeTargetPageIndex = -1;
+    private int _swipeBoundTargetPageIndex = -1;
+    private double _swipeAdjTotalWidthDip;
+    private double _swipeAdjTotalHeightDip;
+    private double _swipeAdjScaleRatio = 1.0;
     private PrintManager? _registeredPrintManager;
     private nint _registeredPrintHwnd;
     private PrintDocument? _printDocument;
@@ -157,10 +223,25 @@ public sealed partial class DocumentView : Page
         _autoScrollPointerPressedHandler = new PointerEventHandler(OnViewerAutoScrollPointerPressed);
         _autoScrollPointerMovedHandler = new PointerEventHandler(OnViewerAutoScrollPointerMoved);
         _autoScrollPointerReleasedHandler = new PointerEventHandler(OnViewerAutoScrollPointerReleased);
+        _slideSwipePointerPressedHandler = new PointerEventHandler(OnSlideSwipePointerPressed);
+        _slideSwipePointerMovedHandler = new PointerEventHandler(OnSlideSwipePointerMoved);
+        _slideSwipePointerReleasedHandler = new PointerEventHandler(OnSlideSwipePointerReleased);
+        _slideSwipePointerCanceledHandler = new PointerEventHandler(OnSlideSwipePointerCanceled);
+        _slideSwipePointerCaptureLostHandler = new PointerEventHandler(OnSlideSwipePointerCaptureLost);
         ScrollViewerContentRoot.AddHandler(UIElement.PointerPressedEvent, _autoScrollPointerPressedHandler, true);
         ScrollViewerContentRoot.AddHandler(UIElement.PointerMovedEvent, _autoScrollPointerMovedHandler, true);
         ScrollViewerContentRoot.AddHandler(UIElement.PointerReleasedEvent, _autoScrollPointerReleasedHandler, true);
+        ScrollViewerContentRoot.AddHandler(UIElement.PointerPressedEvent, _slideSwipePointerPressedHandler, true);
+        ScrollViewerContentRoot.AddHandler(UIElement.PointerMovedEvent, _slideSwipePointerMovedHandler, true);
+        ScrollViewerContentRoot.AddHandler(UIElement.PointerReleasedEvent, _slideSwipePointerReleasedHandler, true);
+        ScrollViewerContentRoot.AddHandler(UIElement.PointerCanceledEvent, _slideSwipePointerCanceledHandler, true);
+        ScrollViewerContentRoot.AddHandler(UIElement.PointerCaptureLostEvent, _slideSwipePointerCaptureLostHandler, true);
+        ScrollViewerContentRoot.AddHandler(UIElement.ManipulationStartingEvent, new ManipulationStartingEventHandler(OnSlideSwipeManipulationStarting), true);
+        ScrollViewerContentRoot.AddHandler(UIElement.ManipulationStartedEvent, new ManipulationStartedEventHandler(OnSlideSwipeManipulationStarted), true);
+        ScrollViewerContentRoot.AddHandler(UIElement.ManipulationDeltaEvent, new ManipulationDeltaEventHandler(OnSlideSwipeManipulationDelta), true);
+        ScrollViewerContentRoot.AddHandler(UIElement.ManipulationCompletedEvent, new ManipulationCompletedEventHandler(OnSlideSwipeManipulationCompleted), true);
         ScrollViewerContentRoot.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
+        ScrollViewerInnerGrid.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         ContinuousPagesRepeater.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         PrevPageZone.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         NextPageZone.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
@@ -172,6 +253,7 @@ public sealed partial class DocumentView : Page
         _topNotificationTimer.Tick += OnTopNotificationTimerTick;
         _viewportDebounceTimer.Tick += OnViewportDebounceTimerTick;
         _searchDebounceTimer.Tick += OnSearchDebounceTimerTick;
+        _touchpadSwipeEndTimer.Tick += OnTouchpadSwipeEndTimerTick;
 
         PdfPageCanvas.CanvasLoaded += OnCanvasLoaded;
         PdfPageCanvas.CanvasUnloaded += OnCanvasUnloaded;
@@ -210,6 +292,8 @@ public sealed partial class DocumentView : Page
         _viewportDebounceTimer.Tick += OnViewportDebounceTimerTick;
         _searchDebounceTimer.Tick -= OnSearchDebounceTimerTick;
         _searchDebounceTimer.Tick += OnSearchDebounceTimerTick;
+        _touchpadSwipeEndTimer.Tick -= OnTouchpadSwipeEndTimerTick;
+        _touchpadSwipeEndTimer.Tick += OnTouchpadSwipeEndTimerTick;
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
         ViewModel.SearchFocusRequested -= OnSearchFocusRequested;
@@ -234,6 +318,7 @@ public sealed partial class DocumentView : Page
 
         if (ViewModel.CurrentDocument is not null)
         {
+            SyncPagedScrollViewerModes();
             UpdateViewportPages(ViewModel.CurrentDocument.ZoomFactor);
         }
     }
@@ -270,6 +355,9 @@ public sealed partial class DocumentView : Page
         _viewportDebounceTimer.Tick -= OnViewportDebounceTimerTick;
         _searchDebounceTimer.Stop();
         _searchDebounceTimer.Tick -= OnSearchDebounceTimerTick;
+        _touchpadSwipeEndTimer.Stop();
+        _touchpadSwipeEndTimer.Tick -= OnTouchpadSwipeEndTimerTick;
+        CancelInteractiveSlideSwipeImmediate();
 
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.SearchFocusRequested -= OnSearchFocusRequested;
@@ -292,6 +380,7 @@ public sealed partial class DocumentView : Page
     /// </summary>
     public void OnWindowMinimized()
     {
+        CancelInteractiveSlideSwipeImmediate();
         StopAutoScroll();
         _viewportDebounceTimer.Stop();
         _searchDebounceTimer.Stop();
@@ -358,6 +447,8 @@ public sealed partial class DocumentView : Page
     private void OnCanvasLoaded(PdfPageCanvas canvas)
     {
         _activeCanvases.Add(canvas);
+        canvas.SyncTouchManipulationMode();
+        SyncPagedScrollViewerModes();
         double targetZoom = ViewModel.CurrentDocument?.ZoomFactor ?? ContinuousScrollViewer.ZoomFactor;
         if (targetZoom > 0.05)
         {
@@ -435,6 +526,8 @@ public sealed partial class DocumentView : Page
         }
 
         FindAndApplyNightMode(ContinuousPagesRepeater, isNightMode);
+        AdjacentLeftPageCanvas?.ApplyNightModeImmediate(isNightMode);
+        AdjacentRightPageCanvas?.ApplyNightModeImmediate(isNightMode);
     }
 
     private static void FindAndApplyNightMode(DependencyObject? parent, bool isNightMode)
@@ -463,6 +556,7 @@ public sealed partial class DocumentView : Page
     {
         if (e.PropertyName == nameof(ShellViewModel.CurrentDocument))
         {
+            CancelInteractiveSlideSwipeImmediate();
             StopAutoScroll();
             SubscribeToDocument(ViewModel.CurrentDocument);
             if (ViewModel.CurrentDocument is not null)
@@ -530,6 +624,7 @@ public sealed partial class DocumentView : Page
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsPresentationMode))
         {
+            CancelInteractiveSlideSwipeImmediate();
             if (ViewModel.IsPresentationMode)
             {
                 if (!_wasInPresentationMode)
@@ -792,6 +887,7 @@ public sealed partial class DocumentView : Page
         _isApplyingZoom = true;
         try
         {
+            EnsureScrollModesEnabledForViewChange();
             ContinuousScrollViewer.UpdateLayout();
             doc.ZoomFactor = restoreZoom;
             UpdateZoomSlider(restoreZoom);
@@ -832,6 +928,7 @@ public sealed partial class DocumentView : Page
 
     private void OnDocumentModeChanged(object? sender, EventArgs e)
     {
+        CancelInteractiveSlideSwipeImmediate();
         if (_isRestoringFromPresentation || ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
         {
             return;
@@ -869,6 +966,7 @@ public sealed partial class DocumentView : Page
                 finally
                 {
                     _isSwitchingMode = false;
+                    SyncPagedScrollViewerModes();
                 }
             });
         }
@@ -913,7 +1011,12 @@ public sealed partial class DocumentView : Page
     {
         if (e.PropertyName == nameof(DocumentViewModel.CurrentPageIndex))
         {
-            if (!_isUpdatingPageFromScroll && !_isApplyingFitZoom && _observedDocument is not null)
+            if (!_isCommittingSlideSwipe && (_isSlideSwipeActive || _isSlideSwipeAnimating))
+            {
+                CancelInteractiveSlideSwipeImmediate();
+            }
+
+            if (!_isUpdatingPageFromScroll && !_isApplyingFitZoom && !_isCommittingSlideSwipe && _observedDocument is not null)
             {
                 ScrollToPage(_observedDocument.CurrentPageIndex);
             }
@@ -940,8 +1043,10 @@ public sealed partial class DocumentView : Page
         }
         else if (e.PropertyName is nameof(DocumentViewModel.IsContinuous) or nameof(DocumentViewModel.IsDoublePage))
         {
+            SyncPagedScrollViewerModes();
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
+                SyncPagedScrollViewerModes();
                 UpdateViewportPages(ViewModel.CurrentDocument?.ZoomFactor ?? ContinuousScrollViewer.ZoomFactor);
             });
         }
@@ -980,7 +1085,7 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        if (!_isHorizontalPushAnimating && PagesRepeaterPushTransform is not null && e.NextView.ZoomFactor > 0.05)
+        if (!_isHorizontalPushAnimating && !_isSlideSwipeActive && !_isSlideSwipeAnimating && PagesRepeaterPushTransform is not null && e.NextView.ZoomFactor > 0.05)
         {
             PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip(e.NextView.ZoomFactor) / e.NextView.ZoomFactor;
         }
@@ -1004,6 +1109,11 @@ public sealed partial class DocumentView : Page
     {
         if (_isSwitchingMode || _isRestoringFromPresentation)
         {
+            if (!e.IsIntermediate)
+            {
+                SyncPagedScrollViewerModes();
+            }
+
             ScheduleViewportUpdate();
             return;
         }
@@ -1014,7 +1124,7 @@ public sealed partial class DocumentView : Page
             ViewModel.CurrentDocument.LastVerticalOffset = ContinuousScrollViewer.VerticalOffset;
 
             double activeZoom = ContinuousScrollViewer.ZoomFactor;
-            if (!_isHorizontalPushAnimating && PagesRepeaterPushTransform is not null && activeZoom > 0.05)
+            if (!_isHorizontalPushAnimating && !_isSlideSwipeActive && !_isSlideSwipeAnimating && PagesRepeaterPushTransform is not null && activeZoom > 0.05)
             {
                 PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip(activeZoom) / activeZoom;
             }
@@ -1053,6 +1163,7 @@ public sealed partial class DocumentView : Page
 
         if (!e.IsIntermediate)
         {
+            SyncPagedScrollViewerModes();
             ScheduleViewportUpdate();
         }
     }
@@ -1315,12 +1426,17 @@ public sealed partial class DocumentView : Page
         }
         else
         {
+            EnsureScrollModesEnabledForViewChange();
             ContinuousScrollViewer.ChangeView(0, 0, null, disableAnimation: true);
             doc.LastVerticalOffset = 0;
             doc.FractionalPageIndex = pageIndex;
             if (_isFittedVertically || ViewModel.IsPresentationMode)
             {
                 DispatcherQueue.TryEnqueue(() => ExecuteFitVertical(force: true));
+            }
+            else
+            {
+                SyncPagedScrollViewerModes();
             }
         }
 
@@ -1371,12 +1487,15 @@ public sealed partial class DocumentView : Page
                 FloatingTopTransform.TranslateX = GetTargetFloatingTopOffsetDip();
             }
 
+            EnsureScrollModesEnabledForViewChange();
             ContinuousScrollViewer.ChangeView(newOffsetX, newOffsetY, newZoom, disableAnimation: true);
 
             ViewModel.SetZoom(newZoom);
+            SyncPagedScrollViewerModes();
             UpdateViewportPages(newZoom);
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
+                SyncPagedScrollViewerModes();
                 UpdateViewportPages(newZoom);
             });
             ScheduleViewportUpdate();
@@ -1403,6 +1522,7 @@ public sealed partial class DocumentView : Page
         _isApplyingFitZoom = true;
         try
         {
+            EnsureScrollModesEnabledForViewChange();
             int cur = Math.Clamp(doc.CurrentPageIndex, 0, doc.Pages.Count - 1);
             var page = doc.Pages[cur];
 
@@ -1474,13 +1594,14 @@ public sealed partial class DocumentView : Page
                 ContinuousScrollViewer.ChangeView(0, 0, (float)targetZoom, disableAnimation: true);
             }
 
-            if (!_isHorizontalPushAnimating && PagesRepeaterPushTransform is not null && targetZoom > 0.05)
+            if (!_isHorizontalPushAnimating && !_isSlideSwipeActive && !_isSlideSwipeAnimating && PagesRepeaterPushTransform is not null && targetZoom > 0.05)
             {
                 PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip() / targetZoom;
             }
 
             _isFittedVertically = true;
             doc.ZoomFactor = targetZoom;
+            SyncPagedScrollViewerModes();
             UpdateViewportPages(targetZoom);
             ScheduleViewportUpdate();
 
@@ -1544,6 +1665,7 @@ public sealed partial class DocumentView : Page
         _isApplyingFitZoom = true;
         try
         {
+            EnsureScrollModesEnabledForViewChange();
             int cur = Math.Clamp(doc.CurrentPageIndex, 0, doc.Pages.Count - 1);
             var page = doc.Pages[cur];
 
@@ -1604,6 +1726,7 @@ public sealed partial class DocumentView : Page
             _isFittedVertically = false;
             ContinuousScrollViewer.ChangeView(0, targetVOffset, (float)targetZoom, disableAnimation: true);
             doc.ZoomFactor = targetZoom;
+            SyncPagedScrollViewerModes();
             UpdateViewportPages(targetZoom);
             ScheduleViewportUpdate();
 
@@ -1665,14 +1788,16 @@ public sealed partial class DocumentView : Page
             StopAutoScroll();
         }
 
-        if (e.Handled || ViewModel.CurrentDocument is not { } doc)
+        if (ReferenceEquals(e, _lastProcessedWheelEventArgs) || ViewModel.CurrentDocument is not { } doc)
         {
             return;
         }
 
+        _lastProcessedWheelEventArgs = e;
         doc.NotifyUserDocumentScrollInitiated();
 
-        var props = e.GetCurrentPoint(ContinuousScrollViewer).Properties;
+        var currentPt = e.GetCurrentPoint(ContinuousScrollViewer);
+        var props = currentPt.Properties;
         bool isCtrlPressed = (e.KeyModifiers & Windows.System.VirtualKeyModifiers.Control) != 0
             || IsKeyDown(Windows.System.VirtualKey.Control)
             || IsKeyDown(Windows.System.VirtualKey.LeftControl)
@@ -1681,13 +1806,14 @@ public sealed partial class DocumentView : Page
         bool isShiftDown = IsKeyDown(Windows.System.VirtualKey.Shift)
             || IsKeyDown(Windows.System.VirtualKey.LeftShift)
             || IsKeyDown(Windows.System.VirtualKey.RightShift);
-        bool isShiftPressed = (e.KeyModifiers & Windows.System.VirtualKeyModifiers.Shift) != 0
-            || isShiftDown
-            || props.IsHorizontalMouseWheel;
+        bool isShiftKeyHeld = (e.KeyModifiers & Windows.System.VirtualKeyModifiers.Shift) != 0
+            || isShiftDown;
+        bool isTouchpadHorizontalWheel = props.IsHorizontalMouseWheel && !isShiftKeyHeld;
+        bool isShiftPressed = isShiftKeyHeld || props.IsHorizontalMouseWheel;
 
         if (!isShiftPressed || isCtrlPressed)
         {
-            if (ContinuousScrollViewer.VerticalScrollMode != ScrollMode.Enabled)
+            if (doc.IsContinuous && !ViewModel.IsPresentationMode && ContinuousScrollViewer.VerticalScrollMode != ScrollMode.Enabled)
             {
                 ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Enabled;
             }
@@ -1695,8 +1821,40 @@ public sealed partial class DocumentView : Page
 
         if (isCtrlPressed)
         {
+            CancelInteractiveSlideSwipeImmediate();
+            EnsureScrollModesEnabledForViewChange();
             _isFittedVertically = false;
+            if (!doc.IsContinuous || ViewModel.IsPresentationMode)
+            {
+                e.Handled = true;
+                int zoomDelta = props.MouseWheelDelta;
+                if (zoomDelta != 0)
+                {
+                    StartOrUpdateSmoothWheelZoom(currentPt.Position, zoomDelta);
+                }
+
+                return;
+            }
+
             return;
+        }
+
+        // Precision Touchpad 2-finger horizontal swipe in Paged / Presentation mode:
+        // In Windows (WM_MOUSEHWHEEL), MouseWheelDelta > 0 means scroll right (content moves left -> swiping 2 fingers left -> Next slide),
+        // and MouseWheelDelta < 0 means scroll left (content moves right -> swiping 2 fingers right -> Previous slide).
+        if (isTouchpadHorizontalWheel && CanUseInteractiveSlideSwipe())
+        {
+            int tpDelta = props.MouseWheelDelta;
+            if (tpDelta != 0)
+            {
+                bool swipingContentRight = tpDelta < 0;
+                if (_isSlideSwipeActive || _isSlideSwipeAnimating || _isDrainingTouchpadInertia || CanStartSwipeInDirection(swipingRight: swipingContentRight))
+                {
+                    e.Handled = true;
+                    HandleTouchpadHorizontalSlideSwipe(tpDelta);
+                    return;
+                }
+            }
         }
 
         if (isShiftPressed)
@@ -1705,6 +1863,7 @@ public sealed partial class DocumentView : Page
             int delta = props.MouseWheelDelta;
             if (delta != 0)
             {
+                CancelInteractiveSlideSwipeImmediate();
                 _isFittedVertically = false;
                 double lockedVerticalOffset = ContinuousScrollViewer.VerticalOffset;
 
@@ -1715,7 +1874,10 @@ public sealed partial class DocumentView : Page
 
                 if (ContinuousScrollViewer.ScrollableWidth > 1.0)
                 {
-                    double scrollDelta = delta > 0 ? -120.0 : 120.0;
+                    EnsureScrollModesEnabledForViewChange();
+                    double scrollDelta = props.IsHorizontalMouseWheel
+                        ? (delta * 0.9)
+                        : (delta > 0 ? -120.0 : 120.0);
                     double newOffset = Math.Clamp(
                         ContinuousScrollViewer.HorizontalOffset + scrollDelta,
                         0,
@@ -1723,7 +1885,7 @@ public sealed partial class DocumentView : Page
 
                     ContinuousScrollViewer.ChangeView(newOffset, lockedVerticalOffset, null, disableAnimation: true);
                 }
-                else if (!doc.IsContinuous)
+                else if (!doc.IsContinuous || ViewModel.IsPresentationMode)
                 {
                     if (delta > 0)
                     {
@@ -1741,27 +1903,63 @@ public sealed partial class DocumentView : Page
 
                 DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
                 {
-                    if (ContinuousScrollViewer.VerticalScrollMode != ScrollMode.Enabled)
-                    {
-                        ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Enabled;
-                    }
+                    SyncPagedScrollViewerModes();
                 });
             }
             return;
         }
 
-        if (!doc.IsContinuous)
+        if (!doc.IsContinuous || ViewModel.IsPresentationMode)
         {
+            // If an interactive horizontal touchpad swipe is currently active, ignore stray vertical wheel jitter
+            if (_isSlideSwipeActive || _isSlideSwipeAnimating)
+            {
+                e.Handled = true;
+                return;
+            }
+
             int delta = props.MouseWheelDelta;
             if (delta != 0)
             {
-                bool canScrollVertically = ContinuousScrollViewer.ScrollableHeight > 4.0 && !_isFittedVertically;
+                bool canScrollVertically = ContinuousScrollViewer.ScrollableHeight > 4.0 && !_isFittedVertically && !ViewModel.IsPresentationMode;
                 bool atTop = ContinuousScrollViewer.VerticalOffset <= 4.0;
                 bool atBottom = ContinuousScrollViewer.VerticalOffset >= ContinuousScrollViewer.ScrollableHeight - 4.0;
 
                 if (!canScrollVertically || (delta > 0 && atTop) || (delta < 0 && atBottom))
                 {
                     e.Handled = true;
+
+                    // Distinguish discrete physical mouse wheel detents (multiples of 120) from continuous Precision Touchpad
+                    // sub-detent packets so diagonal 2-finger horizontal touchpad swipes are never hijacked by tiny vertical drift.
+                    bool isDiscreteMouseWheel = Math.Abs(delta) >= 120 && (Math.Abs(delta) % 120 == 0);
+                    if (!isDiscreteMouseWheel)
+                    {
+                        long nowTick = Environment.TickCount64;
+                        if (nowTick < _ignoreTouchpadVerticalFlipUntilTick)
+                        {
+                            return;
+                        }
+
+                        if (nowTick - _lastTouchpadVerticalPacketTick > 140)
+                        {
+                            _touchpadVerticalWheelAccum = 0.0;
+                            _touchpadHorizontalWheelAccum = 0.0;
+                        }
+
+                        _lastTouchpadVerticalPacketTick = nowTick;
+                        _touchpadVerticalWheelAccum += delta;
+
+                        if (Math.Abs(_touchpadVerticalWheelAccum) < 105.0 ||
+                            Math.Abs(_touchpadHorizontalWheelAccum) >= Math.Abs(_touchpadVerticalWheelAccum))
+                        {
+                            return;
+                        }
+
+                        _touchpadVerticalWheelAccum = 0.0;
+                        _ignoreTouchpadVerticalFlipUntilTick = nowTick + 240;
+                    }
+
+                    CancelInteractiveSlideSwipeImmediate();
                     if (delta > 0)
                     {
                         doc.PreviousPage();
@@ -1771,10 +1969,21 @@ public sealed partial class DocumentView : Page
                         doc.NextPage();
                     }
 
-                    if (_isFittedVertically)
+                    if (_isFittedVertically || ViewModel.IsPresentationMode)
                     {
                         DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
                     }
+                }
+                else
+                {
+                    e.Handled = true;
+                    EnsureScrollModesEnabledForViewChange();
+                    double stepV = -delta * 0.85;
+                    double targetV = Math.Clamp(ContinuousScrollViewer.VerticalOffset + stepV, 0.0, ContinuousScrollViewer.ScrollableHeight);
+                    ContinuousScrollViewer.ChangeView(null, targetV, null, disableAnimation: true);
+                    doc.LastVerticalOffset = targetV;
+                    ScheduleViewportUpdate();
+                    DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, SyncPagedScrollViewerModes);
                 }
             }
         }
@@ -1792,8 +2001,14 @@ public sealed partial class DocumentView : Page
 
     private void OnPrevZoneTapped(object sender, TappedRoutedEventArgs e)
     {
+        if (_isSlideSwipeActive || _isSlideSwipeAnimating || (Environment.TickCount64 - _lastSlideSwipeCompletedTick < 180))
+        {
+            return;
+        }
+
+        CancelInteractiveSlideSwipeImmediate();
         ViewModel.CurrentDocument?.PreviousPage();
-        if (_isFittedVertically)
+        if (_isFittedVertically || ViewModel.IsPresentationMode)
         {
             DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
         }
@@ -1811,8 +2026,14 @@ public sealed partial class DocumentView : Page
 
     private void OnNextZoneTapped(object sender, TappedRoutedEventArgs e)
     {
+        if (_isSlideSwipeActive || _isSlideSwipeAnimating || (Environment.TickCount64 - _lastSlideSwipeCompletedTick < 180))
+        {
+            return;
+        }
+
+        CancelInteractiveSlideSwipeImmediate();
         ViewModel.CurrentDocument?.NextPage();
-        if (_isFittedVertically)
+        if (_isFittedVertically || ViewModel.IsPresentationMode)
         {
             DispatcherQueue.TryEnqueue(() => ExecuteFitVertical());
         }
@@ -1876,9 +2097,11 @@ public sealed partial class DocumentView : Page
             targetVOffset = 0;
         }
 
+        EnsureScrollModesEnabledForViewChange();
         ContinuousScrollViewer.ChangeView(0, targetVOffset, (float)restoredZoom, disableAnimation: true);
         doc.ZoomFactor = restoredZoom;
         UpdateZoomSlider(restoredZoom);
+        SyncPagedScrollViewerModes();
         UpdateViewportPages(restoredZoom);
         ScheduleViewportUpdate();
     }
@@ -2476,6 +2699,8 @@ public sealed partial class DocumentView : Page
         {
             return;
         }
+
+        CancelInteractiveSlideSwipeImmediate();
 
         if (forward)
         {
@@ -3906,6 +4131,1381 @@ public sealed partial class DocumentView : Page
             }
 
             ScheduleViewportUpdate();
+        }
+    }
+
+    // =========================================================================
+    // Interactive Horizontal Slide Swipe (1-Finger Touch & 2-Finger Precision Touchpad)
+    // =========================================================================
+
+    private bool CanUseInteractiveSlideSwipe()
+    {
+        if (ViewModel?.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return false;
+        }
+
+        if (_isRestoringFromPresentation || _isAutoScrolling)
+        {
+            return false;
+        }
+
+        return !doc.IsContinuous || ViewModel.IsPresentationMode;
+    }
+
+    private bool CanPanHorizontallyInPagedMode()
+    {
+        if (ViewModel?.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return false;
+        }
+
+        if (doc.IsContinuous && !ViewModel.IsPresentationMode)
+        {
+            return true;
+        }
+
+        if (_isFittedVertically)
+        {
+            return false;
+        }
+
+        double zoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor;
+        double rowWidthDip = GetDisplayedRowContentWidthDip(doc, doc.CurrentPageIndex);
+        double rawViewerW = ContinuousScrollViewer.ActualWidth > 0 ? ContinuousScrollViewer.ActualWidth : ContinuousScrollViewer.ViewportWidth;
+        double availW = GetAvailableDocumentWidthDip(rawViewerW);
+        return (rowWidthDip * zoom) > (availW + 8.0) && ContinuousScrollViewer.ScrollableWidth > 4.0;
+    }
+
+    private bool CanPanVerticallyInPagedMode()
+    {
+        if (ViewModel?.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return false;
+        }
+
+        if (doc.IsContinuous && !ViewModel.IsPresentationMode)
+        {
+            return true;
+        }
+
+        if (_isFittedVertically)
+        {
+            return false;
+        }
+
+        double zoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor;
+        double rowHeightDip = GetDisplayedRowContentHeightDip(doc, doc.CurrentPageIndex);
+        double rawViewerH = ContinuousScrollViewer.ActualHeight > 0 ? ContinuousScrollViewer.ActualHeight : ContinuousScrollViewer.ViewportHeight;
+        return (rowHeightDip * zoom) > (rawViewerH + 8.0) && ContinuousScrollViewer.ScrollableHeight > 4.0;
+    }
+
+    private bool CanStartSwipeInDirection(bool swipingRight)
+    {
+        if (!CanUseInteractiveSlideSwipe())
+        {
+            return false;
+        }
+
+        if (!CanPanHorizontallyInPagedMode())
+        {
+            return true;
+        }
+
+        // When zoomed horizontally in Paged / Presentation mode, allow starting a slide swipe only when already at the horizontal scroll edge
+        if (swipingRight)
+        {
+            return ContinuousScrollViewer.HorizontalOffset <= 4.0;
+        }
+
+        return ContinuousScrollViewer.HorizontalOffset >= ContinuousScrollViewer.ScrollableWidth - 4.0;
+    }
+
+    private void EnsureScrollModesEnabledForViewChange()
+    {
+        if (ContinuousScrollViewer is null)
+        {
+            return;
+        }
+
+        if (ContinuousScrollViewer.HorizontalScrollMode != ScrollMode.Enabled)
+        {
+            ContinuousScrollViewer.HorizontalScrollMode = ScrollMode.Enabled;
+        }
+
+        if (ContinuousScrollViewer.VerticalScrollMode != ScrollMode.Enabled)
+        {
+            ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Enabled;
+        }
+
+        if (ContinuousScrollViewer.ZoomMode != ZoomMode.Enabled)
+        {
+            ContinuousScrollViewer.ZoomMode = ZoomMode.Enabled;
+        }
+    }
+
+    private void SyncPagedScrollViewerModes()
+    {
+        if (ContinuousScrollViewer is null || ScrollViewerContentRoot is null)
+        {
+            return;
+        }
+
+        // Always keep ScrollViewer ScrollModes and ZoomMode Enabled so WinUI 3 ScrollContentPresenter
+        // always divides its arrange slot by ZoomFactor (preserving pixel-perfect centering at all zoom levels)
+        // and native DirectManipulation pinch-to-zoom works smoothly on both Touchpad and Touchscreen.
+        EnsureScrollModesEnabledForViewChange();
+
+        bool isPres = ViewModel?.IsPresentationMode == true;
+        ScrollBarVisibility targetVBar = isPres ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Visible;
+        ScrollBarVisibility targetHBar = isPres ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Auto;
+
+        if (ContinuousScrollViewer.VerticalScrollBarVisibility != targetVBar)
+        {
+            ContinuousScrollViewer.VerticalScrollBarVisibility = targetVBar;
+        }
+
+        if (ContinuousScrollViewer.HorizontalScrollBarVisibility != targetHBar)
+        {
+            ContinuousScrollViewer.HorizontalScrollBarVisibility = targetHBar;
+        }
+
+        bool isPagedOrPres = CanUseInteractiveSlideSwipe();
+        if (isPagedOrPres && !_isApplyingFitZoom && !_isApplyingZoom &&
+            ContinuousScrollViewer.ScrollableWidth <= 4.0 && ContinuousScrollViewer.ScrollableHeight <= 4.0 &&
+            isPres)
+        {
+            _isFittedVertically = true;
+        }
+
+        bool useCustomSwipeManip = isPagedOrPres && _activeTouchPointerIds.Count <= 1;
+        ApplyManipulationModeToViewerContent(useCustomSwipeManip);
+    }
+
+    private void ApplyManipulationModeToViewerContent(bool useCustomSwipeManip)
+    {
+        // IMPORTANT: Never overwrite ContinuousScrollViewer.ManipulationMode or its internal ScrollContentPresenter,
+        // so ScrollViewer internal DirectManipulation zoom/centering transforms remain 100% intact.
+        ManipulationModes targetMode = useCustomSwipeManip
+            ? PagedCustomManipulationMode
+            : ManipulationModes.System;
+
+        SetElementManipulationMode(ScrollViewerInnerGrid, targetMode);
+        SetElementManipulationMode(ContinuousPagesRepeater, targetMode);
+        SetElementManipulationMode(PrevPageZone, targetMode);
+        SetElementManipulationMode(NextPageZone, targetMode);
+
+        foreach (PdfPageCanvas canvas in _activeCanvases.ToArray())
+        {
+            canvas.SyncTouchManipulationMode(useCustomSwipeManip);
+        }
+    }
+
+    private static void SetElementManipulationMode(UIElement? element, ManipulationModes mode)
+    {
+        if (element is not null && element.ManipulationMode != mode)
+        {
+            element.ManipulationMode = mode;
+        }
+    }
+
+    private void StartOrUpdateSmoothWheelZoom(Point pivotInViewport, int wheelDelta)
+    {
+        if (ViewModel?.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return;
+        }
+
+        double currentZoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor;
+        if (!_isSmoothZoomRenderingSubscribed || _smoothZoomTargetFactor <= 0.05)
+        {
+            _smoothZoomTargetFactor = currentZoom;
+        }
+
+        double factorStep = Math.Pow(1.13, wheelDelta / 120.0);
+        _smoothZoomTargetFactor = Math.Clamp(_smoothZoomTargetFactor * factorStep, DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
+        _smoothZoomPivotPoint = pivotInViewport;
+        _lastSmoothZoomRenderTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        if (!_isSmoothZoomRenderingSubscribed)
+        {
+            CompositionTarget.Rendering += OnSmoothZoomRendering;
+            _isSmoothZoomRenderingSubscribed = true;
+        }
+    }
+
+    private void StopSmoothWheelZoom()
+    {
+        if (_isSmoothZoomRenderingSubscribed)
+        {
+            CompositionTarget.Rendering -= OnSmoothZoomRendering;
+            _isSmoothZoomRenderingSubscribed = false;
+        }
+    }
+
+    private void OnSmoothZoomRendering(object? sender, object e)
+    {
+        if (ViewModel?.CurrentDocument is not { Pages.Count: > 0 } doc || _isSwitchingMode || _isRestoringFromPresentation)
+        {
+            StopSmoothWheelZoom();
+            return;
+        }
+
+        long nowTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        double dt = (double)(nowTicks - _lastSmoothZoomRenderTicks) / System.Diagnostics.Stopwatch.Frequency;
+        _lastSmoothZoomRenderTicks = nowTicks;
+        dt = Math.Clamp(dt, 0.002, 0.050);
+
+        double currentZoom = Math.Max(0.05, ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor);
+        double diff = _smoothZoomTargetFactor - currentZoom;
+        if (Math.Abs(diff) < 0.0015)
+        {
+            StopSmoothWheelZoom();
+            ApplyInteractiveZoomAroundPoint(_smoothZoomPivotPoint, _smoothZoomTargetFactor / currentZoom, 0.0, 0.0);
+            SyncPagedScrollViewerModes();
+            return;
+        }
+
+        double alpha = 1.0 - Math.Exp(-26.0 * dt);
+        double nextZoom = currentZoom + (diff * alpha);
+        ApplyInteractiveZoomAroundPoint(_smoothZoomPivotPoint, nextZoom / currentZoom, 0.0, 0.0);
+    }
+
+    private void ApplyInteractiveZoomAroundPoint(Point viewportPoint, double zoomMultiplier, double panDx, double panDy)
+    {
+        if (_isApplyingZoom || ViewModel?.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return;
+        }
+
+        _isApplyingZoom = true;
+        try
+        {
+            _isFittedVertically = false;
+            EnsureScrollModesEnabledForViewChange();
+
+            double oldZoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor);
+            double newZoom = Math.Clamp(oldZoom * zoomMultiplier, DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
+
+            double vw = ContinuousScrollViewer.ViewportWidth > 0 ? ContinuousScrollViewer.ViewportWidth : ContinuousScrollViewer.ActualWidth;
+            double vh = ContinuousScrollViewer.ViewportHeight > 0 ? ContinuousScrollViewer.ViewportHeight : ContinuousScrollViewer.ActualHeight;
+            double pivotX = vw > 0 ? Math.Clamp(viewportPoint.X, 0.0, vw) : 0.0;
+            double pivotY = vh > 0 ? Math.Clamp(viewportPoint.Y, 0.0, vh) : 0.0;
+
+            double contentX = (ContinuousScrollViewer.HorizontalOffset + pivotX) / oldZoom;
+            double contentY = (ContinuousScrollViewer.VerticalOffset + pivotY) / oldZoom;
+
+            double newOffsetX = Math.Max(0.0, (contentX * newZoom) - pivotX - panDx);
+            double newOffsetY = Math.Max(0.0, (contentY * newZoom) - pivotY - panDy);
+
+            if (!_isHorizontalPushAnimating && !_isSlideSwipeActive && !_isSlideSwipeAnimating && PagesRepeaterPushTransform is not null && newZoom > 0.05)
+            {
+                PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip(newZoom) / newZoom;
+            }
+
+            ContinuousScrollViewer.ChangeView(newOffsetX, newOffsetY, (float)newZoom, disableAnimation: true);
+            ViewModel.SetZoom((float)newZoom);
+            UpdateViewportPages(newZoom);
+            ScheduleViewportUpdate();
+        }
+        finally
+        {
+            _isApplyingZoom = false;
+        }
+    }
+
+    private void PanPagedScrollViewerBy(double deltaX, double deltaY)
+    {
+        if (ViewModel?.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return;
+        }
+
+        bool canH = CanPanHorizontallyInPagedMode();
+        bool canV = CanPanVerticallyInPagedMode();
+        if (!canH && !canV)
+        {
+            return;
+        }
+
+        EnsureScrollModesEnabledForViewChange();
+        double? targetH = null;
+        double? targetV = null;
+
+        if (canH && Math.Abs(deltaX) > 0.01)
+        {
+            targetH = Math.Clamp(ContinuousScrollViewer.HorizontalOffset - deltaX, 0.0, ContinuousScrollViewer.ScrollableWidth);
+            doc.LastHorizontalOffset = targetH.Value;
+        }
+
+        if (canV && Math.Abs(deltaY) > 0.01)
+        {
+            targetV = Math.Clamp(ContinuousScrollViewer.VerticalOffset - deltaY, 0.0, ContinuousScrollViewer.ScrollableHeight);
+            doc.LastVerticalOffset = targetV.Value;
+        }
+
+        if (targetH.HasValue || targetV.HasValue)
+        {
+            ContinuousScrollViewer.ChangeView(targetH, targetV, null, disableAnimation: true);
+            ScheduleViewportUpdate();
+        }
+    }
+
+    private double GetDisplayedRowContentWidthDip(DocumentViewModel doc, int leftPageIndex)
+    {
+        if (leftPageIndex < 0 || leftPageIndex >= doc.Pages.Count)
+        {
+            return 612.0;
+        }
+
+        double borderAdd = ViewModel.IsPresentationMode ? 0.0 : 2.0;
+        double leftW = GetDisplayedPageWidthDip(doc.Pages[leftPageIndex], doc.Rotation) + borderAdd;
+        bool isDouble = doc.IsDoublePage && !ViewModel.IsPresentationMode && (leftPageIndex + 1 < doc.Pages.Count);
+        if (!isDouble)
+        {
+            return leftW;
+        }
+
+        double rightW = GetDisplayedPageWidthDip(doc.Pages[leftPageIndex + 1], doc.Rotation) + borderAdd;
+        return leftW + 16.0 + rightW;
+    }
+
+    private double GetDisplayedRowContentHeightDip(DocumentViewModel doc, int leftPageIndex)
+    {
+        if (leftPageIndex < 0 || leftPageIndex >= doc.Pages.Count)
+        {
+            return 792.0;
+        }
+
+        double borderAdd = ViewModel.IsPresentationMode ? 0.0 : 2.0;
+        double leftH = GetDisplayedPageHeightDip(doc.Pages[leftPageIndex], doc.Rotation) + borderAdd;
+        bool isDouble = doc.IsDoublePage && !ViewModel.IsPresentationMode && (leftPageIndex + 1 < doc.Pages.Count);
+        if (!isDouble)
+        {
+            return leftH;
+        }
+
+        double rightH = GetDisplayedPageHeightDip(doc.Pages[leftPageIndex + 1], doc.Rotation) + borderAdd;
+        return Math.Max(leftH, rightH);
+    }
+
+    private void OnSlideSwipePointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        var pt = e.GetCurrentPoint(ScrollViewerContentRoot);
+        if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse)
+        {
+            _isMouseButtonDown = pt.Properties.IsLeftButtonPressed || pt.Properties.IsRightButtonPressed || pt.Properties.IsMiddleButtonPressed;
+            return;
+        }
+
+        if (e.Pointer.PointerDeviceType != Microsoft.UI.Input.PointerDeviceType.Touch)
+        {
+            return;
+        }
+
+        _isMouseButtonDown = false;
+        _activeTouchPointerIds.Add(e.Pointer.PointerId);
+
+        if (!CanUseInteractiveSlideSwipe())
+        {
+            return;
+        }
+
+        // If a 2nd finger touches down (pinch-to-zoom), immediately cancel any horizontal slide swipe
+        // and hand both touch contacts to ScrollViewer native DirectManipulation for butter-smooth 120Hz pinch-zoom.
+        if (_activeTouchPointerIds.Count > 1)
+        {
+            _isTouchSwipeTracking = false;
+            _isTouchSwipeEngaged = false;
+            _isManipulatingSlideSwipe = false;
+            _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
+            if (_isSlideSwipeActive || _isSlideSwipeAnimating)
+            {
+                CancelInteractiveSlideSwipeImmediate();
+            }
+
+            ApplyManipulationModeToViewerContent(useCustomSwipeManip: false);
+            try
+            {
+                if (_firstTouchPointer is not null)
+                {
+                    _ = TryStartDirectManipulation(_firstTouchPointer);
+                }
+
+                _ = TryStartDirectManipulation(e.Pointer);
+            }
+            catch
+            {
+            }
+
+            return;
+        }
+
+        _firstTouchPointer = e.Pointer;
+
+        if (_isSlideSwipeAnimating)
+        {
+            CompleteSlideSwipeAnimationImmediate();
+        }
+
+        SyncPagedScrollViewerModes();
+
+        _touchSwipePointerId = e.Pointer.PointerId;
+        _touchSwipeStartPoint = pt.Position;
+        _touchSwipeLastPoint = pt.Position;
+        _touchSwipeLastTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+        _isTouchSwipeTracking = true;
+        _isTouchSwipeEngaged = false;
+        _touchGestureAxis = PagedTouchGestureAxis.Undecided;
+    }
+
+    private void OnSlideSwipePointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse)
+        {
+            var mousePt = e.GetCurrentPoint(ScrollViewerContentRoot);
+            _isMouseButtonDown = mousePt.Properties.IsLeftButtonPressed || mousePt.Properties.IsRightButtonPressed || mousePt.Properties.IsMiddleButtonPressed;
+            return;
+        }
+
+        if (e.Pointer.PointerDeviceType != Microsoft.UI.Input.PointerDeviceType.Touch ||
+            e.Pointer.PointerId != _touchSwipePointerId ||
+            !_isTouchSwipeTracking ||
+            _isManipulatingSlideSwipe ||
+            _activeTouchPointerIds.Count > 1)
+        {
+            return;
+        }
+
+        if (!CanUseInteractiveSlideSwipe())
+        {
+            _isTouchSwipeTracking = false;
+            return;
+        }
+
+        Point pos = e.GetCurrentPoint(ScrollViewerContentRoot).Position;
+        long nowTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        double dt = (double)(nowTicks - _touchSwipeLastTimestamp) / System.Diagnostics.Stopwatch.Frequency;
+        double stepDx = pos.X - _touchSwipeLastPoint.X;
+        double stepDy = pos.Y - _touchSwipeLastPoint.Y;
+        _touchSwipeLastPoint = pos;
+        _touchSwipeLastTimestamp = nowTicks;
+
+        if (!_isTouchSwipeEngaged)
+        {
+            double totalDx = pos.X - _touchSwipeStartPoint.X;
+            double totalDy = pos.Y - _touchSwipeStartPoint.Y;
+
+            if (Math.Abs(totalDy) > 12.0 && Math.Abs(totalDy) > Math.Abs(totalDx) * 1.2)
+            {
+                if (CanPanVerticallyInPagedMode() || CanPanHorizontallyInPagedMode())
+                {
+                    _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
+                    PanPagedScrollViewerBy(stepDx, stepDy);
+                }
+
+                _isTouchSwipeTracking = false;
+                return;
+            }
+
+            if (Math.Abs(totalDx) >= SlideSwipeDirectionLockDip && Math.Abs(totalDx) >= Math.Abs(totalDy) * 1.1)
+            {
+                if (!CanStartSwipeInDirection(swipingRight: totalDx > 0))
+                {
+                    if (CanPanHorizontallyInPagedMode())
+                    {
+                        _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
+                        PanPagedScrollViewerBy(stepDx, stepDy);
+                    }
+
+                    _isTouchSwipeTracking = false;
+                    return;
+                }
+
+                _touchGestureAxis = PagedTouchGestureAxis.HorizontalSwipe;
+                _isTouchSwipeEngaged = true;
+                BeginInteractiveSlideSwipe();
+                stepDx = totalDx;
+            }
+            else
+            {
+                return;
+            }
+        }
+
+        if (dt > 0.0005 && dt < 0.25)
+        {
+            double instantVx = stepDx / dt;
+            _swipeVelocityX = Math.Abs(_swipeVelocityX) < 1.0
+                ? instantVx
+                : (0.65 * instantVx) + (0.35 * _swipeVelocityX);
+        }
+
+        UpdateInteractiveSlideSwipeDelta(_swipeRawDeltaX + stepDx);
+    }
+
+    private void OnSlideSwipePointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse)
+        {
+            _isMouseButtonDown = false;
+            return;
+        }
+
+        if (e.Pointer.PointerDeviceType != Microsoft.UI.Input.PointerDeviceType.Touch)
+        {
+            return;
+        }
+
+        _activeTouchPointerIds.Remove(e.Pointer.PointerId);
+        if (_activeTouchPointerIds.Count == 0)
+        {
+            _firstTouchPointer = null;
+        }
+
+        if (e.Pointer.PointerId == _touchSwipePointerId)
+        {
+            _isTouchSwipeTracking = false;
+            if (_isTouchSwipeEngaged && !_isManipulatingSlideSwipe)
+            {
+                _isTouchSwipeEngaged = false;
+                CompleteInteractiveSlideSwipe(fromTouchpad: false);
+            }
+        }
+
+        if (_activeTouchPointerIds.Count == 0 && !_isSlideSwipeActive && !_isSlideSwipeAnimating)
+        {
+            SyncPagedScrollViewerModes();
+        }
+    }
+
+    private void OnSlideSwipePointerCanceled(object sender, PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Touch)
+        {
+            _activeTouchPointerIds.Remove(e.Pointer.PointerId);
+            if (_activeTouchPointerIds.Count == 0)
+            {
+                _firstTouchPointer = null;
+            }
+
+            if (e.Pointer.PointerId == _touchSwipePointerId)
+            {
+                _isTouchSwipeTracking = false;
+
+                // When XAML ManipulationStarted activates on the UI thread, WinUI raises PointerCanceled
+                // for the raw pointer stream while ManipulationDelta continues tracking the finger.
+                if (_isTouchSwipeEngaged && !_isManipulatingSlideSwipe)
+                {
+                    _isTouchSwipeEngaged = false;
+                    CompleteInteractiveSlideSwipe(fromTouchpad: false);
+                }
+            }
+        }
+        else if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse)
+        {
+            _isMouseButtonDown = false;
+        }
+    }
+
+    private void OnSlideSwipePointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Touch && !_isManipulatingSlideSwipe)
+        {
+            _activeTouchPointerIds.Remove(e.Pointer.PointerId);
+            if (_activeTouchPointerIds.Count == 0)
+            {
+                _firstTouchPointer = null;
+            }
+        }
+    }
+
+    private void OnSlideSwipeManipulationStarting(object sender, ManipulationStartingRoutedEventArgs e)
+    {
+        if (CanUseInteractiveSlideSwipe() && _activeTouchPointerIds.Count <= 1 && ScrollViewerContentRoot is not null)
+        {
+            e.Container = ScrollViewerContentRoot;
+            e.Mode = PagedCustomManipulationMode;
+        }
+    }
+
+    private void OnSlideSwipeManipulationStarted(object sender, ManipulationStartedRoutedEventArgs e)
+    {
+        if (_isMouseButtonDown || !CanUseInteractiveSlideSwipe())
+        {
+            return;
+        }
+
+        if (_isSlideSwipeAnimating)
+        {
+            CompleteSlideSwipeAnimationImmediate();
+        }
+
+        _isManipulatingSlideSwipe = true;
+        _isTouchSwipeTracking = false;
+        _isTouchSwipeEngaged = false;
+        _manipCumulativeDx = _isSlideSwipeActive ? _swipeRawDeltaX : 0.0;
+        _manipCumulativeDy = 0.0;
+
+        if (_activeTouchPointerIds.Count > 1)
+        {
+            _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
+            if (_isSlideSwipeActive)
+            {
+                CancelInteractiveSlideSwipeImmediate();
+            }
+        }
+        else if (_isSlideSwipeActive)
+        {
+            _touchGestureAxis = PagedTouchGestureAxis.HorizontalSwipe;
+        }
+        else
+        {
+            _touchGestureAxis = PagedTouchGestureAxis.Undecided;
+        }
+    }
+
+    private void OnSlideSwipeManipulationDelta(object sender, ManipulationDeltaRoutedEventArgs e)
+    {
+        if (!_isManipulatingSlideSwipe)
+        {
+            return;
+        }
+
+        if (!CanUseInteractiveSlideSwipe())
+        {
+            _isManipulatingSlideSwipe = false;
+            CancelInteractiveSlideSwipeImmediate();
+            return;
+        }
+
+        double deltaX = e.Delta.Translation.X;
+        double deltaY = e.Delta.Translation.Y;
+        double scaleDelta = e.Delta.Scale;
+
+        // 2-finger pinch-to-zoom fallback if manipulation stayed on XAML thread
+        if (_activeTouchPointerIds.Count > 1 || Math.Abs(scaleDelta - 1.0) > 0.002)
+        {
+            _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
+            if (_isSlideSwipeActive)
+            {
+                CancelInteractiveSlideSwipeImmediate();
+            }
+
+            if (Math.Abs(scaleDelta - 1.0) > 0.001)
+            {
+                ApplyInteractiveZoomAroundPoint(e.Position, scaleDelta, deltaX, deltaY);
+            }
+            else
+            {
+                PanPagedScrollViewerBy(deltaX, deltaY);
+            }
+
+            return;
+        }
+
+        _manipCumulativeDx += deltaX;
+        _manipCumulativeDy += deltaY;
+
+        if (_touchGestureAxis == PagedTouchGestureAxis.Undecided)
+        {
+            bool canPanH = CanPanHorizontallyInPagedMode();
+            bool canPanV = CanPanVerticallyInPagedMode();
+
+            if (canPanV && Math.Abs(_manipCumulativeDy) >= SlideSwipeDirectionLockDip &&
+                Math.Abs(_manipCumulativeDy) > Math.Abs(_manipCumulativeDx) * 1.15)
+            {
+                _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
+                PanPagedScrollViewerBy(_manipCumulativeDx, _manipCumulativeDy);
+                return;
+            }
+
+            if (Math.Abs(_manipCumulativeDx) >= 3.5 &&
+                (!canPanV || Math.Abs(_manipCumulativeDx) >= Math.Abs(_manipCumulativeDy) * 0.9))
+            {
+                if (canPanH && !CanStartSwipeInDirection(swipingRight: _manipCumulativeDx > 0))
+                {
+                    _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
+                    PanPagedScrollViewerBy(_manipCumulativeDx, _manipCumulativeDy);
+                    return;
+                }
+
+                _touchGestureAxis = PagedTouchGestureAxis.HorizontalSwipe;
+                if (!_isSlideSwipeActive)
+                {
+                    BeginInteractiveSlideSwipe();
+                }
+
+                deltaX = _manipCumulativeDx;
+            }
+            else
+            {
+                return;
+            }
+        }
+
+        if (_touchGestureAxis == PagedTouchGestureAxis.PanOrZoom)
+        {
+            PanPagedScrollViewerBy(deltaX, deltaY);
+            return;
+        }
+
+        double velocityDipPerSec = e.Velocities.Linear.X * 1000.0;
+        if (Math.Abs(velocityDipPerSec) > 1.0)
+        {
+            _swipeVelocityX = velocityDipPerSec;
+        }
+
+        UpdateInteractiveSlideSwipeDelta(_swipeRawDeltaX + deltaX);
+    }
+
+    private void OnSlideSwipeManipulationCompleted(object sender, ManipulationCompletedRoutedEventArgs e)
+    {
+        if (!_isManipulatingSlideSwipe)
+        {
+            return;
+        }
+
+        _isManipulatingSlideSwipe = false;
+        _activeTouchPointerIds.Clear();
+        _firstTouchPointer = null;
+
+        if (_touchGestureAxis == PagedTouchGestureAxis.HorizontalSwipe && _isSlideSwipeActive)
+        {
+            double finalVelocityDipPerSec = e.Velocities.Linear.X * 1000.0;
+            if (Math.Abs(finalVelocityDipPerSec) > Math.Abs(_swipeVelocityX))
+            {
+                _swipeVelocityX = finalVelocityDipPerSec;
+            }
+
+            CompleteInteractiveSlideSwipe(fromTouchpad: false);
+        }
+        else
+        {
+            SyncPagedScrollViewerModes();
+        }
+
+        _touchGestureAxis = PagedTouchGestureAxis.Undecided;
+    }
+
+    private void HandleTouchpadHorizontalSlideSwipe(int wheelDelta)
+    {
+        if (_isManipulatingSlideSwipe || !CanUseInteractiveSlideSwipe())
+        {
+            return;
+        }
+
+        long nowTick = Environment.TickCount64;
+        int absDelta = Math.Abs(wheelDelta);
+        int wheelSign = Math.Sign(wheelDelta);
+
+        if (nowTick - _lastTouchpadVerticalPacketTick > 140)
+        {
+            _touchpadVerticalWheelAccum = 0.0;
+            _touchpadHorizontalWheelAccum = 0.0;
+        }
+
+        _lastTouchpadVerticalPacketTick = nowTick;
+        _touchpadHorizontalWheelAccum += wheelDelta;
+
+        // 1. If a slide transition animation is currently playing, NEVER abort it on incoming touchpad inertia packets;
+        // let the animation play smoothly to completion while absorbing same-direction inertia.
+        if (_isSlideSwipeAnimating)
+        {
+            _lastTouchpadInertiaDrainTick = nowTick;
+            return;
+        }
+
+        // 2. Drain OS touchpad inertia tail after a swipe has already committed or bounced so a single fast flick
+        // flips at most ONE slide with full animation instead of skipping multiple pages.
+        if (_isDrainingTouchpadInertia)
+        {
+            bool sameDirection = wheelSign == _committedTouchpadWheelSign;
+            long gapSinceLastPacket = nowTick - _lastTouchpadInertiaDrainTick;
+            long elapsedSinceDrainStart = nowTick - _touchpadInertiaDrainStartTick;
+
+            if (sameDirection && gapSinceLastPacket < 135 && elapsedSinceDrainStart < 620)
+            {
+                // Allow breaking out early ONLY if enough time passed, inertia had already decayed to near-zero,
+                // and the user clearly started a fresh deliberate push (surge >= 3x from <= 5).
+                if (elapsedSinceDrainStart > 240 && _lastTouchpadWheelAbsDelta <= 5 && absDelta >= 18)
+                {
+                    _isDrainingTouchpadInertia = false;
+                }
+                else
+                {
+                    _lastTouchpadWheelAbsDelta = Math.Min(_lastTouchpadWheelAbsDelta, absDelta);
+                    _lastTouchpadInertiaDrainTick = nowTick;
+                    return;
+                }
+            }
+            else
+            {
+                _isDrainingTouchpadInertia = false;
+            }
+        }
+
+        long nowPerf = System.Diagnostics.Stopwatch.GetTimestamp();
+        double dt = _touchpadLastWheelTimestamp > 0
+            ? (double)(nowPerf - _touchpadLastWheelTimestamp) / System.Diagnostics.Stopwatch.Frequency
+            : 0.016;
+        _touchpadLastWheelTimestamp = nowPerf;
+        dt = Math.Clamp(dt, 0.004, 0.080);
+
+        if (!_isSlideSwipeActive)
+        {
+            bool swipingContentRight = wheelDelta < 0;
+            if (!CanStartSwipeInDirection(swipingRight: swipingContentRight))
+            {
+                return;
+            }
+
+            _isTouchpadWheelSwipeActive = true;
+            _touchpadDecayingFrameCount = 0;
+            _lastTouchpadWheelAbsDelta = absDelta;
+            BeginInteractiveSlideSwipe();
+        }
+        else
+        {
+            if (absDelta < _lastTouchpadWheelAbsDelta)
+            {
+                _touchpadDecayingFrameCount++;
+            }
+            else if (absDelta > _lastTouchpadWheelAbsDelta)
+            {
+                _touchpadDecayingFrameCount = 0;
+            }
+
+            _lastTouchpadWheelAbsDelta = absDelta;
+        }
+
+        // In Windows WM_MOUSEHWHEEL (IsHorizontalMouseWheel == true), positive wheelDelta (> 0) means scroll right
+        // (content moves left -> swiping 2 fingers left -> Next page), and negative wheelDelta (< 0) means scroll left
+        // (content moves right -> swiping 2 fingers right -> Previous page).
+        double stepDip = -wheelDelta * TouchpadWheelToDipScale;
+        double instantVx = stepDip / dt;
+        _swipeVelocityX = Math.Abs(_swipeVelocityX) < 1.0
+            ? instantVx
+            : (0.60 * instantVx) + (0.40 * _swipeVelocityX);
+
+        UpdateInteractiveSlideSwipeDelta(_swipeRawDeltaX + stepDip);
+
+        // If the user executed a fast two-finger flick on the touchpad (crossing commit distance at high velocity
+        // followed by decaying inertia frames), commit once to the smooth slide animation and latch inertia drain.
+        double rawW = ContinuousScrollViewer.ActualWidth > 0 ? ContinuousScrollViewer.ActualWidth : ContinuousScrollViewer.ViewportWidth;
+        double availW = GetAvailableDocumentWidthDip(rawW);
+        if (_swipeTargetPageIndex >= 0 &&
+            _touchpadDecayingFrameCount >= 2 &&
+            Math.Abs(_swipeRawDeltaX) >= Math.Max(72.0, availW * 0.25) &&
+            Math.Abs(_swipeVelocityX) >= 540.0 &&
+            Math.Sign(_swipeVelocityX) == Math.Sign(_swipeRawDeltaX))
+        {
+            _touchpadSwipeEndTimer.Stop();
+            _isDrainingTouchpadInertia = true;
+            _committedTouchpadWheelSign = wheelSign;
+            _lastTouchpadInertiaDrainTick = nowTick;
+            _touchpadInertiaDrainStartTick = nowTick;
+            CompleteInteractiveSlideSwipe(fromTouchpad: true);
+            return;
+        }
+
+        _touchpadSwipeEndTimer.Stop();
+        _touchpadSwipeEndTimer.Start();
+    }
+
+    private void OnTouchpadSwipeEndTimerTick(object? sender, object e)
+    {
+        _touchpadSwipeEndTimer.Stop();
+        if (_isTouchpadWheelSwipeActive && _isSlideSwipeActive && !_isSlideSwipeAnimating)
+        {
+            CompleteInteractiveSlideSwipe(fromTouchpad: true);
+        }
+    }
+
+    private void BeginInteractiveSlideSwipe()
+    {
+        _slideSwipeStoryboard?.Stop();
+        _slideSwipeStoryboard = null;
+        _horizontalPushStoryboard?.Stop();
+        _isHorizontalPushAnimating = false;
+
+        _isSlideSwipeActive = true;
+        _isSlideSwipeAnimating = false;
+        _swipeRawDeltaX = 0.0;
+        _swipeVisualDeltaX = 0.0;
+        _swipeVelocityX = 0.0;
+        _swipeTargetPageIndex = -1;
+        _swipeBoundTargetPageIndex = -1;
+        _swipeAdjScaleRatio = 1.0;
+    }
+
+    private void GetZoomedViewportCenterShiftScreenDip(out double shiftX, out double shiftY)
+    {
+        shiftX = ContinuousScrollViewer is not null && ContinuousScrollViewer.ScrollableWidth > 0.5
+            ? (ContinuousScrollViewer.HorizontalOffset - (ContinuousScrollViewer.ScrollableWidth / 2.0))
+            : 0.0;
+        shiftY = ContinuousScrollViewer is not null && ContinuousScrollViewer.ScrollableHeight > 0.5
+            ? (ContinuousScrollViewer.VerticalOffset - (ContinuousScrollViewer.ScrollableHeight / 2.0))
+            : 0.0;
+    }
+
+    private void UpdateInteractiveSlideSwipeDelta(double newRawDeltaX)
+    {
+        if (!_isSlideSwipeActive || ViewModel?.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return;
+        }
+
+        _swipeRawDeltaX = newRawDeltaX;
+
+        int curPage = doc.CurrentPageIndex;
+        int step = (!doc.IsContinuous && doc.IsDoublePage && !ViewModel.IsPresentationMode) ? 2 : 1;
+
+        int candidateTarget = -1;
+        if (_swipeRawDeltaX < -0.5)
+        {
+            // Dragging left -> Next slide enters from the right
+            if (curPage + step < doc.Pages.Count)
+            {
+                candidateTarget = curPage + step;
+            }
+        }
+        else if (_swipeRawDeltaX > 0.5)
+        {
+            // Dragging right -> Previous slide enters from the left
+            if (curPage - step >= 0)
+            {
+                candidateTarget = curPage - step;
+            }
+        }
+
+        _swipeTargetPageIndex = candidateTarget;
+
+        double rawViewerW = ContinuousScrollViewer.ActualWidth > 0 ? ContinuousScrollViewer.ActualWidth : ContinuousScrollViewer.ViewportWidth;
+        double availW = Math.Max(200.0, GetAvailableDocumentWidthDip(rawViewerW));
+        double curZoom = Math.Max(0.05, ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor);
+        double baseDocOffsetDip = GetTargetDocumentOffsetDip(curZoom);
+
+        if (candidateTarget < 0)
+        {
+            // At the first or last slide boundary: apply elastic rubber-band resistance and hide adjacent preview
+            double maxRubberDip = availW * 0.18;
+            double sign = Math.Sign(_swipeRawDeltaX);
+            double absRaw = Math.Abs(_swipeRawDeltaX);
+            _swipeVisualDeltaX = sign * Math.Min(maxRubberDip, absRaw * SlideSwipeRubberBandFactor);
+
+            if (AdjacentSlideOverlayCanvas is not null && AdjacentSlideOverlayCanvas.Visibility != Visibility.Collapsed)
+            {
+                AdjacentSlideOverlayCanvas.Visibility = Visibility.Collapsed;
+            }
+            _swipeBoundTargetPageIndex = -1;
+
+            if (PagesRepeaterPushTransform is not null)
+            {
+                PagesRepeaterPushTransform.TranslateX = (baseDocOffsetDip + _swipeVisualDeltaX) / curZoom;
+            }
+
+            return;
+        }
+
+        // Clamp visual displacement to 1 full slide stride
+        EnsureAdjacentSlidePreviewBound(doc, candidateTarget, curZoom);
+        double strideScreenDip = ComputeSlideSwipeStrideScreenDip(doc, curZoom, availW);
+        _swipeVisualDeltaX = Math.Clamp(_swipeRawDeltaX, -strideScreenDip, strideScreenDip);
+
+        if (PagesRepeaterPushTransform is not null)
+        {
+            PagesRepeaterPushTransform.TranslateX = (baseDocOffsetDip + _swipeVisualDeltaX) / curZoom;
+        }
+
+        if (AdjacentSlideTransform is not null)
+        {
+            GetZoomedViewportCenterShiftScreenDip(out double viewportShiftX, out double viewportShiftY);
+            double adjScreenOffsetDip = _swipeRawDeltaX < 0
+                ? (_swipeVisualDeltaX + strideScreenDip)
+                : (_swipeVisualDeltaX - strideScreenDip);
+            AdjacentSlideTransform.ScaleX = _swipeAdjScaleRatio;
+            AdjacentSlideTransform.ScaleY = _swipeAdjScaleRatio;
+            AdjacentSlideTransform.TranslateX = (baseDocOffsetDip + viewportShiftX + adjScreenOffsetDip) / curZoom;
+            AdjacentSlideTransform.TranslateY = viewportShiftY / curZoom;
+        }
+
+        if (AdjacentSlideOverlayCanvas is not null && AdjacentSlideOverlayCanvas.Visibility != Visibility.Visible)
+        {
+            AdjacentSlideOverlayCanvas.Visibility = Visibility.Visible;
+        }
+    }
+
+    private void EnsureAdjacentSlidePreviewBound(DocumentViewModel doc, int targetPageIndex, double curZoom)
+    {
+        if (AdjacentSlidePreviewContainer is null || AdjacentLeftPageCanvas is null || AdjacentRightPageCanvas is null ||
+            AdjacentLeftPageBorder is null || AdjacentRightPageBorder is null)
+        {
+            return;
+        }
+
+        if (_swipeBoundTargetPageIndex == targetPageIndex &&
+            AdjacentLeftPageCanvas.PageInfo?.Index == targetPageIndex)
+        {
+            return;
+        }
+
+        _swipeBoundTargetPageIndex = targetPageIndex;
+
+        PdfPageInfo leftPage = doc.Pages[targetPageIndex];
+        bool hasRightPage = !doc.IsContinuous && doc.IsDoublePage && !ViewModel.IsPresentationMode && (targetPageIndex + 1 < doc.Pages.Count);
+        PdfPageInfo? rightPage = hasRightPage ? doc.Pages[targetPageIndex + 1] : null;
+
+        _swipeAdjTotalWidthDip = GetDisplayedRowContentWidthDip(doc, targetPageIndex);
+        _swipeAdjTotalHeightDip = GetDisplayedRowContentHeightDip(doc, targetPageIndex);
+
+        AdjacentSlidePreviewContainer.Width = _swipeAdjTotalWidthDip;
+        AdjacentSlidePreviewContainer.Height = _swipeAdjTotalHeightDip;
+        Canvas.SetLeft(AdjacentSlidePreviewContainer, -_swipeAdjTotalWidthDip / 2.0);
+        Canvas.SetTop(AdjacentSlidePreviewContainer, -_swipeAdjTotalHeightDip / 2.0);
+
+        // Always compute the exact Fit-Vertical scale ratio when in Presentation Mode or Fitted mode,
+        // even if the current slide was temporarily zoomed in by touch, so the incoming slide enters at
+        // its exact target fit size and never jumps when FinalizeSlideSwipeAnimation runs ExecuteFitVertical.
+        _swipeAdjScaleRatio = 1.0;
+        if (_isFittedVertically || ViewModel.IsPresentationMode)
+        {
+            double adjW = Math.Max(1.0, _swipeAdjTotalWidthDip);
+            double adjH = Math.Max(1.0, _swipeAdjTotalHeightDip);
+            double rawW = ContinuousScrollViewer.ActualWidth > 0 ? ContinuousScrollViewer.ActualWidth : ContinuousScrollViewer.ViewportWidth;
+            double rawH = ContinuousScrollViewer.ActualHeight > 0 ? ContinuousScrollViewer.ActualHeight : ContinuousScrollViewer.ViewportHeight;
+            if (ViewModel.IsPresentationMode)
+            {
+                var (fsW, fsH) = GetFullScreenDimensionsDip();
+                if (fsW > 0 && fsH > 0)
+                {
+                    rawW = Math.Max(rawW, fsW);
+                    rawH = Math.Max(rawH, fsH);
+                }
+            }
+
+            double availW = Math.Max(100.0, GetAvailableDocumentWidthDip(rawW) - (ViewModel.IsPresentationMode ? 0.0 : 32.0));
+            double availH = Math.Max(100.0, rawH - (ViewModel.IsPresentationMode ? 0.0 : 32.0));
+            double adjTargetZoom = Math.Clamp(Math.Min(availH / adjH, availW / adjW), DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
+            _swipeAdjScaleRatio = adjTargetZoom / Math.Max(0.05, curZoom);
+        }
+
+        AdjacentLeftPageCanvas.IsNightMode = doc.IsNightMode;
+        AdjacentLeftPageCanvas.RotationAngle = doc.Rotation;
+        AdjacentLeftPageCanvas.ZoomFactor = curZoom * _swipeAdjScaleRatio;
+        AdjacentLeftPageCanvas.PageInfo = leftPage;
+
+        if (hasRightPage && rightPage is not null)
+        {
+            AdjacentRightPageBorder.Visibility = Visibility.Visible;
+            AdjacentRightPageCanvas.Visibility = Visibility.Visible;
+            AdjacentRightPageCanvas.IsNightMode = doc.IsNightMode;
+            AdjacentRightPageCanvas.RotationAngle = doc.Rotation;
+            AdjacentRightPageCanvas.ZoomFactor = curZoom * _swipeAdjScaleRatio;
+            AdjacentRightPageCanvas.PageInfo = rightPage;
+        }
+        else
+        {
+            AdjacentRightPageCanvas.PageInfo = null;
+            AdjacentRightPageCanvas.Visibility = Visibility.Collapsed;
+            AdjacentRightPageBorder.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private double ComputeSlideSwipeStrideScreenDip(DocumentViewModel doc, double curZoom, double availViewportWidthDip)
+    {
+        // Cap effective slide screen widths to availViewportWidthDip so that even if a slide was zoomed in,
+        // the incoming slide starts right outside the visible screen edge instead of multiple screens away.
+        double curSlideScreenW = Math.Min(availViewportWidthDip, GetDisplayedRowContentWidthDip(doc, doc.CurrentPageIndex) * curZoom);
+        double adjSlideScreenW = Math.Min(availViewportWidthDip, (_swipeAdjTotalWidthDip > 0 ? _swipeAdjTotalWidthDip : curSlideScreenW / curZoom) * curZoom * _swipeAdjScaleRatio);
+
+        double minSlideSeparation = (curSlideScreenW / 2.0) + (adjSlideScreenW / 2.0) + 32.0;
+        double viewportEdgeSeparation = (availViewportWidthDip / 2.0) + (Math.Max(curSlideScreenW, adjSlideScreenW) / 2.0) + 16.0;
+
+        return Math.Max(minSlideSeparation, viewportEdgeSeparation);
+    }
+
+    private void CompleteInteractiveSlideSwipe(bool fromTouchpad)
+    {
+        _touchpadSwipeEndTimer.Stop();
+        _isTouchpadWheelSwipeActive = false;
+
+        if (!_isSlideSwipeActive || ViewModel?.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            CancelInteractiveSlideSwipeImmediate();
+            return;
+        }
+
+        double rawViewerW = ContinuousScrollViewer.ActualWidth > 0 ? ContinuousScrollViewer.ActualWidth : ContinuousScrollViewer.ViewportWidth;
+        double availW = Math.Max(200.0, GetAvailableDocumentWidthDip(rawViewerW));
+
+        double absDx = Math.Abs(_swipeRawDeltaX);
+        double absVx = Math.Abs(_swipeVelocityX);
+        bool sameVelocityDirection = Math.Abs(_swipeVelocityX) < 40.0 || (Math.Sign(_swipeVelocityX) == Math.Sign(_swipeRawDeltaX));
+
+        bool distanceCommitted = absDx >= (availW * SlideSwipeMinCommitRatio);
+        bool flickCommitted = absVx >= SlideSwipeMinFlickVelocityDipPerSec &&
+                              absDx >= SlideSwipeMinFlickDistanceDip &&
+                              sameVelocityDirection;
+
+        // If the user dragged in one direction and then reversed direction strongly at the end, bounce back
+        bool reversedAtEnd = absVx >= 240.0 && (Math.Sign(_swipeVelocityX) != Math.Sign(_swipeRawDeltaX));
+
+        bool shouldCommit = _swipeTargetPageIndex >= 0 &&
+                            _swipeTargetPageIndex < doc.Pages.Count &&
+                            !reversedAtEnd &&
+                            (distanceCommitted || flickCommitted);
+
+        if (fromTouchpad)
+        {
+            long nowTick = Environment.TickCount64;
+            _isDrainingTouchpadInertia = true;
+            _committedTouchpadWheelSign = _swipeRawDeltaX < 0 ? 1 : -1;
+            _lastTouchpadInertiaDrainTick = nowTick;
+            _touchpadInertiaDrainStartTick = nowTick;
+        }
+
+        AnimateSlideSwipeToCompletion(shouldCommit, _swipeTargetPageIndex);
+    }
+
+    private void AnimateSlideSwipeToCompletion(bool commit, int targetPageIndex)
+    {
+        if (ViewModel?.CurrentDocument is not { Pages.Count: > 0 } doc || PagesRepeaterPushTransform is null)
+        {
+            CancelInteractiveSlideSwipeImmediate();
+            return;
+        }
+
+        double curZoom = Math.Max(0.05, ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor);
+        double baseDocOffsetDip = GetTargetDocumentOffsetDip(curZoom);
+        double baseRepeaterX = baseDocOffsetDip / curZoom;
+
+        double rawViewerW = ContinuousScrollViewer.ActualWidth > 0 ? ContinuousScrollViewer.ActualWidth : ContinuousScrollViewer.ViewportWidth;
+        double availW = Math.Max(200.0, GetAvailableDocumentWidthDip(rawViewerW));
+        double strideScreenDip = ComputeSlideSwipeStrideScreenDip(doc, curZoom, availW);
+        GetZoomedViewportCenterShiftScreenDip(out double viewportShiftX, out _);
+        double baseAdjCenterX = (baseDocOffsetDip + viewportShiftX) / curZoom;
+
+        double startRepeaterX = PagesRepeaterPushTransform.TranslateX;
+        double targetRepeaterX = commit
+            ? ((baseDocOffsetDip + (_swipeRawDeltaX < 0 ? -strideScreenDip : strideScreenDip)) / curZoom)
+            : baseRepeaterX;
+
+        double startAdjX = AdjacentSlideTransform?.TranslateX ?? startRepeaterX;
+        double targetAdjX = commit
+            ? baseAdjCenterX
+            : ((baseDocOffsetDip + viewportShiftX + (_swipeRawDeltaX < 0 ? strideScreenDip : -strideScreenDip)) / curZoom);
+
+        double remainingScreenDip = Math.Abs(targetRepeaterX - startRepeaterX) * curZoom;
+        double speedFactor = Math.Clamp(Math.Abs(_swipeVelocityX) / 1800.0, 0.0, 1.0);
+        double durationMs = commit
+            ? Math.Clamp(195.0 - (speedFactor * 55.0), 130.0, 210.0)
+            : Math.Clamp(200.0, 160.0, 220.0);
+
+        if (remainingScreenDip < 2.0)
+        {
+            durationMs = 15.0;
+        }
+
+        _slideSwipeStoryboard?.Stop();
+        _isSlideSwipeAnimating = true;
+
+        var sb = new Storyboard();
+        var duration = new Duration(TimeSpan.FromMilliseconds(durationMs));
+        EasingFunctionBase ease = commit
+            ? new ExponentialEase { Exponent = 4.5, EasingMode = EasingMode.EaseOut }
+            : new CubicEase { EasingMode = EasingMode.EaseOut };
+
+        var repeaterAnim = new DoubleAnimation
+        {
+            From = startRepeaterX,
+            To = targetRepeaterX,
+            Duration = duration,
+            EasingFunction = ease
+        };
+        Storyboard.SetTarget(repeaterAnim, PagesRepeaterPushTransform);
+        Storyboard.SetTargetProperty(repeaterAnim, "TranslateX");
+        sb.Children.Add(repeaterAnim);
+
+        if (AdjacentSlideTransform is not null && AdjacentSlideOverlayCanvas?.Visibility == Visibility.Visible)
+        {
+            var adjAnim = new DoubleAnimation
+            {
+                From = startAdjX,
+                To = targetAdjX,
+                Duration = duration,
+                EasingFunction = ease
+            };
+            Storyboard.SetTarget(adjAnim, AdjacentSlideTransform);
+            Storyboard.SetTargetProperty(adjAnim, "TranslateX");
+            sb.Children.Add(adjAnim);
+        }
+
+        sb.Completed += (_, _) =>
+        {
+            if (!ReferenceEquals(_slideSwipeStoryboard, sb))
+            {
+                return;
+            }
+
+            FinalizeSlideSwipeAnimation(commit, targetPageIndex);
+        };
+
+        _slideSwipeStoryboard = sb;
+        sb.Begin();
+    }
+
+    private void CompleteSlideSwipeAnimationImmediate()
+    {
+        if (!_isSlideSwipeAnimating)
+        {
+            return;
+        }
+
+        bool commit = _swipeTargetPageIndex >= 0 &&
+                      ViewModel?.CurrentDocument is { } doc &&
+                      _swipeTargetPageIndex < doc.Pages.Count &&
+                      (Math.Abs(_swipeRawDeltaX) >= 32.0);
+        int targetPage = _swipeTargetPageIndex;
+
+        _slideSwipeStoryboard?.Stop();
+        _slideSwipeStoryboard = null;
+        FinalizeSlideSwipeAnimation(commit, targetPage);
+    }
+
+    private void FinalizeSlideSwipeAnimation(bool committed, int targetPageIndex)
+    {
+        _slideSwipeStoryboard = null;
+        _isSlideSwipeAnimating = false;
+        _isSlideSwipeActive = false;
+        _swipeRawDeltaX = 0.0;
+        _swipeVisualDeltaX = 0.0;
+        _swipeVelocityX = 0.0;
+        _swipeTargetPageIndex = -1;
+        _lastSlideSwipeCompletedTick = Environment.TickCount64;
+
+        if (committed && ViewModel?.CurrentDocument is { Pages.Count: > 0 } doc &&
+            targetPageIndex >= 0 && targetPageIndex < doc.Pages.Count)
+        {
+            _isCommittingSlideSwipe = true;
+            try
+            {
+                doc.GoToPage(targetPageIndex);
+
+                if (!_isPageBoxEditing && StatusBarPageBox is not null)
+                {
+                    StatusBarPageBox.Text = doc.CurrentPageNumber.ToString();
+                }
+
+                if (_isFittedVertically || ViewModel.IsPresentationMode)
+                {
+                    _isFittedVertically = true;
+                    ExecuteFitVertical(force: true);
+                }
+                else
+                {
+                    EnsureScrollModesEnabledForViewChange();
+                    ContinuousScrollViewer.ChangeView(0, 0, null, disableAnimation: true);
+                }
+            }
+            finally
+            {
+                _isCommittingSlideSwipe = false;
+            }
+
+            double newZoom = Math.Max(0.05, doc.ZoomFactor > 0.05 ? doc.ZoomFactor : ContinuousScrollViewer.ZoomFactor);
+            double newBaseRepeaterX = GetTargetDocumentOffsetDip(newZoom) / newZoom;
+
+            if (PagesRepeaterPushTransform is not null)
+            {
+                PagesRepeaterPushTransform.TranslateX = newBaseRepeaterX;
+            }
+
+            // Keep AdjacentSlideOverlayCanvas centered for 1 Low-priority dispatcher turn while ContinuousPagesRepeater
+            // draws the newly bound page underneath, eliminating any single-frame Win2D swap flicker.
+            if (AdjacentSlideTransform is not null)
+            {
+                AdjacentSlideTransform.ScaleX = 1.0;
+                AdjacentSlideTransform.ScaleY = 1.0;
+                AdjacentSlideTransform.TranslateX = newBaseRepeaterX;
+                AdjacentSlideTransform.TranslateY = 0.0;
+            }
+
+            UpdateViewportPages(newZoom);
+            SyncPagedScrollViewerModes();
+
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                if (!_isSlideSwipeActive && !_isSlideSwipeAnimating)
+                {
+                    HideAndClearAdjacentSlidePreview();
+                }
+            });
+        }
+        else
+        {
+            double curZoom = Math.Max(0.05, ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel?.CurrentDocument?.ZoomFactor ?? 1.0));
+            if (PagesRepeaterPushTransform is not null)
+            {
+                PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip(curZoom) / curZoom;
+            }
+
+            HideAndClearAdjacentSlidePreview();
+            SyncPagedScrollViewerModes();
+        }
+    }
+
+    private void CancelInteractiveSlideSwipeImmediate()
+    {
+        StopSmoothWheelZoom();
+        _touchpadSwipeEndTimer.Stop();
+        _slideSwipeStoryboard?.Stop();
+        _slideSwipeStoryboard = null;
+        _isSlideSwipeAnimating = false;
+        _isSlideSwipeActive = false;
+        _isManipulatingSlideSwipe = false;
+        _isTouchSwipeTracking = false;
+        _isTouchSwipeEngaged = false;
+        _isTouchpadWheelSwipeActive = false;
+        _touchGestureAxis = PagedTouchGestureAxis.Undecided;
+        _manipCumulativeDx = 0.0;
+        _manipCumulativeDy = 0.0;
+        _swipeRawDeltaX = 0.0;
+        _swipeVisualDeltaX = 0.0;
+        _swipeVelocityX = 0.0;
+        _swipeTargetPageIndex = -1;
+
+        double curZoom = Math.Max(0.05, ContinuousScrollViewer?.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel?.CurrentDocument?.ZoomFactor ?? 1.0));
+        if (!_isHorizontalPushAnimating && PagesRepeaterPushTransform is not null)
+        {
+            PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip(curZoom) / curZoom;
+        }
+
+        HideAndClearAdjacentSlidePreview();
+    }
+
+    private void HideAndClearAdjacentSlidePreview()
+    {
+        _swipeBoundTargetPageIndex = -1;
+        if (AdjacentSlideOverlayCanvas is not null)
+        {
+            AdjacentSlideOverlayCanvas.Visibility = Visibility.Collapsed;
+        }
+
+        if (AdjacentLeftPageCanvas is not null)
+        {
+            AdjacentLeftPageCanvas.PageInfo = null;
+        }
+
+        if (AdjacentRightPageCanvas is not null)
+        {
+            AdjacentRightPageCanvas.PageInfo = null;
+            AdjacentRightPageCanvas.Visibility = Visibility.Collapsed;
+        }
+
+        if (AdjacentRightPageBorder is not null)
+        {
+            AdjacentRightPageBorder.Visibility = Visibility.Collapsed;
         }
     }
 

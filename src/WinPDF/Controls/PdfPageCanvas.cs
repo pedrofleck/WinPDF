@@ -212,6 +212,67 @@ public sealed partial class PdfPageCanvas : Grid
     }
 
     /// <summary>
+    /// Gets or sets a value indicating whether this canvas acts as an adjacent slide preview during an interactive horizontal swipe.
+    /// </summary>
+    public bool IsSwipePreview { get; set; }
+
+    /// <summary>
+    /// Synchronizes the XAML touch manipulation mode of this canvas and its row wrapper elements
+    /// so that unzoomed non-continuous and presentation modes emit UI-thread horizontal swipe manipulations
+    /// while preserving native <see cref="ScrollViewer"/> DirectManipulation for pinch-to-zoom and zoomed panning.
+    /// </summary>
+    /// <param name="forceCustomSwipeManip">Optional explicit override for whether custom swipe manipulation should be active.</param>
+    public void SyncTouchManipulationMode(bool? forceCustomSwipeManip = null)
+    {
+        if (IsSwipePreview)
+        {
+            if (ManipulationMode != ManipulationModes.None)
+            {
+                ManipulationMode = ManipulationModes.None;
+            }
+
+            return;
+        }
+
+        bool usePagedTouchManip;
+        if (forceCustomSwipeManip.HasValue)
+        {
+            usePagedTouchManip = forceCustomSwipeManip.Value;
+        }
+        else
+        {
+            ShellViewModel? shell = _shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>();
+            DocumentViewModel? doc = _observedDocument ?? shell?.CurrentDocument;
+            usePagedTouchManip = shell?.IsPresentationMode == true || (doc is not null && !doc.IsContinuous);
+        }
+
+        ManipulationModes targetMode = usePagedTouchManip
+            ? (ManipulationModes.TranslateX | ManipulationModes.TranslateY | ManipulationModes.Scale)
+            : ManipulationModes.System;
+
+        DependencyObject? curr = this;
+        for (int hop = 0; hop < 4 && curr is not null; hop++)
+        {
+            if (curr is ScrollViewer)
+            {
+                break;
+            }
+
+            if (curr is UIElement ui && ui.ManipulationMode != targetMode)
+            {
+                ui.ManipulationMode = targetMode;
+            }
+
+            if (curr is Microsoft.UI.Xaml.Controls.ItemsRepeater)
+            {
+                break;
+            }
+
+            curr = VisualTreeHelper.GetParent(curr);
+        }
+    }
+
+    /// <summary>
     /// Gets the effective document id, falling back to the shell's active document if not explicitly set.
     /// </summary>
     private long EffectiveDocumentId
@@ -362,6 +423,7 @@ public sealed partial class PdfPageCanvas : Grid
 
         UpdateDimensions();
         SubscribeToActiveDocument();
+        SyncTouchManipulationMode();
         if (_observedDocument is not null)
         {
             ZoomFactor = _observedDocument.ZoomFactor;
@@ -379,7 +441,10 @@ public sealed partial class PdfPageCanvas : Grid
 
         TryLoadCachedBitmaps();
         UpdateRender();
-        CanvasLoaded?.Invoke(this);
+        if (!IsSwipePreview)
+        {
+            CanvasLoaded?.Invoke(this);
+        }
 
         var sv = FindAncestor<ScrollViewer>(this);
         double activeZoom = sv is not null && sv.ZoomFactor > 0.05 ? sv.ZoomFactor : EffectiveZoom;
@@ -394,7 +459,10 @@ public sealed partial class PdfPageCanvas : Grid
         _isUnloaded = true;
         _cachedScrollViewer = null;
         ResetPointerSelectionState();
-        CanvasUnloaded?.Invoke(this);
+        if (!IsSwipePreview)
+        {
+            CanvasUnloaded?.Invoke(this);
+        }
         CancelInFlightRenders();
         ReleaseHighResPatch();
         UnsubscribeFromDocument();
@@ -454,6 +522,10 @@ public sealed partial class PdfPageCanvas : Grid
             {
                 RotationAngle = _observedDocument.Rotation;
             }
+        }
+        else if (e.PropertyName == nameof(DocumentViewModel.IsContinuous))
+        {
+            SyncTouchManipulationMode();
         }
     }
 
@@ -538,6 +610,7 @@ public sealed partial class PdfPageCanvas : Grid
             canvas._loadedPageIndex = canvas.PageInfo?.Index ?? -1;
             canvas.UpdateDimensions();
             canvas.SubscribeToActiveDocument();
+            canvas.SyncTouchManipulationMode();
             if (canvas._observedDocument is not null)
             {
                 canvas.IsNightMode = canvas._observedDocument.IsNightMode;
@@ -1321,7 +1394,10 @@ public sealed partial class PdfPageCanvas : Grid
                 _detailCanvas.Visibility = Visibility.Visible;
                 _detailCanvas.Invalidate();
 
-                PrefetchAdjacentPages(EffectiveDocumentId, pageInfo.Index, RotationAngle, activeZoom, desiredPixelScale, rasterScale);
+                if (!IsSwipePreview)
+                {
+                    PrefetchAdjacentPages(EffectiveDocumentId, pageInfo.Index, RotationAngle, activeZoom, desiredPixelScale, rasterScale);
+                }
             }
         }
     }
@@ -1677,7 +1753,13 @@ public sealed partial class PdfPageCanvas : Grid
             _ = RenderBaseBitmapAsync(_baseCts.Token);
         }
 
-        Rect visibleDip = GetVisibleRectInPageDips(currentZoom);
+        bool swap = (RotationAngle % 180 != 0);
+        double pageW = Math.Max(1.0, swap ? PageInfo.DisplayHeightDip : PageInfo.DisplayWidthDip);
+        double pageH = Math.Max(1.0, swap ? PageInfo.DisplayWidthDip : PageInfo.DisplayHeightDip);
+
+        Rect visibleDip = IsSwipePreview
+            ? new Rect(0, 0, pageW, pageH)
+            : GetVisibleRectInPageDips(currentZoom);
 
         // Case 1 — Page off-screen or unzoomed: release high-res patch immediately.
         if (currentZoom <= DetailZoomThreshold || visibleDip.IsEmpty || visibleDip.Width <= 0 || visibleDip.Height <= 0)
@@ -1685,10 +1767,6 @@ public sealed partial class PdfPageCanvas : Grid
             ReleaseHighResPatch();
             return;
         }
-
-        bool swap = (RotationAngle % 180 != 0);
-        double pageW = Math.Max(1.0, swap ? PageInfo.DisplayHeightDip : PageInfo.DisplayWidthDip);
-        double pageH = Math.Max(1.0, swap ? PageInfo.DisplayWidthDip : PageInfo.DisplayHeightDip);
         double rasterScale = XamlRoot?.RasterizationScale ?? 1.0;
 
         (Rect candidatePatchDip, double targetPixelScale) = ComputePatchAndPixelScale(visibleDip, pageW, pageH, currentZoom, rasterScale);
@@ -2103,7 +2181,8 @@ public sealed partial class PdfPageCanvas : Grid
 
                 if (isFullPagePatch && isSlideMode)
                 {
-                    StoreInSlideBuffer(targetDocId, targetPageIndex, targetPageIndex, targetRotation, pixelScale, newBitmap);
+                    int activeIdx = IsSwipePreview ? (doc?.CurrentPageIndex ?? targetPageIndex) : targetPageIndex;
+                    StoreInSlideBuffer(targetDocId, activeIdx, targetPageIndex, targetRotation, pixelScale, newBitmap);
                 }
 
                 if (oldDetail is not null && !IsInSlideBuffer(oldDetail))
@@ -2111,7 +2190,7 @@ public sealed partial class PdfPageCanvas : Grid
                     oldDetail.Dispose();
                 }
 
-                if (isSlideMode)
+                if (isSlideMode && !IsSwipePreview)
                 {
                     PrefetchAdjacentPages(targetDocId, targetPageIndex, targetRotation, currentZoom, pixelScale, activeRasterScale);
                 }

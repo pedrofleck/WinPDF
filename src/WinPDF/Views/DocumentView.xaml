@@ -271,59 +271,111 @@
                     ViewChanging="OnScrollViewerViewChanging"
                     ViewChanged="OnScrollViewerViewChanged"
                     ZoomMode="Enabled">
-                    <ItemsRepeater
-                        x:Name="ContinuousPagesRepeater"
-                        Margin="{x:Bind converters:UiHelpers.RepeaterMargin(ViewModel.IsPresentationMode, ViewModel.CurrentDocument.IsContinuous), Mode=OneWay}"
+                    <Grid
+                        x:Name="ScrollViewerInnerGrid"
                         HorizontalAlignment="Center"
-                        VerticalAlignment="Center"
-                        RenderTransformOrigin="0.5,0.5"
-                        ItemsSource="{x:Bind ViewModel.CurrentDocument.DisplayedRows, Mode=OneWay}">
-                        <ItemsRepeater.RenderTransform>
-                            <CompositeTransform x:Name="PagesRepeaterPushTransform" />
-                        </ItemsRepeater.RenderTransform>
-                        <ItemsRepeater.Layout>
-                            <StackLayout Orientation="Vertical" Spacing="16" />
-                        </ItemsRepeater.Layout>
-                        <ItemsRepeater.ItemTemplate>
-                            <DataTemplate x:DataType="models:PdfPageRow">
-                                <StackPanel
-                                    Orientation="Horizontal"
-                                    Spacing="16"
-                                    HorizontalAlignment="Center"
-                                    VerticalAlignment="Center">
-                                    <!-- Left page (or single page) -->
-                                    <Border
+                        VerticalAlignment="Center">
+                        <ItemsRepeater
+                            x:Name="ContinuousPagesRepeater"
+                            Margin="{x:Bind converters:UiHelpers.RepeaterMargin(ViewModel.IsPresentationMode, ViewModel.CurrentDocument.IsContinuous), Mode=OneWay}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            RenderTransformOrigin="0.5,0.5"
+                            ItemsSource="{x:Bind ViewModel.CurrentDocument.DisplayedRows, Mode=OneWay}">
+                            <ItemsRepeater.RenderTransform>
+                                <CompositeTransform x:Name="PagesRepeaterPushTransform" />
+                            </ItemsRepeater.RenderTransform>
+                            <ItemsRepeater.Layout>
+                                <StackLayout Orientation="Vertical" Spacing="16" />
+                            </ItemsRepeater.Layout>
+                            <ItemsRepeater.ItemTemplate>
+                                <DataTemplate x:DataType="models:PdfPageRow">
+                                    <StackPanel
+                                        Orientation="Horizontal"
+                                        Spacing="16"
                                         HorizontalAlignment="Center"
-                                        VerticalAlignment="Center"
-                                        Background="{ThemeResource LayerFillColorDefaultBrush}"
-                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                        BorderThickness="{x:Bind converters:UiHelpers.PresentationBorderThickness(IsPresentationMode), Mode=OneWay}"
-                                        CornerRadius="{x:Bind converters:UiHelpers.PresentationCornerRadius(IsPresentationMode), Mode=OneWay}">
-                                        <controls:PdfPageCanvas
-                                            PageInfo="{x:Bind LeftPage, Mode=OneWay}"
-                                            IsNightMode="{x:Bind IsNightMode, Mode=OneWay}"
-                                            RotationAngle="{x:Bind Rotation, Mode=OneWay}" />
-                                    </Border>
+                                        VerticalAlignment="Center">
+                                        <!-- Left page (or single page) -->
+                                        <Border
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                            BorderThickness="{x:Bind converters:UiHelpers.PresentationBorderThickness(IsPresentationMode), Mode=OneWay}"
+                                            CornerRadius="{x:Bind converters:UiHelpers.PresentationCornerRadius(IsPresentationMode), Mode=OneWay}">
+                                            <controls:PdfPageCanvas
+                                                PageInfo="{x:Bind LeftPage, Mode=OneWay}"
+                                                IsNightMode="{x:Bind IsNightMode, Mode=OneWay}"
+                                                RotationAngle="{x:Bind Rotation, Mode=OneWay}" />
+                                        </Border>
 
-                                    <!-- Right page (when double page) -->
-                                    <Border
-                                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasRightPage), Mode=OneWay}"
-                                        HorizontalAlignment="Center"
-                                        VerticalAlignment="Center"
-                                        Background="{ThemeResource LayerFillColorDefaultBrush}"
-                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                        BorderThickness="{x:Bind converters:UiHelpers.PresentationBorderThickness(IsPresentationMode), Mode=OneWay}"
-                                        CornerRadius="{x:Bind converters:UiHelpers.PresentationCornerRadius(IsPresentationMode), Mode=OneWay}">
-                                        <controls:PdfPageCanvas
+                                        <!-- Right page (when double page) -->
+                                        <Border
                                             Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasRightPage), Mode=OneWay}"
-                                            PageInfo="{x:Bind RightPage, Mode=OneWay}"
-                                            IsNightMode="{x:Bind IsNightMode, Mode=OneWay}"
-                                            RotationAngle="{x:Bind Rotation, Mode=OneWay}" />
-                                    </Border>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ItemsRepeater.ItemTemplate>
-                    </ItemsRepeater>
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                            BorderThickness="{x:Bind converters:UiHelpers.PresentationBorderThickness(IsPresentationMode), Mode=OneWay}"
+                                            CornerRadius="{x:Bind converters:UiHelpers.PresentationCornerRadius(IsPresentationMode), Mode=OneWay}">
+                                            <controls:PdfPageCanvas
+                                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasRightPage), Mode=OneWay}"
+                                                PageInfo="{x:Bind RightPage, Mode=OneWay}"
+                                                IsNightMode="{x:Bind IsNightMode, Mode=OneWay}"
+                                                RotationAngle="{x:Bind Rotation, Mode=OneWay}" />
+                                        </Border>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsRepeater.ItemTemplate>
+                        </ItemsRepeater>
+
+                        <!-- Zero-measure centered overlay hosting the incoming adjacent slide during interactive touch/touchpad horizontal swipe -->
+                        <Canvas
+                            x:Name="AdjacentSlideOverlayCanvas"
+                            Width="0"
+                            Height="0"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            IsHitTestVisible="False"
+                            Visibility="Collapsed">
+                            <StackPanel
+                                x:Name="AdjacentSlidePreviewContainer"
+                                Orientation="Horizontal"
+                                Spacing="16"
+                                RenderTransformOrigin="0.5,0.5"
+                                IsHitTestVisible="False">
+                                <StackPanel.RenderTransform>
+                                    <CompositeTransform x:Name="AdjacentSlideTransform" />
+                                </StackPanel.RenderTransform>
+                                <Border
+                                    x:Name="AdjacentLeftPageBorder"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="{x:Bind converters:UiHelpers.PresentationBorderThickness(ViewModel.IsPresentationMode), Mode=OneWay}"
+                                    CornerRadius="{x:Bind converters:UiHelpers.PresentationCornerRadius(ViewModel.IsPresentationMode), Mode=OneWay}">
+                                    <controls:PdfPageCanvas
+                                        x:Name="AdjacentLeftPageCanvas"
+                                        IsSwipePreview="True" />
+                                </Border>
+                                <Border
+                                    x:Name="AdjacentRightPageBorder"
+                                    Visibility="Collapsed"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="{x:Bind converters:UiHelpers.PresentationBorderThickness(ViewModel.IsPresentationMode), Mode=OneWay}"
+                                    CornerRadius="{x:Bind converters:UiHelpers.PresentationCornerRadius(ViewModel.IsPresentationMode), Mode=OneWay}">
+                                    <controls:PdfPageCanvas
+                                        x:Name="AdjacentRightPageCanvas"
+                                        IsSwipePreview="True"
+                                        Visibility="Collapsed" />
+                                </Border>
+                            </StackPanel>
+                        </Canvas>
+                    </Grid>
                 </ScrollViewer>
 
                 <!-- 80 DIPs navigation side strips 'Photos' style -->
