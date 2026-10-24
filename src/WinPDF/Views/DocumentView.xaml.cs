@@ -250,15 +250,6 @@ public sealed partial class DocumentView : Page
 
     private readonly DispatcherTimer _touchpadSwipeEndTimer = new() { Interval = TimeSpan.FromMilliseconds(115) };
     private readonly Dictionary<uint, (long PressTick, Point PressPos)> _activeTouchPointers = new();
-    private bool _isTwoFingerTapCandidate;
-    private long _twoFingerTapStartTick;
-    private Point _twoFingerTapMidpointInViewport;
-    private double _twoFingerTapScaleAccum = 1.0;
-    private uint _twoFingerTapId1;
-    private uint _twoFingerTapId2;
-    private WIN32_POINT _twoFingerTapStartPx1;
-    private WIN32_POINT _twoFingerTapStartPx2;
-    private bool _hasTwoFingerTapStartPx;
     private bool _isTwoFingerTapPollingSubscribed;
     private bool _isTouchDoubleTapZoomedIn;
     private double _zoomBeforeTouchDoubleTap = 1.0;
@@ -311,7 +302,13 @@ public sealed partial class DocumentView : Page
     private double _touchpadDrainSmoothedAbsDelta;
     private int _touchpadFreshSurgeCount;
     private bool _isSmoothZoomRenderingSubscribed;
+    private double _smoothZoomStartFactor = 1.0;
+    private double _smoothZoomCurrentFactor = 1.0;
     private double _smoothZoomTargetFactor;
+    private double _smoothZoomStartOffsetX;
+    private double _smoothZoomStartOffsetY;
+    private double _smoothZoomTargetOffsetX;
+    private double _smoothZoomTargetOffsetY;
     private Point _smoothZoomPivotPoint;
     private long _lastSmoothZoomRenderTicks;
     private bool _isMouseButtonDown;
@@ -357,6 +354,8 @@ public sealed partial class DocumentView : Page
     private bool _isDraggingTouchScrollScrubber;
     private uint _touchScrollScrubberPointerId;
     private double _touchScrollGrabOffsetY = 32.0;
+    private long _lastScrubberScrollUpdateTick;
+    private double _lastScrubberTargetVOffset = -1.0;
     private PrintManager? _registeredPrintManager;
     private nint _registeredPrintHwnd;
     private PrintDocument? _printDocument;
@@ -694,7 +693,6 @@ public sealed partial class DocumentView : Page
     {
         _activeCanvases.Add(canvas);
         canvas.SyncTouchManipulationMode();
-        SyncPagedScrollViewerModes();
         double targetZoom = ViewModel.CurrentDocument?.ZoomFactor ?? ContinuousScrollViewer.ZoomFactor;
         if (targetZoom > 0.05)
         {
@@ -1390,7 +1388,13 @@ public sealed partial class DocumentView : Page
 
         if (!_isProgrammaticPageScroll && _activeTouchSelectingCanvas is null && !_isDraggingSelectionHandle)
         {
-            CancelTouchHoldOnAllCanvases();
+            double dV = Math.Abs(e.NextView.VerticalOffset - ContinuousScrollViewer.VerticalOffset);
+            double dH = Math.Abs(e.NextView.HorizontalOffset - ContinuousScrollViewer.HorizontalOffset);
+            double dZ = Math.Abs(e.NextView.ZoomFactor - ContinuousScrollViewer.ZoomFactor);
+            if (dV > 5.0 || dH > 5.0 || dZ > 0.008)
+            {
+                CancelTouchHoldOnAllCanvases();
+            }
         }
 
         if (_isTouchSelectionHandlesActive)
@@ -1505,7 +1509,11 @@ public sealed partial class DocumentView : Page
 
         if (!e.IsIntermediate)
         {
-            SyncPagedScrollViewerModes();
+            if (!_isDraggingTouchScrollScrubber)
+            {
+                SyncPagedScrollViewerModes();
+            }
+
             ScheduleViewportUpdate();
         }
     }
@@ -4525,11 +4533,16 @@ public sealed partial class DocumentView : Page
             return false;
         }
 
+        if (ContinuousScrollViewer.ScrollableWidth > 1.5)
+        {
+            return true;
+        }
+
         double zoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor;
         double rowWidthDip = GetDisplayedRowContentWidthDip(doc, doc.CurrentPageIndex);
         double rawViewerW = ContinuousScrollViewer.ActualWidth > 0 ? ContinuousScrollViewer.ActualWidth : ContinuousScrollViewer.ViewportWidth;
         double availW = GetAvailableDocumentWidthDip(rawViewerW);
-        return (rowWidthDip * zoom) > (availW + 8.0) && ContinuousScrollViewer.ScrollableWidth > 4.0;
+        return (rowWidthDip * zoom) > (availW + 4.0);
     }
 
     private bool CanPanVerticallyInPagedMode()
@@ -4549,10 +4562,15 @@ public sealed partial class DocumentView : Page
             return false;
         }
 
+        if (ContinuousScrollViewer.ScrollableHeight > 1.5)
+        {
+            return true;
+        }
+
         double zoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor;
         double rowHeightDip = GetDisplayedRowContentHeightDip(doc, doc.CurrentPageIndex);
         double rawViewerH = ContinuousScrollViewer.ActualHeight > 0 ? ContinuousScrollViewer.ActualHeight : ContinuousScrollViewer.ViewportHeight;
-        return (rowHeightDip * zoom) > (rawViewerH + 8.0) && ContinuousScrollViewer.ScrollableHeight > 4.0;
+        return (rowHeightDip * zoom) > (rawViewerH + 4.0);
     }
 
     private bool CanStartSwipeInDirection(bool swipingRight)
@@ -4722,6 +4740,32 @@ public sealed partial class DocumentView : Page
         }
     }
 
+    private double CalculateFitVerticalZoom(DocumentViewModel doc)
+    {
+        int cur = Math.Clamp(doc.CurrentPageIndex, 0, doc.Pages.Count - 1);
+        var page = doc.Pages[cur];
+        bool isPres = ViewModel.IsPresentationMode;
+        bool isContinuous = doc.IsContinuous && !isPres;
+        bool isDoublePage = doc.IsDoublePage && !isPres;
+
+        double marginW = isPres ? 0.0 : (!isContinuous ? 32.0 : 64.0);
+        double marginH = isPres ? 0.0 : (!isContinuous ? 32.0 : 48.0);
+
+        double rawWidth = ContinuousScrollViewer.ActualWidth > 0
+            ? ContinuousScrollViewer.ActualWidth
+            : (_lastHandledScrollViewerSize.Width > 0 ? _lastHandledScrollViewerSize.Width : ContinuousScrollViewer.ViewportWidth);
+        double vWidth = GetAvailableDocumentWidthDip(rawWidth);
+        double vHeight = ContinuousScrollViewer.ActualHeight > 0
+            ? ContinuousScrollViewer.ActualHeight
+            : (_lastHandledScrollViewerSize.Height > 0 ? _lastHandledScrollViewerSize.Height : ContinuousScrollViewer.ViewportHeight);
+
+        double availW = Math.Max(100.0, vWidth - marginW);
+        double availH = Math.Max(100.0, vHeight - marginH);
+        double targetW = isDoublePage ? (page.DisplayWidthDip * 2.0 + 16.0) : page.DisplayWidthDip;
+        double targetH = page.DisplayHeightDip;
+        return Math.Clamp(Math.Min(availH / targetH, availW / targetW), DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
+    }
+
     private void ToggleSmoothTouchZoom(Point pivotInViewport)
     {
         if (ViewModel?.CurrentDocument is not { Pages.Count: > 0 } doc || ViewModel.IsPresentationMode)
@@ -4729,22 +4773,28 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        double currentZoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor;
+        double currentZoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor);
         double targetZoom;
 
         if (_isTouchDoubleTapZoomedIn)
         {
             _isTouchDoubleTapZoomedIn = false;
-            targetZoom = Math.Clamp(
-                _zoomBeforeTouchDoubleTap > 0.05 ? _zoomBeforeTouchDoubleTap : 1.0,
-                DocumentViewModel.MinZoom,
-                DocumentViewModel.MaxZoom);
-            if (Math.Abs(targetZoom - currentZoom) < 0.05)
-            {
-                targetZoom = Math.Clamp(currentZoom / TouchTapZoomMultiplier, DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
-            }
-
             _restoreFitAfterSmoothZoom = _wasFittedBeforeTouchDoubleTap && !doc.IsContinuous;
+            if (_restoreFitAfterSmoothZoom)
+            {
+                targetZoom = CalculateFitVerticalZoom(doc);
+            }
+            else
+            {
+                targetZoom = Math.Clamp(
+                    _zoomBeforeTouchDoubleTap > 0.05 ? _zoomBeforeTouchDoubleTap : 1.0,
+                    DocumentViewModel.MinZoom,
+                    DocumentViewModel.MaxZoom);
+                if (Math.Abs(targetZoom - currentZoom) < 0.05)
+                {
+                    targetZoom = Math.Clamp(currentZoom / TouchTapZoomMultiplier, DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
+                }
+            }
         }
         else
         {
@@ -4758,8 +4808,43 @@ public sealed partial class DocumentView : Page
                 DocumentViewModel.MaxZoom);
         }
 
-        _isTouchToggleZoomAnimation = true;
+        EnsureScrollModesEnabledForViewChange();
+
+        double vw = ContinuousScrollViewer.ViewportWidth > 0 ? ContinuousScrollViewer.ViewportWidth : ContinuousScrollViewer.ActualWidth;
+        double vh = ContinuousScrollViewer.ViewportHeight > 0 ? ContinuousScrollViewer.ViewportHeight : ContinuousScrollViewer.ActualHeight;
+        double pivotX = vw > 0 ? Math.Clamp(pivotInViewport.X, 0.0, vw) : 0.0;
+        double pivotY = vh > 0 ? Math.Clamp(pivotInViewport.Y, 0.0, vh) : 0.0;
+
+        _smoothZoomStartFactor = currentZoom;
+        _smoothZoomCurrentFactor = currentZoom;
         _smoothZoomTargetFactor = targetZoom;
+        _smoothZoomStartOffsetX = ContinuousScrollViewer.HorizontalOffset;
+        _smoothZoomStartOffsetY = ContinuousScrollViewer.VerticalOffset;
+
+        double contentX = (_smoothZoomStartOffsetX + pivotX) / currentZoom;
+        double contentY = (_smoothZoomStartOffsetY + pivotY) / currentZoom;
+
+        if (_restoreFitAfterSmoothZoom && !doc.IsContinuous)
+        {
+            _smoothZoomTargetOffsetX = 0.0;
+            _smoothZoomTargetOffsetY = 0.0;
+        }
+        else if (targetZoom < currentZoom)
+        {
+            double unzoomedW = Math.Max(vw / currentZoom, ContinuousScrollViewer.ExtentWidth / currentZoom);
+            double unzoomedH = Math.Max(vh / currentZoom, ContinuousScrollViewer.ExtentHeight / currentZoom);
+            double maxTargetScrollX = Math.Max(0.0, (unzoomedW * targetZoom) - vw);
+            double maxTargetScrollY = Math.Max(0.0, (unzoomedH * targetZoom) - vh);
+            _smoothZoomTargetOffsetX = Math.Clamp((contentX * targetZoom) - pivotX, 0.0, maxTargetScrollX);
+            _smoothZoomTargetOffsetY = Math.Clamp((contentY * targetZoom) - pivotY, 0.0, maxTargetScrollY);
+        }
+        else
+        {
+            _smoothZoomTargetOffsetX = Math.Max(0.0, (contentX * targetZoom) - pivotX);
+            _smoothZoomTargetOffsetY = Math.Max(0.0, (contentY * targetZoom) - pivotY);
+        }
+
+        _isTouchToggleZoomAnimation = true;
         _smoothZoomPivotPoint = pivotInViewport;
         _lastSmoothZoomRenderTicks = System.Diagnostics.Stopwatch.GetTimestamp();
 
@@ -4809,28 +4894,86 @@ public sealed partial class DocumentView : Page
         _lastSmoothZoomRenderTicks = nowTicks;
         dt = Math.Clamp(dt, 0.002, 0.050);
 
-        double currentZoom = Math.Max(0.05, ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor);
-        double diff = _smoothZoomTargetFactor - currentZoom;
-        if (Math.Abs(diff) < 0.002)
+        if (_isTouchToggleZoomAnimation)
         {
-            bool restoreFit = _restoreFitAfterSmoothZoom;
-            _restoreFitAfterSmoothZoom = false;
-            StopSmoothWheelZoom();
-            ApplyInteractiveZoomAroundPoint(_smoothZoomPivotPoint, _smoothZoomTargetFactor / currentZoom, 0.0, 0.0);
-            if (restoreFit && !doc.IsContinuous)
+            double diff = _smoothZoomTargetFactor - _smoothZoomCurrentFactor;
+            if (Math.Abs(diff) < 0.003 || Math.Abs(_smoothZoomTargetFactor - _smoothZoomStartFactor) < 0.001)
             {
-                _isFittedVertically = true;
-                ExecuteFitVertical(force: true);
+                bool restoreFit = _restoreFitAfterSmoothZoom;
+                _restoreFitAfterSmoothZoom = false;
+                _isTouchToggleZoomAnimation = false;
+                StopSmoothWheelZoom();
+
+                _isApplyingZoom = true;
+                try
+                {
+                    _isFittedVertically = restoreFit && !doc.IsContinuous;
+                    EnsureScrollModesEnabledForViewChange();
+                    if (!_isHorizontalPushAnimating && !_isSlideSwipeActive && !_isSlideSwipeAnimating && PagesRepeaterPushTransform is not null && _smoothZoomTargetFactor > 0.05)
+                    {
+                        PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip(_smoothZoomTargetFactor) / _smoothZoomTargetFactor;
+                    }
+
+                    ContinuousScrollViewer.ChangeView(_smoothZoomTargetOffsetX, _smoothZoomTargetOffsetY, (float)_smoothZoomTargetFactor, disableAnimation: true);
+                    doc.LastHorizontalOffset = _smoothZoomTargetOffsetX;
+                    doc.LastVerticalOffset = _smoothZoomTargetOffsetY;
+                    ViewModel.SetZoom((float)_smoothZoomTargetFactor);
+                    SyncPagedScrollViewerModes();
+                    UpdateViewportPages(_smoothZoomTargetFactor);
+                    ScheduleViewportUpdate();
+                }
+                finally
+                {
+                    _isApplyingZoom = false;
+                }
+
+                return;
             }
 
+            double alpha = 1.0 - Math.Exp(-18.0 * dt);
+            _smoothZoomCurrentFactor += diff * alpha;
+            double totalSpan = _smoothZoomTargetFactor - _smoothZoomStartFactor;
+            double progress = Math.Abs(totalSpan) > 0.0001
+                ? Math.Clamp((_smoothZoomCurrentFactor - _smoothZoomStartFactor) / totalSpan, 0.0, 1.0)
+                : 1.0;
+
+            double nextOffsetX = _smoothZoomStartOffsetX + ((_smoothZoomTargetOffsetX - _smoothZoomStartOffsetX) * progress);
+            double nextOffsetY = _smoothZoomStartOffsetY + ((_smoothZoomTargetOffsetY - _smoothZoomStartOffsetY) * progress);
+
+            _isApplyingZoom = true;
+            try
+            {
+                _isFittedVertically = false;
+                EnsureScrollModesEnabledForViewChange();
+                if (!_isHorizontalPushAnimating && !_isSlideSwipeActive && !_isSlideSwipeAnimating && PagesRepeaterPushTransform is not null && _smoothZoomCurrentFactor > 0.05)
+                {
+                    PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip(_smoothZoomCurrentFactor) / _smoothZoomCurrentFactor;
+                }
+
+                ContinuousScrollViewer.ChangeView(nextOffsetX, nextOffsetY, (float)_smoothZoomCurrentFactor, disableAnimation: true);
+                ScheduleViewportUpdate();
+            }
+            finally
+            {
+                _isApplyingZoom = false;
+            }
+
+            return;
+        }
+
+        double currentZoom = Math.Max(0.05, ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor);
+        double wheelDiff = _smoothZoomTargetFactor - currentZoom;
+        if (Math.Abs(wheelDiff) < 0.002)
+        {
+            StopSmoothWheelZoom();
+            ApplyInteractiveZoomAroundPoint(_smoothZoomPivotPoint, _smoothZoomTargetFactor / currentZoom, 0.0, 0.0);
             SyncPagedScrollViewerModes();
             return;
         }
 
-        double speed = _isTouchToggleZoomAnimation ? 15.0 : 26.0;
-        double alpha = 1.0 - Math.Exp(-speed * dt);
-        double nextZoom = currentZoom + (diff * alpha);
-        ApplyInteractiveZoomAroundPoint(_smoothZoomPivotPoint, nextZoom / currentZoom, 0.0, 0.0);
+        double wheelAlpha = 1.0 - Math.Exp(-26.0 * dt);
+        double nextWheelZoom = currentZoom + (wheelDiff * wheelAlpha);
+        ApplyInteractiveZoomAroundPoint(_smoothZoomPivotPoint, nextWheelZoom / currentZoom, 0.0, 0.0);
     }
 
     private void ApplyInteractiveZoomAroundPoint(Point viewportPoint, double zoomMultiplier, double panDx, double panDy)
@@ -4963,11 +5106,37 @@ public sealed partial class DocumentView : Page
 
     private void OnScrollViewerContentRootContextRequested(UIElement sender, ContextRequestedEventArgs args)
     {
-        if (_isLastPointerInputTouch)
+        if (_isLastPointerInputTouch || _isDraggingTouchScrollScrubber || IsDescendantOfTouchScrubber(args.OriginalSource as DependencyObject))
         {
             // Suppress the desktop right-click MenuFlyout on touch long-press so touch uses native text selection + CommandBarFlyout
             args.Handled = true;
         }
+    }
+
+    private void OnTouchScrollScrubberRightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        e.Handled = true;
+    }
+
+    private void OnTouchScrollScrubberContextRequested(UIElement sender, ContextRequestedEventArgs args)
+    {
+        args.Handled = true;
+    }
+
+    private bool IsDescendantOfTouchScrubber(DependencyObject? element)
+    {
+        while (element is not null)
+        {
+            if (ReferenceEquals(element, TouchScrollThumbHitTarget) ||
+                ReferenceEquals(element, TouchScrollScrubberContainer))
+            {
+                return true;
+            }
+
+            element = VisualTreeHelper.GetParent(element);
+        }
+
+        return false;
     }
 
     private void OnTouchSelectionCopyButtonClick(object sender, RoutedEventArgs e)
@@ -5037,11 +5206,6 @@ public sealed partial class DocumentView : Page
             if (ContinuousScrollViewer.VerticalScrollMode != ScrollMode.Disabled)
             {
                 ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Disabled;
-            }
-
-            if (ContinuousScrollViewer.ZoomMode != ZoomMode.Disabled)
-            {
-                ContinuousScrollViewer.ZoomMode = ZoomMode.Disabled;
             }
 
             try
@@ -5356,7 +5520,10 @@ public sealed partial class DocumentView : Page
         e.Handled = true;
         _isLastPointerInputTouch = true;
         _isDraggingTouchScrollScrubber = true;
+        PdfPageCanvas.IsTouchScrubberDragging = true;
         _touchScrollScrubberPointerId = e.Pointer.PointerId;
+        _lastScrubberScrollUpdateTick = 0;
+        _lastScrubberTargetVOffset = -1.0;
         _touchScrollGrabOffsetY = Math.Clamp(
             e.GetCurrentPoint(TouchScrollThumbHitTarget).Position.Y,
             8.0,
@@ -5411,6 +5578,7 @@ public sealed partial class DocumentView : Page
         }
 
         e.Handled = true;
+        _isLastPointerInputTouch = true;
         double fingerY = e.GetCurrentPoint(ScrollViewerContentRoot).Position.Y;
         double viewerH = ScrollViewerContentRoot.ActualHeight > 0
             ? ScrollViewerContentRoot.ActualHeight
@@ -5428,12 +5596,27 @@ public sealed partial class DocumentView : Page
         if (ContinuousScrollViewer.ScrollableHeight > 0.5)
         {
             double targetVOffset = normalized * ContinuousScrollViewer.ScrollableHeight;
-            EnsureScrollModesEnabledForViewChange();
-            ContinuousScrollViewer.ChangeView(null, targetVOffset, null, disableAnimation: true);
-            doc.LastVerticalOffset = targetVOffset;
-            SyncScrollMetricsFromVerticalOffset(targetVOffset);
-            UpdateTouchScrollPageBubbleText();
-            ScheduleViewportUpdate();
+            _lastScrubberTargetVOffset = targetVOffset;
+
+            if (TouchScrollPageBubbleText is not null)
+            {
+                int targetPageIdx = CalculateCurrentPageIndexFromScroll(targetVOffset);
+                TouchScrollPageBubbleText.Text = $"{targetPageIdx + 1} / {doc.PageCount}";
+            }
+
+            long nowTick = Environment.TickCount64;
+            if (nowTick - _lastScrubberScrollUpdateTick >= 15 ||
+                normalized <= 0.001 ||
+                normalized >= 0.999)
+            {
+                _lastScrubberScrollUpdateTick = nowTick;
+                EnsureScrollModesEnabledForViewChange();
+                ContinuousScrollViewer.ChangeView(null, targetVOffset, null, disableAnimation: true);
+                doc.LastVerticalOffset = targetVOffset;
+                SyncScrollMetricsFromVerticalOffset(targetVOffset);
+                UpdateTouchScrollPageBubbleText();
+                ScheduleViewportUpdate();
+            }
         }
     }
 
@@ -5468,10 +5651,33 @@ public sealed partial class DocumentView : Page
     {
         if (!_isDraggingTouchScrollScrubber)
         {
+            PdfPageCanvas.IsTouchScrubberDragging = false;
             return;
         }
 
         _isDraggingTouchScrollScrubber = false;
+        PdfPageCanvas.IsTouchScrubberDragging = false;
+
+        if (_lastScrubberTargetVOffset >= 0.0 &&
+            ContinuousScrollViewer is not null &&
+            ContinuousScrollViewer.ScrollableHeight > 0.5 &&
+            ViewModel?.CurrentDocument is { IsContinuous: true, Pages.Count: > 0 } doc)
+        {
+            double finalVOffset = Math.Clamp(_lastScrubberTargetVOffset, 0.0, ContinuousScrollViewer.ScrollableHeight);
+            _lastScrubberTargetVOffset = -1.0;
+            if (Math.Abs(ContinuousScrollViewer.VerticalOffset - finalVOffset) > 0.5)
+            {
+                EnsureScrollModesEnabledForViewChange();
+                ContinuousScrollViewer.ChangeView(null, finalVOffset, null, disableAnimation: true);
+                doc.LastVerticalOffset = finalVOffset;
+                SyncScrollMetricsFromVerticalOffset(finalVOffset);
+            }
+        }
+        else
+        {
+            _lastScrubberTargetVOffset = -1.0;
+        }
+
         if (TouchScrollThumbHitTarget is not null && pointerToRelease is not null)
         {
             try
@@ -5807,8 +6013,11 @@ public sealed partial class DocumentView : Page
         List<uint>? stale = null;
         foreach (var kvp in _activeTouchPointers)
         {
-            if (nowTick - kvp.Value.PressTick > 2500 &&
-                (_activeTouchSelectingCanvas is null || !_activeTouchSelectingCanvas.IsTouchSelecting))
+            bool stillDown = GetPointerInfo(kvp.Key, out POINTER_INFO pi) &&
+                             (pi.pointerFlags & POINTER_FLAG_INCONTACT) != 0 &&
+                             (pi.pointerFlags & 0x00040000u) == 0;
+            if (!stillDown || (nowTick - kvp.Value.PressTick > 800 &&
+                (_activeTouchSelectingCanvas is null || !_activeTouchSelectingCanvas.IsTouchSelecting)))
             {
                 (stale ??= new List<uint>()).Add(kvp.Key);
             }
@@ -5823,13 +6032,19 @@ public sealed partial class DocumentView : Page
         }
     }
 
-    private void StartTwoFingerTapPolling()
+    private bool IsAnyTouchPointerStillInContact()
     {
-        if (!_isTwoFingerTapPollingSubscribed)
+        foreach (var kvp in _activeTouchPointers)
         {
-            CompositionTarget.Rendering += OnTwoFingerTapPollingRendering;
-            _isTwoFingerTapPollingSubscribed = true;
+            if (GetPointerInfo(kvp.Key, out POINTER_INFO pi) &&
+                (pi.pointerFlags & POINTER_FLAG_INCONTACT) != 0 &&
+                (pi.pointerFlags & 0x00040000u) == 0)
+            {
+                return true;
+            }
         }
+
+        return false;
     }
 
     private void StopTwoFingerTapPolling()
@@ -5843,76 +6058,7 @@ public sealed partial class DocumentView : Page
 
     private void OnTwoFingerTapPollingRendering(object? sender, object e)
     {
-        if (!_isTwoFingerTapCandidate)
-        {
-            StopTwoFingerTapPolling();
-            return;
-        }
-
-        long elapsedMs = Environment.TickCount64 - _twoFingerTapStartTick;
-        if (elapsedMs > TwoFingerTapMaxDurationMs)
-        {
-            _isTwoFingerTapCandidate = false;
-            StopTwoFingerTapPolling();
-            return;
-        }
-
-        bool ok1 = GetPointerInfo(_twoFingerTapId1, out POINTER_INFO pi1);
-        bool ok2 = GetPointerInfo(_twoFingerTapId2, out POINTER_INFO pi2);
-        if (_hasTwoFingerTapStartPx && XamlRoot is not null)
-        {
-            double scale = XamlRoot.RasterizationScale > 0 ? XamlRoot.RasterizationScale : 1.0;
-            double maxPxSq = (TwoFingerTapMaxMoveDip * scale) * (TwoFingerTapMaxMoveDip * scale);
-            if (ok1)
-            {
-                double dx1 = pi1.ptPixelLocation.X - _twoFingerTapStartPx1.X;
-                double dy1 = pi1.ptPixelLocation.Y - _twoFingerTapStartPx1.Y;
-                if ((dx1 * dx1) + (dy1 * dy1) > maxPxSq)
-                {
-                    _isTwoFingerTapCandidate = false;
-                    StopTwoFingerTapPolling();
-                    return;
-                }
-            }
-
-            if (ok2)
-            {
-                double dx2 = pi2.ptPixelLocation.X - _twoFingerTapStartPx2.X;
-                double dy2 = pi2.ptPixelLocation.Y - _twoFingerTapStartPx2.Y;
-                if ((dx2 * dx2) + (dy2 * dy2) > maxPxSq)
-                {
-                    _isTwoFingerTapCandidate = false;
-                    StopTwoFingerTapPolling();
-                    return;
-                }
-            }
-        }
-
-        bool down1 = ok1 && (pi1.pointerFlags & POINTER_FLAG_INCONTACT) != 0;
-        bool down2 = ok2 && (pi2.pointerFlags & POINTER_FLAG_INCONTACT) != 0;
-        if (!down1 && !down2)
-        {
-            StopTwoFingerTapPolling();
-            _activeTouchPointers.Clear();
-            _firstTouchPointer = null;
-            TryExecutePendingTwoFingerTapZoom();
-        }
-    }
-
-    private void TryExecutePendingTwoFingerTapZoom()
-    {
         StopTwoFingerTapPolling();
-        if (!_isTwoFingerTapCandidate)
-        {
-            return;
-        }
-
-        _isTwoFingerTapCandidate = false;
-        long elapsedMs = Environment.TickCount64 - _twoFingerTapStartTick;
-        if (elapsedMs <= TwoFingerTapMaxDurationMs && Math.Abs(_twoFingerTapScaleAccum - 1.0) <= 0.045)
-        {
-            ToggleSmoothTouchZoom(_twoFingerTapMidpointInViewport);
-        }
     }
 
     private void OnSlideSwipePointerPressed(object sender, PointerRoutedEventArgs e)
@@ -5977,7 +6123,7 @@ public sealed partial class DocumentView : Page
             HideTouchSelectionFlyout();
         }
 
-        // If a 2nd finger touches down (2-finger tap to zoom in or 2-finger pinch-to-zoom), immediately cancel any
+        // If a 2nd finger touches down (2-finger pinch-to-zoom or 2-finger pan), immediately cancel any
         // single-finger touch hold or text selection and track the 2-finger gesture.
         if (_activeTouchPointers.Count > 1)
         {
@@ -5996,67 +6142,17 @@ public sealed partial class DocumentView : Page
                 CancelInteractiveSlideSwipeImmediate();
             }
 
-            if (_activeTouchPointers.Count == 2)
-            {
-                Point p1 = default;
-                Point p2 = default;
-                uint id1 = 0;
-                uint id2 = 0;
-                int idx = 0;
-                foreach (var kvp in _activeTouchPointers)
-                {
-                    if (idx == 0)
-                    {
-                        id1 = kvp.Key;
-                        p1 = kvp.Value.PressPos;
-                    }
-                    else
-                    {
-                        id2 = kvp.Key;
-                        p2 = kvp.Value.PressPos;
-                    }
-
-                    idx++;
-                }
-
-                Point midRoot = new((p1.X + p2.X) * 0.5, (p1.Y + p2.Y) * 0.5);
-                try
-                {
-                    _twoFingerTapMidpointInViewport = ScrollViewerContentRoot.TransformToVisual(ContinuousScrollViewer).TransformPoint(midRoot);
-                }
-                catch
-                {
-                    _twoFingerTapMidpointInViewport = midRoot;
-                }
-
-                _twoFingerTapId1 = id1;
-                _twoFingerTapId2 = id2;
-                bool ok1 = GetPointerInfo(id1, out POINTER_INFO pi1);
-                bool ok2 = GetPointerInfo(id2, out POINTER_INFO pi2);
-                _hasTwoFingerTapStartPx = ok1 && ok2;
-                _twoFingerTapStartPx1 = ok1 ? pi1.ptPixelLocation : default;
-                _twoFingerTapStartPx2 = ok2 ? pi2.ptPixelLocation : default;
-
-                _isTwoFingerTapCandidate = true;
-                _twoFingerTapStartTick = nowTick;
-                _twoFingerTapScaleAccum = 1.0;
-                StartTwoFingerTapPolling();
-            }
-            else
-            {
-                _isTwoFingerTapCandidate = false;
-                StopTwoFingerTapPolling();
-            }
-
+            StopTwoFingerTapPolling();
+            EnsureScrollModesEnabledForViewChange();
             return;
         }
 
-        _isTwoFingerTapCandidate = false;
         StopTwoFingerTapPolling();
         _firstTouchPointer = e.Pointer;
 
         if (!CanUseInteractiveSlideSwipe())
         {
+            EnsureScrollModesEnabledForViewChange();
             _touchSwipePointerId = e.Pointer.PointerId;
             _touchSwipeStartPoint = pt.Position;
             _touchSwipeLastPoint = pt.Position;
@@ -6085,7 +6181,7 @@ public sealed partial class DocumentView : Page
 
     private void OnSlideSwipePointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (_isDraggingSelectionHandle || _isDraggingTouchScrollScrubber)
+        if (_isDraggingSelectionHandle || _isDraggingTouchScrollScrubber || IsDescendantOfTouchScrubber(e.OriginalSource as DependencyObject))
         {
             return;
         }
@@ -6135,17 +6231,6 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        if (_isTwoFingerTapCandidate && _activeTouchPointers.TryGetValue(e.Pointer.PointerId, out var startInfo))
-        {
-            Point curPt = e.GetCurrentPoint(ScrollViewerContentRoot).Position;
-            double fdx = curPt.X - startInfo.PressPos.X;
-            double fdy = curPt.Y - startInfo.PressPos.Y;
-            if (((fdx * fdx) + (fdy * fdy)) > (TwoFingerTapMaxMoveDip * TwoFingerTapMaxMoveDip))
-            {
-                _isTwoFingerTapCandidate = false;
-            }
-        }
-
         if (_activeTouchSelectingCanvas is { IsTouchSelecting: true } selectingCanvas)
         {
             try
@@ -6159,6 +6244,8 @@ public sealed partial class DocumentView : Page
 
             return;
         }
+
+        PruneStaleTouchPointers(Environment.TickCount64);
 
         if (e.Pointer.PointerId != _touchSwipePointerId ||
             !_isTouchSwipeTracking ||
@@ -6186,43 +6273,38 @@ public sealed partial class DocumentView : Page
 
         if (!CanUseInteractiveSlideSwipe())
         {
-            if (((totalDx * totalDx) + (totalDy * totalDy)) > 36.0)
-            {
-                CancelTouchHoldOnAllCanvases();
-                PanPagedScrollViewerBy(stepDx, stepDy);
-            }
-
             return;
         }
 
         if (!_isTouchSwipeEngaged)
         {
-            if (Math.Abs(totalDy) > 12.0 && Math.Abs(totalDy) > Math.Abs(totalDx) * 1.2)
+            bool canPanH = CanPanHorizontallyInPagedMode();
+            bool canPanV = CanPanVerticallyInPagedMode();
+            if (canPanH || canPanV)
             {
-                if (CanPanVerticallyInPagedMode() || CanPanHorizontallyInPagedMode())
+                if (CanStartSwipeInDirection(swipingRight: totalDx > 0) &&
+                    Math.Abs(totalDx) >= 16.0 &&
+                    Math.Abs(totalDx) > Math.Abs(totalDy) * 2.2)
+                {
+                    _touchGestureAxis = PagedTouchGestureAxis.HorizontalSwipe;
+                    _isTouchSwipeEngaged = true;
+                    BeginInteractiveSlideSwipe();
+                    stepDx = totalDx;
+                }
+                else if (((totalDx * totalDx) + (totalDy * totalDy)) >= 25.0)
                 {
                     _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
                     PanPagedScrollViewerBy(stepDx, stepDy);
-                }
-
-                _isTouchSwipeTracking = false;
-                return;
-            }
-
-            if (Math.Abs(totalDx) >= SlideSwipeDirectionLockDip && Math.Abs(totalDx) >= Math.Abs(totalDy) * 1.1)
-            {
-                if (!CanStartSwipeInDirection(swipingRight: totalDx > 0))
-                {
-                    if (CanPanHorizontallyInPagedMode())
-                    {
-                        _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
-                        PanPagedScrollViewerBy(stepDx, stepDy);
-                    }
-
                     _isTouchSwipeTracking = false;
                     return;
                 }
-
+                else
+                {
+                    return;
+                }
+            }
+            else if (Math.Abs(totalDx) >= SlideSwipeDirectionLockDip && Math.Abs(totalDx) >= Math.Abs(totalDy) * 1.15)
+            {
                 _touchGestureAxis = PagedTouchGestureAxis.HorizontalSwipe;
                 _isTouchSwipeEngaged = true;
                 BeginInteractiveSlideSwipe();
@@ -6290,7 +6372,6 @@ public sealed partial class DocumentView : Page
         if (_activeTouchPointers.Count == 0)
         {
             _firstTouchPointer = null;
-            TryExecutePendingTwoFingerTapZoom();
         }
 
         if (e.Pointer.PointerId == _touchSwipePointerId)
@@ -6314,7 +6395,7 @@ public sealed partial class DocumentView : Page
         if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Touch)
         {
             uint canceledId = e.Pointer.PointerId;
-            if (_activeTouchSelectingCanvas is { IsTouchSelecting: true } && _activeTouchPointers.Count <= 1)
+            if (_activeTouchSelectingCanvas is { IsTouchSelecting: true })
             {
                 return;
             }
@@ -6362,11 +6443,19 @@ public sealed partial class DocumentView : Page
             return;
         }
 
+        // In Continuous Mode (when not actively dragging a touch text selection), leave e.Mode untouched
+        // as ManipulationModes.System so ContinuousScrollViewer DirectManipulation handles 100% of vertical
+        // scrolling, 2D zoomed panning, and pinch-to-zoom natively on the compositor thread.
+        if (!CanUseInteractiveSlideSwipe() && _activeTouchSelectingCanvas is null)
+        {
+            return;
+        }
+
         if (ScrollViewerContentRoot is not null)
         {
-            bool isContinuous = ViewModel?.CurrentDocument is { IsContinuous: true } && ViewModel?.IsPresentationMode != true;
             e.Container = ScrollViewerContentRoot;
-            e.Mode = (isContinuous && _activeTouchSelectingCanvas is null)
+            bool allowPanInertia = CanPanHorizontallyInPagedMode() || CanPanVerticallyInPagedMode();
+            e.Mode = allowPanInertia && _activeTouchSelectingCanvas is null
                 ? (PagedCustomManipulationMode | ManipulationModes.TranslateInertia)
                 : PagedCustomManipulationMode;
         }
@@ -6378,6 +6467,13 @@ public sealed partial class DocumentView : Page
         {
             return;
         }
+
+        if (!CanUseInteractiveSlideSwipe() && _activeTouchSelectingCanvas is null)
+        {
+            return;
+        }
+
+        PruneStaleTouchPointers(Environment.TickCount64);
 
         if (_isSlideSwipeAnimating)
         {
@@ -6434,6 +6530,8 @@ public sealed partial class DocumentView : Page
             return;
         }
 
+        PruneStaleTouchPointers(Environment.TickCount64);
+
         double deltaX = e.Delta.Translation.X;
         double deltaY = e.Delta.Translation.Y;
         double scaleDelta = e.Delta.Scale;
@@ -6446,12 +6544,6 @@ public sealed partial class DocumentView : Page
             if (_isSlideSwipeActive)
             {
                 CancelInteractiveSlideSwipeImmediate();
-            }
-
-            _twoFingerTapScaleAccum *= scaleDelta;
-            if (Math.Abs(_twoFingerTapScaleAccum - 1.0) > 0.045)
-            {
-                _isTwoFingerTapCandidate = false;
             }
 
             if (Math.Abs(scaleDelta - 1.0) > 0.001)
@@ -6472,21 +6564,6 @@ public sealed partial class DocumentView : Page
 
         if (!CanUseInteractiveSlideSwipe())
         {
-            if (totalDistSq <= 36.0 && FindCanvasWaitingForTouchHold() is not null)
-            {
-                return;
-            }
-
-            if (FindCanvasWaitingForTouchHold() is not null)
-            {
-                CancelTouchHoldOnAllCanvases();
-                PanPagedScrollViewerBy(_manipCumulativeDx, _manipCumulativeDy);
-            }
-            else
-            {
-                PanPagedScrollViewerBy(deltaX, deltaY);
-            }
-
             return;
         }
 
@@ -6500,26 +6577,40 @@ public sealed partial class DocumentView : Page
             bool canPanH = CanPanHorizontallyInPagedMode();
             bool canPanV = CanPanVerticallyInPagedMode();
 
-            if (canPanV && Math.Abs(_manipCumulativeDy) >= SlideSwipeDirectionLockDip &&
-                Math.Abs(_manipCumulativeDy) > Math.Abs(_manipCumulativeDx) * 1.15)
+            if (canPanH || canPanV)
             {
-                CancelTouchHoldOnAllCanvases();
-                _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
-                PanPagedScrollViewerBy(_manipCumulativeDx, _manipCumulativeDy);
-                return;
-            }
-
-            if (Math.Abs(_manipCumulativeDx) >= 3.5 &&
-                (!canPanV || Math.Abs(_manipCumulativeDx) >= Math.Abs(_manipCumulativeDy) * 0.9))
-            {
-                CancelTouchHoldOnAllCanvases();
-                if (canPanH && !CanStartSwipeInDirection(swipingRight: _manipCumulativeDx > 0))
+                // When zoomed in in Paged Mode, prioritize smooth 2D panning in all directions;
+                // only start a horizontal slide-swipe if already at the horizontal scroll edge
+                // and the user makes a distinctly horizontal swipe.
+                if (CanStartSwipeInDirection(swipingRight: _manipCumulativeDx > 0) &&
+                    Math.Abs(_manipCumulativeDx) >= 14.0 &&
+                    Math.Abs(_manipCumulativeDx) > Math.Abs(_manipCumulativeDy) * 2.2)
                 {
+                    CancelTouchHoldOnAllCanvases();
+                    _touchGestureAxis = PagedTouchGestureAxis.HorizontalSwipe;
+                    if (!_isSlideSwipeActive)
+                    {
+                        BeginInteractiveSlideSwipe();
+                    }
+
+                    deltaX = _manipCumulativeDx;
+                }
+                else if (totalDistSq >= 16.0)
+                {
+                    CancelTouchHoldOnAllCanvases();
                     _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
                     PanPagedScrollViewerBy(_manipCumulativeDx, _manipCumulativeDy);
                     return;
                 }
-
+                else
+                {
+                    return;
+                }
+            }
+            else if (Math.Abs(_manipCumulativeDx) >= 4.0 &&
+                     Math.Abs(_manipCumulativeDx) >= Math.Abs(_manipCumulativeDy) * 0.9)
+            {
+                CancelTouchHoldOnAllCanvases();
                 _touchGestureAxis = PagedTouchGestureAxis.HorizontalSwipe;
                 if (!_isSlideSwipeActive)
                 {
@@ -6557,11 +6648,19 @@ public sealed partial class DocumentView : Page
         }
 
         _isManipulatingSlideSwipe = false;
-        _activeTouchPointers.Clear();
-        _firstTouchPointer = null;
 
         if (_activeTouchSelectingCanvas is { IsTouchSelecting: true } selectingCanvas)
         {
+            // If the user's finger is still physically in contact on the screen (e.g., ManipulationCompleted fired
+            // because CancelDirectManipulations or pointer capture was invoked at the 300ms hold threshold),
+            // do NOT terminate the active touch selection drag!
+            if (IsAnyTouchPointerStillInContact())
+            {
+                return;
+            }
+
+            _activeTouchPointers.Clear();
+            _firstTouchPointer = null;
             try
             {
                 Point ptInCanvas = ScrollViewerContentRoot.TransformToVisual(selectingCanvas).TransformPoint(e.Position);
@@ -6578,7 +6677,8 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        TryExecutePendingTwoFingerTapZoom();
+        _activeTouchPointers.Clear();
+        _firstTouchPointer = null;
 
         if (FindCanvasWaitingForTouchHold() is { } waitingCanvas)
         {

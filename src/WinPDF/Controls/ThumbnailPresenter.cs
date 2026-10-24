@@ -310,8 +310,18 @@ public sealed class ThumbnailPresenter : Grid
 
     private unsafe WriteableBitmap? PopulateWriteableBitmap(PdfBitmapEntry entry)
     {
+        if (!entry.TryRetain())
+        {
+            return null;
+        }
+
         try
         {
+            if (entry.IsDisposed)
+            {
+                return null;
+            }
+
             WriteableBitmap bitmap = (_reusableBitmap is not null &&
                                       _reusableBitmap.PixelWidth == entry.Width &&
                                       _reusableBitmap.PixelHeight == entry.Height)
@@ -380,6 +390,10 @@ public sealed class ThumbnailPresenter : Grid
         catch
         {
             return null;
+        }
+        finally
+        {
+            entry.Release();
         }
     }
 

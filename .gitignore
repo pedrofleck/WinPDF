@@ -41,6 +41,7 @@ artifacts/
 
 # local stuff
 local-todo.md
+ram_optimization_plan.md
 sample.pdf
 test_doc.pdf
 .dotnet_cli/

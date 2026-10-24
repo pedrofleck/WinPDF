@@ -1134,6 +1134,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     /// </summary>
     public double LastVerticalOffset { get; set; }
 
+    private int _lastSelectedThumbnailIndex;
+
     partial void OnCurrentPageIndexChanged(int value)
     {
         OnPropertyChanged(nameof(CurrentPageNumber));
@@ -1148,11 +1150,19 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             }
         }
 
-        for (int i = 0; i < Thumbnails.Count; i++)
+        if (_lastSelectedThumbnailIndex >= 0 &&
+            _lastSelectedThumbnailIndex < Thumbnails.Count &&
+            _lastSelectedThumbnailIndex != value)
         {
-            bool isCur = (i == value);
-            Thumbnails[i].IsSelected = isCur;
-            Thumbnails[i].IsCurrentPage = isCur;
+            Thumbnails[_lastSelectedThumbnailIndex].IsSelected = false;
+            Thumbnails[_lastSelectedThumbnailIndex].IsCurrentPage = false;
+        }
+
+        if (value >= 0 && value < Thumbnails.Count)
+        {
+            Thumbnails[value].IsSelected = true;
+            Thumbnails[value].IsCurrentPage = true;
+            _lastSelectedThumbnailIndex = value;
         }
 
         UpdateIsCurrentPageBookmarked();
@@ -1702,12 +1712,24 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     {
         try
         {
+            // Yield briefly so thumbnails that fly past the sidebar viewport during high-speed scrubbing
+            // are cancelled on recycle before ever enqueuing native PDFium rasterization jobs.
+            await Task.Delay(25, cts.Token);
+
+            if (_isDisposed || cts.IsCancellationRequested || item.LoadCancellation != cts || !item.IsRealized || !_thumbnailsActive)
+            {
+                return;
+            }
+
+            // Do NOT use ConfigureAwait(false) here: resuming on the UI thread guarantees thread-safe
+            // mutation of ThumbnailItemViewModel.Image (which is bound via x:Bind Mode=OneWay in ThumbnailsTabPage)
+            // and eliminates race conditions with OnThumbnailRecycled.
             PdfBitmapLease lease = await _pdfService.RenderAsync(
                 request,
                 PdfJobPriority.Thumbnail,
-                cts.Token).ConfigureAwait(false);
+                cts.Token);
 
-            if (_isDisposed || cts.IsCancellationRequested || !item.IsRealized || !_thumbnailsActive)
+            if (_isDisposed || cts.IsCancellationRequested || item.LoadCancellation != cts || !item.IsRealized || !_thumbnailsActive)
             {
                 lease.Dispose();
                 return;

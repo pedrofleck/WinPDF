@@ -499,6 +499,10 @@
                     VerticalAlignment="Top"
                     Margin="0,0,4,0"
                     Canvas.ZIndex="92"
+                    IsHoldingEnabled="False"
+                    IsRightTapEnabled="False"
+                    RightTapped="OnTouchScrollScrubberRightTapped"
+                    ContextRequested="OnTouchScrollScrubberContextRequested"
                     Opacity="0"
                     Visibility="Collapsed">
                     <Grid.ColumnDefinitions>
@@ -538,6 +542,10 @@
                         Height="64"
                         Background="Transparent"
                         ManipulationMode="None"
+                        IsHoldingEnabled="False"
+                        IsRightTapEnabled="False"
+                        RightTapped="OnTouchScrollScrubberRightTapped"
+                        ContextRequested="OnTouchScrollScrubberContextRequested"
                         PointerPressed="OnTouchScrollThumbPointerPressed"
                         PointerMoved="OnTouchScrollThumbPointerMoved"
                         PointerReleased="OnTouchScrollThumbPointerReleased"

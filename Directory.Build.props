@@ -5,7 +5,7 @@
   -->
   <PropertyGroup>
     <!-- Single source of truth for the application version across Visual Studio, Settings UI, Package-Release.ps1, and Inno Setup -->
-    <Version>0.5.4-alpha.5-s3v1</Version>
+    <Version>0.5.4-alpha.5</Version>
 
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
