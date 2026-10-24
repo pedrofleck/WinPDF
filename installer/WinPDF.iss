@@ -3,7 +3,27 @@
 ; ============================================================================
 
 #ifndef AppVersion
-  #define AppVersion "0.5.4-alpha.5"
+  #define ParseVersionFromPropsLine(str Line) \
+    Pos("<Version>", Line) > 0 && Pos("</Version>", Line) > Pos("<Version>", Line) \
+      ? Copy(Line, Pos("<Version>", Line) + 9, Pos("</Version>", Line) - Pos("<Version>", Line) - 9) \
+      : ""
+  #sub ReadPropsLineForVersion
+    #define public PropsLine = FileRead(PropsFileHandle)
+    #define public CandidateVer = ParseVersionFromPropsLine(PropsLine)
+    #if CandidateVer != ""
+      #define public AppVersion = CandidateVer
+    #endif
+  #endsub
+  #if FileExists("..\Directory.Build.props")
+    #define PropsFileHandle = FileOpen("..\Directory.Build.props")
+    #if PropsFileHandle
+      #for {0; !FileEof(PropsFileHandle); 0} ReadPropsLineForVersion
+      #expr FileClose(PropsFileHandle)
+    #endif
+  #endif
+  #ifndef AppVersion
+    #define AppVersion "0.0.0"
+  #endif
 #endif
 
 #ifndef AppArch

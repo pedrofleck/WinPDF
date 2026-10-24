@@ -70,12 +70,12 @@ Permitir passar páginas/slides deslizando horizontalmente no modo **Não Contí
      - No callback `Completed` da animação, atualizar `doc.GoToPage(targetPageIndex)`, zerar o `TranslateX` do repeater e ocultar o `AdjacentSlidePreviewContainer` no mesmo frame da UI thread para que a troca final seja 100% invisível e sem piscar.
 
 ### Checklist de Verificação da Etapa 1
-- [ ] Deslizar com 1 dedo na tela no modo Página Única / Duas Páginas (`!IsContinuous`) e no modo Apresentação (`F5`) move o slide atual junto com o dedo e revela o próximo/anterior lateralmente.
-- [ ] Deslizar com 2 dedos horizontalmente no Precision Touchpad produz a mesma transição contínua lateral.
-- [ ] Um toque rápido ou *flick* curto (< 32 DIPs ou baixa velocidade) faz *bounce-back* suave e permanece no mesmo slide.
-- [ ] Na primeira e na última página, o arraste oferece resistência elástica (*rubber-band*) e volta ao lugar.
-- [ ] Setas do teclado (`Left`/`Right`/`Up`/`Down`/`PageUp`/`PageDown`), roda do mouse vertical, `Shift + Roda do Mouse` e clique/toque nas zonas laterais (`PrevPageZone`/`NextPageZone`) continuam passando os slides **instantaneamente, sem animação**.
-- [ ] Zoom por pinça (*pinch-to-zoom*) com 2 dedos continua funcionando normalmente.
+- [x] Deslizar com 1 dedo na tela no modo Página Única / Duas Páginas (`!IsContinuous`) e no modo Apresentação (`F5`) move o slide atual junto com o dedo e revela o próximo/anterior lateralmente.
+- [x] Deslizar com 2 dedos horizontalmente no Precision Touchpad produz a mesma transição contínua lateral.
+- [x] Um toque rápido ou *flick* curto (< 32 DIPs ou baixa velocidade) faz *bounce-back* suave e permanece no mesmo slide.
+- [x] Na primeira e na última página, o arraste oferece resistência elástica (*rubber-band*) e volta ao lugar.
+- [x] Setas do teclado (`Left`/`Right`/`Up`/`Down`/`PageUp`/`PageDown`), roda do mouse vertical, `Shift + Roda do Mouse` e clique/toque nas zonas laterais (`PrevPageZone`/`NextPageZone`) continuam passando os slides **instantaneamente, sem animação**.
+- [x] Zoom por pinça (*pinch-to-zoom*) com 2 dedos continua funcionando normalmente.
 
 ---
 
@@ -132,9 +132,9 @@ Permitir selecionar texto via toque ao **segurar e arrastar com o dedo** (*long-
 ### Checklist de Verificação da Etapa 2
 - [ ] Deslizar o dedo imediatamente na página continua rolando o documento normalmente sem acionar seleção acidental.
 - [ ] Segurar o dedo por ~320 ms sobre texto seleciona a palavra inicial e permite arrastar o dedo para expandir a seleção por caracteres/linhas.
-- [ ] Ao soltar o dedo após selecionar (por arraste, *double-tap* ou *triple-tap* em toque), o `CommandBarFlyout` nativo do Windows 11 aparece centralizado logo acima do texto selecionado contendo apenas o ícone de Copiar.
-- [ ] Tocar no ícone de Copiar copia o texto selecionado para a área de transferência e fecha o balão.
-- [ ] Tocar em qualquer lugar fora da seleção fecha o balão e limpa a seleção da página imediatamente.
+- [x] Ao soltar o dedo após selecionar (por arraste, *double-tap* ou *triple-tap* em toque), o `CommandBarFlyout` nativo do Windows 11 aparece centralizado logo acima do texto selecionado contendo apenas o ícone de Copiar.
+- [x] Tocar no ícone de Copiar copia o texto selecionado para a área de transferência e fecha o balão.
+- [x] Tocar em qualquer lugar fora da seleção fecha o balão e limpa a seleção da página imediatamente.
 
 ---
 

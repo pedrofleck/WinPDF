@@ -266,7 +266,9 @@ public sealed partial class SettingsViewModel : ObservableObject
     public string AppVersion => typeof(SettingsViewModel).Assembly
         .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
         .InformationalVersion
-        .Split('+')[0] ?? "0.5.3-alpha.5";
+        .Split('+')[0]
+        ?? typeof(SettingsViewModel).Assembly.GetName().Version?.ToString(3)
+        ?? "0.0.0";
 
     /// <summary>
     /// Gets the runtime processor architecture description.

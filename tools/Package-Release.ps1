@@ -4,18 +4,32 @@
 .DESCRIPTION
     Builds and publishes WinPDF in self-contained Release configuration, generates
     installer visual assets, creates a clean portable zip file, and compiles the
-    official Inno Setup 7 installer.
+    official Inno Setup 7 installer. Reads <Version> automatically from Directory.Build.props
+    when -Version is not explicitly passed.
 #>
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Release',
     [string]$Platform = 'x64',
-    [string]$Version = '0.5.3-alpha.5'
+    [string]$Version = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = (Resolve-Path "$PSScriptRoot\..").Path
+
+if ([string]::IsNullOrWhiteSpace($Version)) {
+    $propsPath = Join-Path $repoRoot 'Directory.Build.props'
+    if (Test-Path $propsPath) {
+        [xml]$propsXml = Get-Content $propsPath -Raw
+        $Version = ($propsXml.Project.PropertyGroup.Version | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1).Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($Version)) {
+        throw "Could not resolve <Version> from Directory.Build.props. Pass -Version explicitly or define <Version> in Directory.Build.props."
+    }
+}
+
 $cleanVersion = $Version.TrimStart('v')
+Write-Host "Packaging WinPDF version $cleanVersion ($Platform, $Configuration)..." -ForegroundColor Cyan
 
 # 1. Ensure installer visual assets are up to date
 Write-Host "Generating installer assets..." -ForegroundColor Cyan
@@ -36,7 +50,7 @@ if (Test-Path $targetZipPath) {
 }
 
 $projectPath = Join-Path $repoRoot 'src\WinPDF\WinPDF.csproj'
-& dotnet publish $projectPath -c $Configuration -p:Platform=$Platform --self-contained true -o $targetFolderPath
+& dotnet publish $projectPath -c $Configuration -p:Platform=$Platform -p:Version=$cleanVersion --self-contained true -o $targetFolderPath
 
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed with exit code $LASTEXITCODE"

@@ -93,10 +93,31 @@
             <Grid
                 x:Name="ScrollViewerContentRoot"
                 Grid.Row="0"
-                Background="Transparent">
+                Background="Transparent"
+                ContextRequested="OnScrollViewerContentRootContextRequested">
+                <FlyoutBase.AttachedFlyout>
+                    <CommandBarFlyout
+                        x:Name="TouchSelectionCommandBarFlyout"
+                        AlwaysExpanded="True"
+                        Placement="Top"
+                        Closed="OnTouchSelectionFlyoutClosed">
+                        <CommandBarFlyout.PrimaryCommands>
+                            <AppBarButton
+                                x:Name="TouchSelectionCopyButton"
+                                Width="40"
+                                Height="36"
+                                Click="OnTouchSelectionCopyButtonClick">
+                                <AppBarButton.Icon>
+                                    <FontIcon Glyph="&#xE8C8;" FontSize="15" />
+                                </AppBarButton.Icon>
+                            </AppBarButton>
+                        </CommandBarFlyout.PrimaryCommands>
+                    </CommandBarFlyout>
+                </FlyoutBase.AttachedFlyout>
                 <Grid.ContextFlyout>
                     <MenuFlyout>
                         <MenuFlyoutItem
+                            x:Name="ContextCopyMenuItem"
                             x:Uid="Context_Copy"
                             Command="{x:Bind ViewModel.CopySelectedTextCommand}"
                             IsEnabled="{x:Bind ViewModel.HasTextSelection, Mode=OneWay}"
@@ -377,6 +398,191 @@
                         </Canvas>
                     </Grid>
                 </ScrollViewer>
+
+                <!-- Edge-style Touch Selection Handles (left/start and right/end markers below selected text) -->
+                <Canvas
+                    x:Name="TouchSelectionHandlesCanvas"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    Canvas.ZIndex="95"
+                    Translation="0,0,28"
+                    Visibility="Collapsed">
+                    <!-- Left / Start Selection Handle -->
+                    <Grid
+                        x:Name="TouchSelectionStartHandle"
+                        Width="44"
+                        Padding="0,0,0,14"
+                        Background="Transparent"
+                        ManipulationMode="None"
+                        PointerPressed="OnTouchSelectionStartHandlePointerPressed"
+                        PointerMoved="OnTouchSelectionHandlePointerMoved"
+                        PointerReleased="OnTouchSelectionHandlePointerReleased"
+                        PointerCanceled="OnTouchSelectionHandlePointerCanceled"
+                        PointerCaptureLost="OnTouchSelectionHandlePointerCaptureLost">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Border
+                            x:Name="TouchSelectionStartStem"
+                            Grid.Row="0"
+                            Width="2"
+                            Height="18"
+                            Margin="28,0,0,0"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Top"
+                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                            CornerRadius="1"
+                            IsHitTestVisible="False" />
+                        <Border
+                            x:Name="TouchSelectionStartKnob"
+                            Grid.Row="1"
+                            Width="16"
+                            Height="16"
+                            Margin="14,-1,0,0"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Top"
+                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                            BorderBrush="#E0FFFFFF"
+                            BorderThickness="1.5"
+                            CornerRadius="8,2,8,8"
+                            IsHitTestVisible="False" />
+                    </Grid>
+
+                    <!-- Right / End Selection Handle -->
+                    <Grid
+                        x:Name="TouchSelectionEndHandle"
+                        Width="44"
+                        Padding="0,0,0,14"
+                        Background="Transparent"
+                        ManipulationMode="None"
+                        PointerPressed="OnTouchSelectionEndHandlePointerPressed"
+                        PointerMoved="OnTouchSelectionHandlePointerMoved"
+                        PointerReleased="OnTouchSelectionHandlePointerReleased"
+                        PointerCanceled="OnTouchSelectionHandlePointerCanceled"
+                        PointerCaptureLost="OnTouchSelectionHandlePointerCaptureLost">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Border
+                            x:Name="TouchSelectionEndStem"
+                            Grid.Row="0"
+                            Width="2"
+                            Height="18"
+                            Margin="14,0,0,0"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Top"
+                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                            CornerRadius="1"
+                            IsHitTestVisible="False" />
+                        <Border
+                            x:Name="TouchSelectionEndKnob"
+                            Grid.Row="1"
+                            Width="16"
+                            Height="16"
+                            Margin="14,-1,0,0"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Top"
+                            Background="{ThemeResource AccentFillColorDefaultBrush}"
+                            BorderBrush="#E0FFFFFF"
+                            BorderThickness="1.5"
+                            CornerRadius="2,8,8,8"
+                            IsHitTestVisible="False" />
+                    </Grid>
+                </Canvas>
+
+                <!-- Stage 3: Touch-Exclusive Assisted Vertical Scroll Scrubber ("Touch Scroll Pill / Scrubber") -->
+                <Grid
+                    x:Name="TouchScrollScrubberContainer"
+                    HorizontalAlignment="Right"
+                    VerticalAlignment="Top"
+                    Margin="0,0,4,0"
+                    Canvas.ZIndex="92"
+                    Opacity="0"
+                    Visibility="Collapsed">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <Grid.RenderTransform>
+                        <CompositeTransform x:Name="TouchScrollScrubberTranslate" />
+                    </Grid.RenderTransform>
+
+                    <!-- Floating Page Indicator Bubble (visible only while dragging the scrubber thumb) -->
+                    <Border
+                        x:Name="TouchScrollPageBubble"
+                        Grid.Column="0"
+                        VerticalAlignment="Center"
+                        Margin="0,0,12,0"
+                        Padding="12,6"
+                        CornerRadius="14"
+                        Background="{ThemeResource SolidBackgroundFillColorTertiaryBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        IsHitTestVisible="False"
+                        Visibility="Collapsed">
+                        <TextBlock
+                            x:Name="TouchScrollPageBubbleText"
+                            FontSize="12"
+                            FontWeight="SemiBold"
+                            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                            VerticalAlignment="Center" />
+                    </Border>
+
+                    <!-- Ergonomic 48x64 DIP Touch Hit Target -->
+                    <Grid
+                        x:Name="TouchScrollThumbHitTarget"
+                        Grid.Column="1"
+                        Width="48"
+                        Height="64"
+                        Background="Transparent"
+                        ManipulationMode="None"
+                        PointerPressed="OnTouchScrollThumbPointerPressed"
+                        PointerMoved="OnTouchScrollThumbPointerMoved"
+                        PointerReleased="OnTouchScrollThumbPointerReleased"
+                        PointerCanceled="OnTouchScrollThumbPointerCanceled"
+                        PointerCaptureLost="OnTouchScrollThumbPointerCaptureLost">
+                        <Border
+                            x:Name="TouchScrollPill"
+                            Width="26"
+                            Height="48"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            CornerRadius="13"
+                            Background="{ThemeResource SolidBackgroundFillColorTertiaryBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            RenderTransformOrigin="0.5,0.5"
+                            IsHitTestVisible="False">
+                            <Border.RenderTransform>
+                                <CompositeTransform x:Name="TouchScrollPillScaleTransform" />
+                            </Border.RenderTransform>
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <FontIcon
+                                    Grid.Row="0"
+                                    Glyph="&#xE70E;"
+                                    FontSize="10"
+                                    Margin="0,4,0,0"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Top"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <FontIcon
+                                    Grid.Row="1"
+                                    Glyph="&#xE70D;"
+                                    FontSize="10"
+                                    Margin="0,0,0,4"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Bottom"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Grid>
 
                 <!-- 80 DIPs navigation side strips 'Photos' style -->
                 <Grid
