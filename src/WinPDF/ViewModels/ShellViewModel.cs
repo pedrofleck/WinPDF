@@ -1653,10 +1653,23 @@ public sealed partial class ShellViewModel : ObservableObject
             IsSettingsOpen = false;
         }
 
+        DocumentViewModel? doc = CurrentDocument;
         CurrentDocument = null;
+        if (doc is not null)
+        {
+            long oldId = doc.DocumentId;
+            doc.Dispose();
+            _tileCache.RemoveDocument(oldId);
+        }
+
         Controls.PdfPageCanvas.ClearSlideBuffer();
         Controls.PdfPageCanvas.ReleaseReusableBuffer();
         Controls.PdfPageCanvas.TrimSharedGpuDevice();
+        System.Runtime.GCSettings.LargeObjectHeapCompactionMode = System.Runtime.GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
+
         _settingsService.Update(s =>
         {
             s.LastOpenedFilePath = null;

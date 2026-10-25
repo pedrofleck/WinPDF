@@ -4978,7 +4978,7 @@ public sealed partial class DocumentView : Page
         ApplyInteractiveZoomAroundPoint(_smoothZoomPivotPoint, nextWheelZoom / currentZoom, 0.0, 0.0);
     }
 
-    private void ApplyInteractiveZoomAroundPoint(Point viewportPoint, double zoomMultiplier, double panDx, double panDy)
+    private void ApplyInteractiveZoomAroundPoint(Point viewportPoint, double zoomMultiplier, double panDx, double panDy, bool commitZoomProperty = true)
     {
         if (_isApplyingZoom || ViewModel?.CurrentDocument is not { Pages.Count: > 0 } doc)
         {
@@ -5011,8 +5011,11 @@ public sealed partial class DocumentView : Page
             }
 
             ContinuousScrollViewer.ChangeView(newOffsetX, newOffsetY, (float)newZoom, disableAnimation: true);
-            ViewModel.SetZoom((float)newZoom);
-            UpdateViewportPages(newZoom);
+            if (commitZoomProperty)
+            {
+                ViewModel.SetZoom((float)newZoom);
+                UpdateViewportPages(newZoom);
+            }
             ScheduleViewportUpdate();
         }
         finally
@@ -6550,7 +6553,7 @@ public sealed partial class DocumentView : Page
 
             if (Math.Abs(scaleDelta - 1.0) > 0.001)
             {
-                ApplyInteractiveZoomAroundPoint(e.Position, scaleDelta, deltaX, deltaY);
+                ApplyInteractiveZoomAroundPoint(e.Position, scaleDelta, deltaX, deltaY, commitZoomProperty: false);
             }
             else
             {
@@ -6707,6 +6710,16 @@ public sealed partial class DocumentView : Page
         }
         else
         {
+            if (_touchGestureAxis == PagedTouchGestureAxis.PanOrZoom && ViewModel?.CurrentDocument is { } doc)
+            {
+                double finalZoom = ContinuousScrollViewer.ZoomFactor;
+                if (finalZoom > 0.05 && Math.Abs(doc.ZoomFactor - finalZoom) > 0.005)
+                {
+                    ViewModel.SetZoom((float)finalZoom);
+                    UpdateViewportPages(finalZoom);
+                }
+            }
+
             SyncPagedScrollViewerModes();
         }
 

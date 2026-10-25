@@ -2810,11 +2810,6 @@ public sealed partial class PdfPageCanvas : Grid
         if (currentZoom <= DetailZoomThreshold || visibleDip.IsEmpty || visibleDip.Width <= 0 || visibleDip.Height <= 0)
         {
             ReleaseHighResPatch();
-            if (currentZoom <= DetailZoomThreshold && _shellViewModel?.IsPresentationMode != true)
-            {
-                ClearSlideBuffer();
-            }
-
             return;
         }
         double rasterScale = XamlRoot?.RasterizationScale ?? 1.0;
