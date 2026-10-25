@@ -60,6 +60,20 @@ internal sealed class PdfiumPageCache : IDisposable
     internal int Count => _map.Count;
 
     /// <summary>
+    /// Removes and closes a specific cached page handle (and its companion text/link handles), if present.
+    /// </summary>
+    /// <param name="documentId">Engine-assigned document id.</param>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    internal void RemovePage(long documentId, int pageIndex)
+    {
+        if (_map.Remove((documentId, pageIndex), out LinkedListNode<Entry>? node))
+        {
+            _lru.Remove(node);
+            node.Value.DisposeHandles();
+        }
+    }
+
+    /// <summary>
     /// Attempts to retrieve an already-cached page handle without loading a new one or evicting existing entries.
     /// </summary>
     /// <param name="documentId">Engine-assigned document id.</param>

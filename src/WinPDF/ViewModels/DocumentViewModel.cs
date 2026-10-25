@@ -980,18 +980,6 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
         UpdatePageCacheCapacity();
 
-        foreach (PdfPageInfo page in info.Pages)
-        {
-            (double widthDip, double heightDip) = FitThumbnail(page, Rotation);
-            Thumbnails.Add(new ThumbnailItemViewModel(page.Index, widthDip, heightDip) { Owner = this, IsNightMode = IsNightMode });
-        }
-
-        if (Thumbnails.Count > 0)
-        {
-            Thumbnails[0].IsSelected = true;
-            Thumbnails[0].IsCurrentPage = true;
-        }
-
         foreach (OutlineItem item in outline)
         {
             Outline.Add(CreateOutlineViewModel(item));
@@ -1538,6 +1526,33 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Ensures that the <see cref="Thumbnails"/> collection is populated on demand when the Thumbnails tab becomes active.
+    /// </summary>
+    public void EnsureThumbnailsInitialized()
+    {
+        if (_isDisposed || Thumbnails.Count > 0 || Pages.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < Pages.Count; i++)
+        {
+            PdfPageInfo page = Pages[i];
+            (double widthDip, double heightDip) = FitThumbnail(page, Rotation);
+            bool isCur = (page.Index == CurrentPageIndex);
+            Thumbnails.Add(new ThumbnailItemViewModel(page.Index, widthDip, heightDip)
+            {
+                Owner = this,
+                IsNightMode = IsNightMode,
+                IsSelected = isCur,
+                IsCurrentPage = isCur,
+            });
+        }
+
+        _lastSelectedThumbnailIndex = Math.Clamp(CurrentPageIndex, 0, Math.Max(0, Thumbnails.Count - 1));
+    }
+
+    /// <summary>
     /// Activates or deactivates sidebar thumbnail rasterization. When deactivated, pending thumbnail jobs are cancelled immediately.
     /// </summary>
     /// <param name="active">Whether thumbnail loading is active.</param>
@@ -1547,6 +1562,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         if (_isDisposed)
         {
             return;
+        }
+
+        if (active)
+        {
+            EnsureThumbnailsInitialized();
         }
 
         if (_thumbnailsActive == active && Math.Abs(_thumbnailScale - scale) <= 0.01)
@@ -1605,6 +1625,32 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         }
 
         RequestThumbnail(item, _thumbnailScale);
+    }
+
+    /// <summary>
+    /// Discards all realized thumbnail bitmaps and cancels any in-flight thumbnail render requests
+    /// when the sidebar is closed or navigated away from the Thumbnails tab.
+    /// </summary>
+    public void DeactivateAndClearThumbnails()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        foreach (ThumbnailItemViewModel item in Thumbnails)
+        {
+            if (item.LoadCancellation is not null)
+            {
+                item.LoadCancellation.Cancel();
+                item.LoadCancellation.Dispose();
+                item.LoadCancellation = null;
+            }
+
+            item.ClearImage();
+        }
+
+        _tileCache.RemoveAllThumbnails(DocumentId);
     }
 
     /// <summary>

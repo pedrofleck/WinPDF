@@ -330,23 +330,46 @@ public sealed class ThumbnailPresenter : Grid
 
             bool isNight = Item?.IsNightMode ?? IsNightMode;
 
-            if (bitmap.PixelBuffer is IBufferByteAccess byteAccess)
+            bool copiedViaCom = false;
+            nint unkPtr = WinRT.MarshalInspectable<Windows.Storage.Streams.IBuffer>.FromManaged(bitmap.PixelBuffer);
+            try
             {
-                byte* dest = byteAccess.Buffer;
-                if (entry.Pixels is { Length: > 0 })
+                Guid iid = typeof(IBufferByteAccess).GUID;
+                if (Marshal.QueryInterface(unkPtr, in iid, out nint byteAccessPtr) == 0 && byteAccessPtr != nint.Zero)
                 {
-                    fixed (byte* src = entry.Pixels)
+                    try
                     {
-                        CopyPixels(src, dest, entry.ByteLength, entry.Stride, entry.Height, isNight);
+                        var byteAccess = (IBufferByteAccess)Marshal.GetObjectForIUnknown(byteAccessPtr);
+                        byte* dest = byteAccess.Buffer;
+                        if (entry.Pixels is { Length: > 0 })
+                        {
+                            fixed (byte* src = entry.Pixels)
+                            {
+                                CopyPixels(src, dest, entry.ByteLength, entry.Stride, entry.Height, isNight);
+                            }
+                        }
+                        else if (entry.Bitmap is { IsDisposed: false } lease)
+                        {
+                            byte* src = (byte*)lease.Scan0;
+                            CopyPixels(src, dest, lease.SizeInBytes, lease.Stride, lease.Height, isNight);
+                        }
+                        copiedViaCom = true;
+                    }
+                    finally
+                    {
+                        Marshal.Release(byteAccessPtr);
                     }
                 }
-                else if (entry.Bitmap is { IsDisposed: false } lease)
+            }
+            finally
+            {
+                if (unkPtr != nint.Zero)
                 {
-                    byte* src = (byte*)lease.Scan0;
-                    CopyPixels(src, dest, lease.SizeInBytes, lease.Stride, lease.Height, isNight);
+                    Marshal.Release(unkPtr);
                 }
             }
-            else
+
+            if (!copiedViaCom)
             {
                 using Stream stream = bitmap.PixelBuffer.AsStream();
                 if (entry.Pixels is { Length: > 0 })

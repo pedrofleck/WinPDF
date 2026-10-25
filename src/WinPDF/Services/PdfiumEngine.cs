@@ -1737,6 +1737,7 @@ internal sealed unsafe class PdfiumEngine : IDisposable
             PdfiumNative.FPDFBitmap_FillRect(bitmap, 0, 0, request.BitmapWidth, request.BitmapHeight, PdfiumConstants.OpaqueWhite);
 
             int rotate = PageCoordinateTransform.NormalizeRotation(request.Rotation) / 90;
+            int renderFlags = (int)(request.Flags | PdfRenderFlags.LimitedImageCache);
             PdfiumNative.FPDF_RenderPageBitmap(
                 bitmap,
                 page,
@@ -1745,7 +1746,14 @@ internal sealed unsafe class PdfiumEngine : IDisposable
                 request.PageWidthPx,
                 request.PageHeightPx,
                 rotate,
-                (int)request.Flags);
+                renderFlags);
+
+            long fileSize = document.StreamAccess?.FileLength ?? 0;
+            int docPageCount = Math.Max(1, PdfiumNative.FPDF_GetPageCount(document));
+            if (fileSize > 50L * 1024 * 1024 || (fileSize / docPageCount) > 5L * 1024 * 1024)
+            {
+                _pageCache.RemovePage(request.DocumentId, request.PageIndex);
+            }
 
             // A render in progress cannot be interrupted; honor cancellation by discarding its result.
             cancellationToken.ThrowIfCancellationRequested();

@@ -106,7 +106,7 @@ public sealed partial class ShellViewModel : ObservableObject
         CurrentDocument?.SetThumbnailsActive(thumbnailsActive);
         if (!thumbnailsActive && CurrentDocument is { } doc)
         {
-            doc.TrimThumbnailsForBackground(doc.CurrentPageIndex, margin: 1);
+            doc.DeactivateAndClearThumbnails();
         }
 
         if (!_isInitializingSettings && !IsPresentationMode && !IsFullScreen && IsSidebarAllowed && !SuppressSidebarSettingsPersistence)
@@ -121,7 +121,7 @@ public sealed partial class ShellViewModel : ObservableObject
         CurrentDocument?.SetThumbnailsActive(thumbnailsActive);
         if (!thumbnailsActive && CurrentDocument is { } doc)
         {
-            doc.TrimThumbnailsForBackground(doc.CurrentPageIndex, margin: 1);
+            doc.DeactivateAndClearThumbnails();
         }
     }
 
@@ -900,8 +900,13 @@ public sealed partial class ShellViewModel : ObservableObject
 
             if (CurrentDocument is { } oldDoc)
             {
+                long oldId = oldDoc.DocumentId;
                 CurrentDocument = null;
                 oldDoc.Dispose();
+                _tileCache.RemoveDocument(oldId);
+                Controls.PdfPageCanvas.ClearSlideBuffer();
+                Controls.PdfPageCanvas.ReleaseReusableBuffer();
+                Controls.PdfPageCanvas.TrimSharedGpuDevice();
             }
 
             PdfDocumentInfo docInfo = await _pdfService.OpenDocumentAsync(filePath, null, cancellationToken);
@@ -1649,6 +1654,9 @@ public sealed partial class ShellViewModel : ObservableObject
         }
 
         CurrentDocument = null;
+        Controls.PdfPageCanvas.ClearSlideBuffer();
+        Controls.PdfPageCanvas.ReleaseReusableBuffer();
+        Controls.PdfPageCanvas.TrimSharedGpuDevice();
         _settingsService.Update(s =>
         {
             s.LastOpenedFilePath = null;

@@ -309,6 +309,7 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
         bool highPriority = true,
         CancellationToken cancellationToken = default)
     {
+        WinPDF.Rendering.TileCache.IncrementRenderJobsCount();
         PdfRenderRequest request = new(
             documentId,
             pageIndex,
@@ -337,6 +338,7 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
         bool highPriority = true,
         CancellationToken cancellationToken = default)
     {
+        WinPDF.Rendering.TileCache.IncrementRenderJobsCount();
         PdfRenderRequest request = new(
             documentId,
             pageIndex,
@@ -355,6 +357,7 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
     /// <inheritdoc/>
     public Task<PdfBitmapLease> RenderAsync(PdfRenderRequest request, PdfJobPriority priority, CancellationToken cancellationToken = default)
     {
+        WinPDF.Rendering.TileCache.IncrementRenderJobsCount();
         bool highPriority = priority is PdfJobPriority.Critical or PdfJobPriority.Visible;
         RenderPageJob job = new(request, this, highPriority, cancellationToken);
         return Enqueue<PdfBitmapLease>(job, highPriority);

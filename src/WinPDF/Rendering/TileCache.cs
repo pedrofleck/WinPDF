@@ -133,6 +133,14 @@ public sealed class TileCache : IDisposable
     /// <summary>Maximum number of Level 0 entries retained in cache.</summary>
     public const int MaxLevel0Entries = 4;
 
+    private static long s_totalRenderJobsExecuted;
+
+    /// <summary>Gets the lifetime total of render jobs processed across the app session.</summary>
+    public static long TotalRenderJobsExecuted => Volatile.Read(ref s_totalRenderJobsExecuted);
+
+    /// <summary>Increments the metric counter of executed render jobs.</summary>
+    public static void IncrementRenderJobsCount() => Interlocked.Increment(ref s_totalRenderJobsExecuted);
+
     private readonly object _gate = new();
     private readonly Dictionary<TileKey, LinkedListNode<Item>> _map = new();
     private readonly LinkedList<Item> _mainLru = new();
@@ -290,6 +298,10 @@ public sealed class TileCache : IDisposable
     /// <summary>Removes every entry of a document (call when it is closed).</summary>
     /// <param name="documentId">Engine-assigned document id.</param>
     public void RemoveDocument(long documentId) => RemoveWhere(key => key.DocumentId == documentId);
+
+    /// <summary>Removes all thumbnail entries of a document (call when the sidebar is closed or tab changed).</summary>
+    /// <param name="documentId">Engine-assigned document id.</param>
+    public void RemoveAllThumbnails(long documentId) => RemoveWhere(key => key.DocumentId == documentId && key.Kind == TileKind.Thumbnail);
 
     /// <summary>Removes every entry of a page (call when its annotations change).</summary>
     /// <param name="documentId">Engine-assigned document id.</param>

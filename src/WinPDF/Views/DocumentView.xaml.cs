@@ -668,6 +668,7 @@ public sealed partial class DocumentView : Page
         // Trim only non-current prefetched slides in the presentation slide buffer so the active slide is never disposed
         PdfPageCanvas.TrimSlideBuffer(curPage);
         PdfPageCanvas.ReleaseReusableBuffer();
+        PdfPageCanvas.TrimSharedGpuDevice();
 
         if (curPage >= 0 && _activeCanvases.Count > 0)
         {
@@ -1202,6 +1203,7 @@ public sealed partial class DocumentView : Page
         _isTouchDoubleTapZoomedIn = false;
         _restoreFitAfterSmoothZoom = false;
         CancelInteractiveSlideSwipeImmediate();
+        PdfPageCanvas.ClearSlideBuffer();
         if (_isRestoringFromPresentation || ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
         {
             return;

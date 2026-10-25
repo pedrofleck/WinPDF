@@ -44,6 +44,9 @@ internal sealed unsafe class PdfiumStreamAccess : IDisposable
     /// <summary>Gets the native <c>FPDF_FILEACCESS</c> block to pass to <c>FPDF_LoadCustomDocument</c>.</summary>
     internal FpdfFileAccess* Native => _native;
 
+    /// <summary>Gets the length of the underlying PDF file in bytes.</summary>
+    internal long FileLength => _native is not null ? _native->FileLength : 0;
+
     /// <summary>
     /// Opens <paramref name="path"/> for shared, read-only, random access.
     /// </summary>

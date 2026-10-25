@@ -47,3 +47,5 @@ test_doc.pdf
 .dotnet_cli/
 scratch_renders/
 app_screenshot_test.png
+
+huge.pdf

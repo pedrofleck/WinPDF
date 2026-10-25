@@ -90,6 +90,64 @@ public sealed partial class PdfPageCanvas : Grid
         unsafe byte* Buffer { get; }
     }
 
+    [ComImport]
+    [Guid("6007896c-3244-4afd-bf18-a6d3beda5023")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IDxgiDevice3
+    {
+        void GetParent(in Guid riid, out nint ppParent);
+        void GetAdapter(out nint pAdapter);
+        void CreateSurface(nint pDesc, uint numSurfaces, uint usage, nint pSharedResource, out nint ppSurface);
+        void QueryResourceResidency(nint ppResources, nint pResidencyStatus, uint numResources);
+        void SetGPUThreadPriority(int priority);
+        void GetGPUThreadPriority(out int pPriority);
+        void SetMaximumFrameLatency(uint maxLatency);
+        void GetMaximumFrameLatency(out uint pMaxLatency);
+        void OfferResources(uint numResources, nint ppResources, int priority);
+        void ReclaimResources(uint numResources, nint ppResources, nint pDiscarded);
+        void EnqueueSetEvent(nint hEvent);
+        void Trim();
+    }
+
+    /// <summary>
+    /// Safely trims the shared Win2D Direct2D/DXGI device (<c>IDXGIDevice3::Trim</c>) when closing a document
+    /// or during background efficiency mode trimming to reclaim temporary DirectX staging memory.
+    /// </summary>
+    public static void TrimSharedGpuDevice()
+    {
+        try
+        {
+            CanvasDevice device = CanvasDevice.GetSharedDevice();
+            nint unkPtr = WinRT.MarshalInspectable<CanvasDevice>.FromManaged(device);
+            try
+            {
+                Guid iid = typeof(IDxgiDevice3).GUID;
+                if (Marshal.QueryInterface(unkPtr, in iid, out nint dxgiPtr) == 0 && dxgiPtr != nint.Zero)
+                {
+                    try
+                    {
+                        var dxgiDevice3 = (IDxgiDevice3)Marshal.GetObjectForIUnknown(dxgiPtr);
+                        dxgiDevice3.Trim();
+                    }
+                    finally
+                    {
+                        Marshal.Release(dxgiPtr);
+                    }
+                }
+            }
+            finally
+            {
+                if (unkPtr != nint.Zero)
+                {
+                    Marshal.Release(unkPtr);
+                }
+            }
+        }
+        catch
+        {
+        }
+    }
+
     /// <summary>
     /// Identifies the <see cref="PageInfo"/> dependency property.
     /// </summary>
@@ -2752,6 +2810,11 @@ public sealed partial class PdfPageCanvas : Grid
         if (currentZoom <= DetailZoomThreshold || visibleDip.IsEmpty || visibleDip.Width <= 0 || visibleDip.Height <= 0)
         {
             ReleaseHighResPatch();
+            if (currentZoom <= DetailZoomThreshold && _shellViewModel?.IsPresentationMode != true)
+            {
+                ClearSlideBuffer();
+            }
+
             return;
         }
         double rasterScale = XamlRoot?.RasterizationScale ?? 1.0;
@@ -3751,19 +3814,47 @@ public sealed partial class PdfPageCanvas : Grid
             }
 
             int byteLength = (int)lease.SizeInBytes;
-            Windows.Storage.Streams.IBuffer nativeBuffer = GetOrCreateReusableBuffer(byteLength);
-
-            if ((object)nativeBuffer is ICanvasBufferByteAccess byteAccess)
+            bool isOversized = byteLength > 16 * 1024 * 1024;
+            if (isOversized)
             {
-                byte* dst = byteAccess.Buffer;
-                byte* src = (byte*)lease.Scan0;
-                System.Buffer.MemoryCopy(src, dst, byteLength, byteLength);
+                s_reusableBuffer = null;
             }
-            else
+
+            Windows.Storage.Streams.Buffer nativeBuffer = isOversized
+                ? new Windows.Storage.Streams.Buffer((uint)byteLength) { Length = (uint)byteLength }
+                : GetOrCreateReusableBuffer(byteLength);
+
+            nint unkPtr = WinRT.MarshalInspectable<Windows.Storage.Streams.IBuffer>.FromManaged(nativeBuffer);
+            try
             {
-                using var stream = nativeBuffer.AsStream();
-                stream.Position = 0;
-                stream.Write(lease.AsSpan());
+                Guid iid = typeof(ICanvasBufferByteAccess).GUID;
+                if (Marshal.QueryInterface(unkPtr, in iid, out nint byteAccessPtr) == 0 && byteAccessPtr != nint.Zero)
+                {
+                    try
+                    {
+                        var byteAccess = (ICanvasBufferByteAccess)Marshal.GetObjectForIUnknown(byteAccessPtr);
+                        byte* dst = byteAccess.Buffer;
+                        byte* src = (byte*)lease.Scan0;
+                        System.Buffer.MemoryCopy(src, dst, byteLength, byteLength);
+                    }
+                    finally
+                    {
+                        Marshal.Release(byteAccessPtr);
+                    }
+                }
+                else
+                {
+                    using var stream = nativeBuffer.AsStream();
+                    stream.Position = 0;
+                    stream.Write(lease.AsSpan());
+                }
+            }
+            finally
+            {
+                if (unkPtr != nint.Zero)
+                {
+                    Marshal.Release(unkPtr);
+                }
             }
 
             return CanvasBitmap.CreateFromBytes(

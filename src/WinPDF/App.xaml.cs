@@ -171,6 +171,8 @@ public partial class App : Application
         // Check for automated diagnostic test mode
         bool isAutoTest = false;
         string? autoTestPdf = null;
+        bool isRamBenchmark = false;
+        string? ramBenchmarkPdf = null;
         for (int i = 1; i < cmdArgs.Length; i++)
         {
             if (string.Equals(cmdArgs[i], "--autotest", StringComparison.OrdinalIgnoreCase))
@@ -182,11 +184,21 @@ public partial class App : Application
                 }
                 break;
             }
+
+            if (string.Equals(cmdArgs[i], "--ram-benchmark", StringComparison.OrdinalIgnoreCase))
+            {
+                isRamBenchmark = true;
+                if (i + 1 < cmdArgs.Length && !cmdArgs[i + 1].StartsWith('-'))
+                {
+                    ramBenchmarkPdf = cmdArgs[i + 1].Trim('\"', ' ');
+                }
+                break;
+            }
         }
 
         // Check command-line activation for file paths before creating main window
         string? startupPdf = null;
-        if (!string.IsNullOrWhiteSpace(args.Arguments))
+        if (!isAutoTest && !isRamBenchmark && !string.IsNullOrWhiteSpace(args.Arguments))
         {
             try
             {
@@ -203,7 +215,7 @@ public partial class App : Application
                 System.Diagnostics.Debug.WriteLine($"Failed to parse launch arguments: {ex.Message}");
             }
         }
-        else if (cmdArgs.Length > 1)
+        else if (!isAutoTest && !isRamBenchmark && cmdArgs.Length > 1)
         {
             try
             {
@@ -228,7 +240,7 @@ public partial class App : Application
         bool isSessionRestore = false;
         int initialPageIndex = 0;
 
-        if (startupPdf is null && !isAutoTest)
+        if (startupPdf is null && !isAutoTest && !isRamBenchmark)
         {
             ISettingsService settingsService = _services.GetRequiredService<ISettingsService>();
             if (settingsService.Settings.ReopenLastDocument &&
@@ -274,6 +286,13 @@ public partial class App : Application
         {
             _mainWindow.Activate();
             WinPDF.Services.Diagnostics.AutoTestRunner.Run(_mainWindow, autoTestPdf);
+            return;
+        }
+
+        if (isRamBenchmark)
+        {
+            _mainWindow.Activate();
+            WinPDF.Services.Diagnostics.RamBenchmarkRunner.Run(_mainWindow, ramBenchmarkPdf);
             return;
         }
 
