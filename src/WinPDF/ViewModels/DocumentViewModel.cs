@@ -29,7 +29,13 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     /// Gets or sets the file name displayed in titles and headers.
     /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayFileName))]
     public partial string FileName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets the document file name prefixed with an unsaved indicator dot when dirty (tab-ready).
+    /// </summary>
+    public string DisplayFileName => HasUnsavedChanges ? $"• {FileName}" : FileName;
 
     /// <summary>
     /// Gets or sets the total number of pages in the document.
@@ -540,6 +546,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     /// Gets or sets a value indicating whether there are unsaved annotation changes.
     /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DisplayFileName))]
     public partial bool HasUnsavedChanges { get; set; }
 
     /// <summary>
@@ -956,6 +963,538 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     /// Gets the collection of annotation descriptions in the document.
     /// </summary>
     public ObservableCollection<AnnotationItemViewModel> AnnotationsSummary { get; } = new();
+
+    /// <summary>
+    /// Gets the collection of digital signatures embedded in the document.
+    /// </summary>
+    public ObservableCollection<SignatureItemViewModel> Signatures { get; } = new();
+
+    private readonly Dictionary<int, List<PdfAnnotationInfo>> _annotationsByPage = new();
+
+    /// <summary>
+    /// Event raised when rendered page bitmaps must be invalidated and re-rasterized because annotations changed.
+    /// Passes <c>-1</c> to invalidate all realized pages, or a zero-based page index.
+    /// </summary>
+    public event Action<int>? PageContentInvalidated;
+
+    /// <summary>
+    /// Event raised when a user selects an annotation in the sidebar or elsewhere and wants the viewport
+    /// to focus it and open its comment editor.
+    /// </summary>
+    public event Action<PdfAnnotationInfo>? AnnotationFocusRequested;
+
+    /// <summary>
+    /// Event raised when a user asks to inspect a specific digital signature.
+    /// </summary>
+    public event Action<PdfSignatureInfo>? SignatureInspectRequested;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the document contains one or more digital signatures.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSignatureBannerVisible))]
+    public partial bool HasSignatures { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the user dismissed the floating digital signature banner for this document.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSignatureBannerVisible))]
+    public partial bool IsSignatureBannerDismissed { get; set; }
+
+    /// <summary>
+    /// Gets or sets the concise status summary shown in the floating digital signature banner.
+    /// </summary>
+    [ObservableProperty]
+    public partial string SignatureBannerMessage { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets a value indicating whether the floating digital signature banner should currently be displayed.
+    /// </summary>
+    public bool IsSignatureBannerVisible => HasSignatures && !IsSignatureBannerDismissed;
+
+    /// <summary>
+    /// Gets a value indicating whether the document currently has at least one annotation or digital signature.
+    /// </summary>
+    public bool HasAnnotationsOrSignatures => AnnotationsSummary.Count > 0 || Signatures.Count > 0;
+
+    /// <summary>
+    /// Gets or sets the currently focused annotation (drawn with a subtle accent focus outline on its page).
+    /// </summary>
+    [ObservableProperty]
+    public partial PdfAnnotationInfo? SelectedAnnotation { get; set; }
+
+    partial void OnSelectedAnnotationChanged(PdfAnnotationInfo? oldValue, PdfAnnotationInfo? newValue)
+    {
+        if (oldValue is not null)
+        {
+            PageOverlaysInvalidated?.Invoke(oldValue.PageIndex);
+        }
+
+        if (newValue is not null && newValue.PageIndex != oldValue?.PageIndex)
+        {
+            PageOverlaysInvalidated?.Invoke(newValue.PageIndex);
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the preferred RGBA color used when creating new highlights, comments, or text boxes.
+    /// </summary>
+    public PdfAnnotationColor ActiveAnnotationColor { get; set; } = PdfAnnotationColor.Yellow;
+
+    /// <summary>
+    /// Returns the cached annotations for <paramref name="pageIndex"/> in O(1) time.
+    /// </summary>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <returns>The annotations on that page, or an empty list when none are present.</returns>
+    public IReadOnlyList<PdfAnnotationInfo> GetPageAnnotations(int pageIndex)
+    {
+        return _annotationsByPage.TryGetValue(pageIndex, out List<PdfAnnotationInfo>? list)
+            ? list
+            : Array.Empty<PdfAnnotationInfo>();
+    }
+
+    /// <summary>
+    /// Finds the highest-priority annotation containing <c>(pdfX, pdfY)</c> on <paramref name="pageIndex"/>.
+    /// Prioritizes digital signature widgets, then sticky notes / FreeText boxes, then smallest bounding box.
+    /// </summary>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="pdfX">X coordinate in PDF user space (points).</param>
+    /// <param name="pdfY">Y coordinate in PDF user space (points).</param>
+    /// <param name="tolerancePt">Hit-test tolerance in PDF points.</param>
+    /// <returns>The matching <see cref="PdfAnnotationInfo"/>, or <see langword="null"/> if none matched.</returns>
+    public PdfAnnotationInfo? HitTestAnnotation(int pageIndex, double pdfX, double pdfY, double tolerancePt = 6.0)
+    {
+        if (!_annotationsByPage.TryGetValue(pageIndex, out List<PdfAnnotationInfo>? list) || list.Count == 0)
+        {
+            return null;
+        }
+
+        PdfAnnotationInfo? best = null;
+        int bestPriority = int.MinValue;
+        double bestArea = double.MaxValue;
+
+        for (int i = 0; i < list.Count; i++)
+        {
+            PdfAnnotationInfo candidate = list[i];
+            if (!candidate.ContainsPoint(pdfX, pdfY, tolerancePt))
+            {
+                continue;
+            }
+
+            int priority = candidate.IsSignatureWidget
+                ? 300
+                : candidate.Subtype is PdfAnnotationSubtype.Text or PdfAnnotationSubtype.FreeText
+                    ? 200
+                    : 100;
+
+            double area = Math.Max(1.0, candidate.Bounds.Width * candidate.Bounds.Height);
+            if (priority > bestPriority || (priority == bestPriority && area < bestArea))
+            {
+                best = candidate;
+                bestPriority = priority;
+                bestArea = area;
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>
+    /// Returns the inspected <see cref="PdfSignatureInfo"/> at <paramref name="signatureIndex"/>, if available.
+    /// </summary>
+    /// <param name="signatureIndex">Zero-based signature index.</param>
+    /// <returns>The matching <see cref="PdfSignatureInfo"/> or <see langword="null"/>.</returns>
+    public PdfSignatureInfo? GetSignatureByIndex(int signatureIndex)
+    {
+        if (signatureIndex >= 0 && signatureIndex < Signatures.Count)
+        {
+            return Signatures[signatureIndex].Info;
+        }
+
+        return Signatures.FirstOrDefault(s => s.Index == signatureIndex)?.Info;
+    }
+
+    /// <summary>
+    /// Requests the active view to scroll to and open the editor for <paramref name="annotation"/>.
+    /// </summary>
+    /// <param name="annotation">Target annotation metadata.</param>
+    public void RequestFocusAnnotation(PdfAnnotationInfo annotation)
+    {
+        ArgumentNullException.ThrowIfNull(annotation);
+        SelectedAnnotation = annotation;
+        GoToPage(annotation.PageIndex);
+        AnnotationFocusRequested?.Invoke(annotation);
+    }
+
+    /// <summary>
+    /// Requests inspection details for <paramref name="signature"/>.
+    /// </summary>
+    /// <param name="signature">Target signature metadata.</param>
+    public void RequestInspectSignature(PdfSignatureInfo signature)
+    {
+        ArgumentNullException.ThrowIfNull(signature);
+        if (signature.PageIndex >= 0)
+        {
+            GoToPage(signature.PageIndex);
+        }
+
+        SignatureInspectRequested?.Invoke(signature);
+    }
+
+    /// <summary>
+    /// Asynchronously loads digital signatures and all existing annotations across the document without blocking startup.
+    /// </summary>
+    /// <returns>A task representing the asynchronous scan.</returns>
+    public async Task LoadAnnotationsAndSignaturesAsync()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        try
+        {
+            IReadOnlyList<PdfSignatureInfo> sigs = await _pdfService.GetDocumentSignaturesAsync(
+                DocumentId,
+                FilePath,
+                _lifetime.Token);
+
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            Signatures.Clear();
+            for (int i = 0; i < sigs.Count; i++)
+            {
+                Signatures.Add(new SignatureItemViewModel(sigs[i]));
+            }
+
+            HasSignatures = Signatures.Count > 0;
+            if (HasSignatures)
+            {
+                string primarySigner = Signatures[0].SignerName;
+                SignatureBannerMessage = Signatures.Count == 1
+                    ? ResourceStrings.Format(ResourceKeys.SigBannerSingleFormat, primarySigner)
+                    : ResourceStrings.Format(ResourceKeys.SigBannerMultiFormat, Signatures.Count, primarySigner);
+            }
+            else
+            {
+                SignatureBannerMessage = string.Empty;
+            }
+
+            OnPropertyChanged(nameof(HasAnnotationsOrSignatures));
+            OnPropertyChanged(nameof(IsSignatureBannerVisible));
+
+            IReadOnlyList<PdfAnnotationInfo> annots = await _pdfService.GetDocumentAnnotationsAsync(
+                DocumentId,
+                _lifetime.Token);
+
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            _annotationsByPage.Clear();
+            for (int i = 0; i < annots.Count; i++)
+            {
+                PdfAnnotationInfo a = annots[i];
+                if (!_annotationsByPage.TryGetValue(a.PageIndex, out List<PdfAnnotationInfo>? pageList))
+                {
+                    pageList = new List<PdfAnnotationInfo>(4);
+                    _annotationsByPage[a.PageIndex] = pageList;
+                }
+
+                pageList.Add(a);
+            }
+
+            RebuildAnnotationsSummary();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"Failed to load annotations/signatures: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Creates text markup annotations covering a single- or multi-page <see cref="PdfTextSelection"/>,
+    /// refreshes caches and overlays, marks the document dirty, and returns the primary created annotation.
+    /// </summary>
+    /// <param name="selection">Active text selection.</param>
+    /// <param name="subtype">Markup subtype (<c>Highlight</c>, <c>Underline</c>, <c>StrikeOut</c>, or <c>Squiggly</c>).</param>
+    /// <param name="color">Annotation RGBA color.</param>
+    /// <param name="comment">Optional comment body attached to the first selected page's markup.</param>
+    /// <param name="author">Optional author name.</param>
+    /// <returns>The primary created <see cref="PdfAnnotationInfo"/>, or <see langword="null"/> if invalid.</returns>
+    public async Task<PdfAnnotationInfo?> AddMarkupForSelectionAsync(
+        PdfTextSelection selection,
+        PdfAnnotationSubtype subtype,
+        PdfAnnotationColor color,
+        string comment = "",
+        string author = "")
+    {
+        if (_isDisposed || !selection.HasContent)
+        {
+            return null;
+        }
+
+        string effectiveAuthor = string.IsNullOrWhiteSpace(author) ? Environment.UserName : author;
+        PdfAnnotationInfo? firstCreated = null;
+
+        IReadOnlyList<PdfPageTextSelection> pageSlices = selection.Pages is { Count: > 0 }
+            ? selection.Pages
+            : [new PdfPageTextSelection(selection.PageIndex, selection.StartCharIndex, selection.EndCharIndex, selection.Rects, selection.SelectedText)];
+
+        for (int i = 0; i < pageSlices.Count; i++)
+        {
+            PdfPageTextSelection slice = pageSlices[i];
+            if (slice.Rects.Count == 0)
+            {
+                continue;
+            }
+
+            PdfCreateMarkupRequest req = new(
+                PageIndex: slice.PageIndex,
+                Subtype: subtype,
+                Rects: slice.Rects,
+                Color: color,
+                Contents: i == 0 ? comment : string.Empty,
+                Author: effectiveAuthor);
+
+            PdfPageAnnotationMutationResult result = await _pdfService.AddMarkupAnnotationAsync(DocumentId, req, _lifetime.Token);
+            if (_isDisposed)
+            {
+                return firstCreated;
+            }
+
+            ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
+            if (firstCreated is null)
+            {
+                firstCreated = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
+            }
+        }
+
+        if (firstCreated is not null)
+        {
+            ClearSelection();
+            HasUnsavedChanges = true;
+            SelectedAnnotation = firstCreated;
+        }
+
+        return firstCreated;
+    }
+
+    /// <summary>
+    /// Creates a sticky-note comment annotation (<c>/Text</c>) on <paramref name="pageIndex"/>.
+    /// </summary>
+    public async Task<PdfAnnotationInfo?> AddTextNoteAsync(
+        int pageIndex,
+        double pdfX,
+        double pdfY,
+        PdfAnnotationColor color,
+        string contents,
+        string author = "")
+    {
+        if (_isDisposed)
+        {
+            return null;
+        }
+
+        PdfCreateNoteRequest req = new(
+            PageIndex: pageIndex,
+            PdfX: pdfX,
+            PdfY: pdfY,
+            Color: color,
+            Contents: contents ?? string.Empty,
+            Author: string.IsNullOrWhiteSpace(author) ? Environment.UserName : author);
+
+        PdfPageAnnotationMutationResult result = await _pdfService.AddTextNoteAnnotationAsync(DocumentId, req, _lifetime.Token);
+        if (_isDisposed)
+        {
+            return null;
+        }
+
+        ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
+        PdfAnnotationInfo? created = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
+        HasUnsavedChanges = true;
+        SelectedAnnotation = created;
+        return created;
+    }
+
+    /// <summary>
+    /// Creates a direct-on-page <c>/FreeText</c> text-box annotation on <paramref name="pageIndex"/>.
+    /// </summary>
+    public async Task<PdfAnnotationInfo?> AddFreeTextAsync(
+        int pageIndex,
+        double pdfX,
+        double pdfY,
+        PdfAnnotationColor color,
+        string contents,
+        string author = "")
+    {
+        if (_isDisposed)
+        {
+            return null;
+        }
+
+        PdfCreateFreeTextRequest req = new(
+            PageIndex: pageIndex,
+            PdfX: pdfX,
+            PdfY: pdfY,
+            Color: color,
+            Contents: contents ?? string.Empty,
+            Author: string.IsNullOrWhiteSpace(author) ? Environment.UserName : author);
+
+        PdfPageAnnotationMutationResult result = await _pdfService.AddFreeTextAnnotationAsync(DocumentId, req, _lifetime.Token);
+        if (_isDisposed)
+        {
+            return null;
+        }
+
+        ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
+        PdfAnnotationInfo? created = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
+        HasUnsavedChanges = true;
+        SelectedAnnotation = created;
+        return created;
+    }
+
+    /// <summary>
+    /// Updates the text contents and optional color of an existing annotation.
+    /// </summary>
+    public async Task<PdfAnnotationInfo?> UpdateAnnotationAsync(
+        int pageIndex,
+        int annotIndex,
+        string contents,
+        PdfAnnotationColor? newColor = null)
+    {
+        if (_isDisposed)
+        {
+            return null;
+        }
+
+        PdfUpdateAnnotationRequest req = new(pageIndex, annotIndex, contents ?? string.Empty, newColor);
+        PdfPageAnnotationMutationResult result = await _pdfService.UpdateAnnotationAsync(DocumentId, req, _lifetime.Token);
+        if (_isDisposed)
+        {
+            return null;
+        }
+
+        ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
+        PdfAnnotationInfo? updated = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
+        HasUnsavedChanges = true;
+        SelectedAnnotation = updated;
+        return updated;
+    }
+
+    /// <summary>
+    /// Deletes an existing annotation from <paramref name="pageIndex"/> and refreshes caches and views.
+    /// </summary>
+    public async Task DeleteAnnotationAsync(int pageIndex, int annotIndex)
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        IReadOnlyList<PdfAnnotationInfo> refreshed = await _pdfService.DeleteAnnotationAsync(DocumentId, pageIndex, annotIndex, _lifetime.Token);
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        if (SelectedAnnotation is { } sel && sel.PageIndex == pageIndex && sel.AnnotIndex == annotIndex)
+        {
+            SelectedAnnotation = null;
+        }
+
+        ApplyPageAnnotationMutation(pageIndex, refreshed);
+        HasUnsavedChanges = true;
+    }
+
+    private PdfAnnotationInfo? FindAnnotationByIndex(int pageIndex, int annotIndex)
+    {
+        if (!_annotationsByPage.TryGetValue(pageIndex, out List<PdfAnnotationInfo>? list))
+        {
+            return null;
+        }
+
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (list[i].AnnotIndex == annotIndex)
+            {
+                return list[i];
+            }
+        }
+
+        return list.Count > 0 ? list[^1] : null;
+    }
+
+    private void ApplyPageAnnotationMutation(int pageIndex, IReadOnlyList<PdfAnnotationInfo> pageAnnotations)
+    {
+        if (pageAnnotations.Count == 0)
+        {
+            _annotationsByPage.Remove(pageIndex);
+        }
+        else
+        {
+            _annotationsByPage[pageIndex] = new List<PdfAnnotationInfo>(pageAnnotations);
+        }
+
+        RebuildAnnotationsSummary();
+        _tileCache.RemovePage(DocumentId, pageIndex);
+        RefreshThumbnailForPage(pageIndex);
+        PageContentInvalidated?.Invoke(pageIndex);
+    }
+
+    private void RefreshThumbnailForPage(int pageIndex)
+    {
+        if (pageIndex < 0 || pageIndex >= Thumbnails.Count)
+        {
+            return;
+        }
+
+        ThumbnailItemViewModel item = Thumbnails[pageIndex];
+        if (item.LoadCancellation is not null)
+        {
+            item.LoadCancellation.Cancel();
+            item.LoadCancellation.Dispose();
+            item.LoadCancellation = null;
+        }
+
+        item.ClearImage();
+        if (_thumbnailsActive && item.IsRealized)
+        {
+            RequestThumbnail(item, _thumbnailScale);
+        }
+    }
+
+    private void RebuildAnnotationsSummary()
+    {
+        AnnotationsSummary.Clear();
+        if (_annotationsByPage.Count > 0)
+        {
+            List<int> pageKeys = new(_annotationsByPage.Keys);
+            pageKeys.Sort();
+            for (int k = 0; k < pageKeys.Count; k++)
+            {
+                List<PdfAnnotationInfo> list = _annotationsByPage[pageKeys[k]];
+                for (int i = 0; i < list.Count; i++)
+                {
+                    // Skip duplicate signature widgets in AnnotationsSummary when already displayed in Signatures section
+                    if (!list[i].IsSignatureWidget)
+                    {
+                        AnnotationsSummary.Add(new AnnotationItemViewModel(list[i]));
+                    }
+                }
+            }
+        }
+
+        OnPropertyChanged(nameof(HasAnnotationsOrSignatures));
+    }
 
     /// <summary>
     /// Gets the collection of embedded file attachment names.
@@ -1872,6 +2411,10 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         }
         Thumbnails.Clear();
         DisplayedRows.Clear();
+        AnnotationsSummary.Clear();
+        Signatures.Clear();
+        _annotationsByPage.Clear();
+        SelectedAnnotation = null;
 
         _tileCache.RemoveDocument(DocumentId);
         _ = _pdfService.CloseDocumentAsync(DocumentId);

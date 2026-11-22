@@ -63,6 +63,76 @@ internal static class PdfiumConstants
 
     /// <summary>Version of <see cref="FpdfLibraryConfig"/> that this binding fills in.</summary>
     internal const int LibraryConfigVersion = 2;
+
+    /// <summary><c>FPDFANNOT_COLORTYPE_Color</c>.</summary>
+    internal const int AnnotColorTypeColor = 0;
+
+    /// <summary><c>FPDFANNOT_COLORTYPE_InteriorColor</c>.</summary>
+    internal const int AnnotColorTypeInterior = 1;
+
+    /// <summary><c>FPDF_ANNOT_APPEARANCEMODE_NORMAL</c>.</summary>
+    internal const int AnnotAppearanceNormal = 0;
+
+    /// <summary><c>FPDF_ANNOT_FLAG_PRINT</c>.</summary>
+    internal const int AnnotFlagPrint = 1 << 2;
+
+    /// <summary><c>FPDF_ANNOT_FLAG_NOZOOM</c>.</summary>
+    internal const int AnnotFlagNoZoom = 1 << 3;
+
+    /// <summary><c>FPDF_ANNOT_FLAG_NOROTATE</c>.</summary>
+    internal const int AnnotFlagNoRotate = 1 << 4;
+
+    /// <summary><c>FPDF_INCREMENTAL</c> for preserving prior digital signature revisions on save.</summary>
+    internal const uint SaveFlagIncremental = 1u;
+
+    /// <summary><c>FPDF_NO_INCREMENTAL</c>.</summary>
+    internal const uint SaveFlagNoIncremental = 2u;
+
+    /// <summary><c>FPDF_OBJECT_DICTIONARY</c>.</summary>
+    internal const int ObjectDictionary = 6;
+
+    /// <summary><c>FPDF_OBJECT_REFERENCE</c>.</summary>
+    internal const int ObjectReference = 9;
+}
+
+/// <summary>Managed mirror of <c>FS_POINTF</c> (coordinates in points).</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct FsPointF
+{
+    /// <summary>The x-coordinate.</summary>
+    public float X;
+
+    /// <summary>The y-coordinate.</summary>
+    public float Y;
+}
+
+/// <summary>Managed mirror of <c>FS_QUADPOINTSF</c> (4 Z-ordered vertices in PDF user space).</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct FsQuadPointsF
+{
+    /// <summary>Top-left X.</summary>
+    public float X1;
+
+    /// <summary>Top-left Y.</summary>
+    public float Y1;
+
+    /// <summary>Top-right X.</summary>
+    public float X2;
+
+    /// <summary>Top-right Y.</summary>
+    public float Y2;
+
+    /// <summary>Bottom-left X.</summary>
+    public float X3;
+
+    /// <summary>Bottom-left Y.</summary>
+    public float Y3;
+
+    /// <summary>Bottom-right X.</summary>
+    public float X4;
+
+    /// <summary>Bottom-right Y.</summary>
+    public float Y4;
 }
 
 /// <summary>

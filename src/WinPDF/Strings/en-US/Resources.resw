@@ -285,4 +285,82 @@
   <data name="Properties_DocKeywordsLabel.Text" xml:space="preserve"><value>Keywords</value></data>
   <data name="Properties_DocCreatorLabel.Text" xml:space="preserve"><value>Creation application</value></data>
   <data name="Properties_DocProducerLabel.Text" xml:space="preserve"><value>PDF producer</value></data>
+  <!-- ===================== Step 4 (0.6.0): Text Annotations, Comments & Digital Signatures ===================== -->
+  <data name="Menu_Save.Text" xml:space="preserve"><value>Save</value></data>
+  <data name="Context_Save.Text" xml:space="preserve"><value>Save</value></data>
+  <data name="Context_Highlight.Text" xml:space="preserve"><value>Highlight</value></data>
+  <data name="Context_HighlightWithComment.Text" xml:space="preserve"><value>Highlight with comment…</value></data>
+  <data name="Context_MarkupSubMenu.Text" xml:space="preserve"><value>Text markup</value></data>
+  <data name="Context_Underline.Text" xml:space="preserve"><value>Underline</value></data>
+  <data name="Context_StrikeOut.Text" xml:space="preserve"><value>Strikethrough</value></data>
+  <data name="Context_Squiggly.Text" xml:space="preserve"><value>Squiggly underline</value></data>
+  <data name="Context_AddComment.Text" xml:space="preserve"><value>Add comment note…</value></data>
+  <data name="Context_AddTextBox.Text" xml:space="preserve"><value>Add text box…</value></data>
+  <data name="Context_EditAnnotation.Text" xml:space="preserve"><value>Edit comment…</value></data>
+  <data name="Context_DeleteAnnotation.Text" xml:space="preserve"><value>Delete annotation</value></data>
+  <data name="Context_InspectSignature.Text" xml:space="preserve"><value>View digital signature details</value></data>
+  <data name="TouchSelection_Copy_ToolTip" xml:space="preserve"><value>Copy</value></data>
+  <data name="TouchSelection_Highlight_ToolTip" xml:space="preserve"><value>Highlight</value></data>
+  <data name="TouchSelection_Comment_ToolTip" xml:space="preserve"><value>Highlight with comment</value></data>
+  <data name="TouchSelection_Underline.Text" xml:space="preserve"><value>Underline</value></data>
+  <data name="TouchSelection_StrikeOut.Text" xml:space="preserve"><value>Strikethrough</value></data>
+  <data name="TouchSelection_Squiggly.Text" xml:space="preserve"><value>Squiggly underline</value></data>
+  <data name="TouchEmpty_AddComment_Label" xml:space="preserve"><value>Comment</value></data>
+  <data name="TouchEmpty_AddTextBox_Label" xml:space="preserve"><value>Text box</value></data>
+  <data name="Annot_Save" xml:space="preserve"><value>Save</value></data>
+  <data name="Annot_Delete" xml:space="preserve"><value>Delete</value></data>
+  <data name="Annot_Close" xml:space="preserve"><value>Close</value></data>
+  <data name="Annot_CommentPlaceholder" xml:space="preserve"><value>Write a comment…</value></data>
+  <data name="Annot_TextBoxPlaceholder" xml:space="preserve"><value>Enter text…</value></data>
+  <data name="Color_Yellow" xml:space="preserve"><value>Yellow</value></data>
+  <data name="Color_Green" xml:space="preserve"><value>Green</value></data>
+  <data name="Color_Blue" xml:space="preserve"><value>Blue</value></data>
+  <data name="Color_Pink" xml:space="preserve"><value>Pink</value></data>
+  <data name="Color_Orange" xml:space="preserve"><value>Orange</value></data>
+  <data name="Annot_Subtype_Highlight" xml:space="preserve"><value>Highlight</value></data>
+  <data name="Annot_Subtype_Underline" xml:space="preserve"><value>Underline</value></data>
+  <data name="Annot_Subtype_Squiggly" xml:space="preserve"><value>Squiggly</value></data>
+  <data name="Annot_Subtype_StrikeOut" xml:space="preserve"><value>Strikethrough</value></data>
+  <data name="Annot_Subtype_Text" xml:space="preserve"><value>Comment</value></data>
+  <data name="Annot_Subtype_FreeText" xml:space="preserve"><value>Text Box</value></data>
+  <data name="Annot_Subtype_Ink" xml:space="preserve"><value>Drawing (Ink)</value></data>
+  <data name="Annot_Subtype_Square" xml:space="preserve"><value>Rectangle</value></data>
+  <data name="Annot_Subtype_Circle" xml:space="preserve"><value>Circle</value></data>
+  <data name="Annot_Subtype_Line" xml:space="preserve"><value>Line</value></data>
+  <data name="Annot_Subtype_Polygon" xml:space="preserve"><value>Polygon</value></data>
+  <data name="Annot_Subtype_PolyLine" xml:space="preserve"><value>Polyline</value></data>
+  <data name="Annot_Subtype_Stamp" xml:space="preserve"><value>Stamp</value></data>
+  <data name="Annot_Subtype_Caret" xml:space="preserve"><value>Insertion</value></data>
+  <data name="Annot_Subtype_FileAttachment" xml:space="preserve"><value>Attachment</value></data>
+  <data name="Annot_Subtype_Redact" xml:space="preserve"><value>Redaction</value></data>
+  <data name="Annot_Subtype_Signature" xml:space="preserve"><value>Digital Signature</value></data>
+  <data name="Annot_Subtype_Other" xml:space="preserve"><value>Annotation</value></data>
+  <data name="Annotations_SectionHeader.Text" xml:space="preserve"><value>Annotations &amp; Comments</value></data>
+  <data name="Annotations_SignaturesHeader.Text" xml:space="preserve"><value>Digital Signatures</value></data>
+  <data name="Annotations_DeleteButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Delete annotation</value></data>
+  <data name="Annotations_DeleteButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Delete annotation</value></data>
+  <data name="Sig_Banner_SingleFormat" xml:space="preserve"><value>Digitally signed by {0}</value></data>
+  <data name="Sig_Banner_MultiFormat" xml:space="preserve"><value>Digitally signed ({0} signatures) — {1}</value></data>
+  <data name="Sig_Banner_ViewButton" xml:space="preserve"><value>View signatures</value></data>
+  <data name="Sig_Dialog_Title" xml:space="preserve"><value>Digital Signatures</value></data>
+  <data name="Sig_Dialog_Signer" xml:space="preserve"><value>Signer</value></data>
+  <data name="Sig_Dialog_Issuer" xml:space="preserve"><value>Issuer (CA)</value></data>
+  <data name="Sig_Dialog_Time" xml:space="preserve"><value>Signed on</value></data>
+  <data name="Sig_Dialog_Reason" xml:space="preserve"><value>Reason</value></data>
+  <data name="Sig_Dialog_Format" xml:space="preserve"><value>Signature format</value></data>
+  <data name="Sig_Dialog_Coverage" xml:space="preserve"><value>Document coverage</value></data>
+  <data name="Sig_Dialog_CoverageWhole" xml:space="preserve"><value>Covers the entire document</value></data>
+  <data name="Sig_Dialog_CoverageModified" xml:space="preserve"><value>Incremental updates appended after signing</value></data>
+  <data name="Sig_Dialog_Permission" xml:space="preserve"><value>Modification policy</value></data>
+  <data name="Sig_Dialog_CertValidity" xml:space="preserve"><value>Certificate validity</value></data>
+  <data name="Sig_Dialog_Thumbprint" xml:space="preserve"><value>Thumbprint (SHA-256)</value></data>
+  <data name="Sig_Status_Valid" xml:space="preserve"><value>Valid digital signature</value></data>
+  <data name="Sig_Status_ValidUntrustedRoot" xml:space="preserve"><value>Intact integrity (root CA not in Windows store)</value></data>
+  <data name="Sig_Status_ModifiedAfterSigning" xml:space="preserve"><value>Document modified after signing</value></data>
+  <data name="Sig_Status_Invalid" xml:space="preserve"><value>Invalid signature (content altered)</value></data>
+  <data name="Sig_Status_Unknown" xml:space="preserve"><value>Unknown / unsupported signature</value></data>
+  <data name="Sig_DocMdp_NoChanges" xml:space="preserve"><value>No changes allowed</value></data>
+  <data name="Sig_DocMdp_FormFillAndSign" xml:space="preserve"><value>Form fill and signing allowed</value></data>
+  <data name="Sig_DocMdp_AnnotationsAllowed" xml:space="preserve"><value>Annotations, form fill and signing allowed</value></data>
+  <data name="Sig_DocMdp_Unspecified" xml:space="preserve"><value>Standard</value></data>
 </root>

@@ -281,4 +281,82 @@
   <data name="Properties_DocKeywordsLabel.Text" xml:space="preserve"><value>Palavras-chave</value></data>
   <data name="Properties_DocCreatorLabel.Text" xml:space="preserve"><value>Aplicativo de criação</value></data>
   <data name="Properties_DocProducerLabel.Text" xml:space="preserve"><value>Produtor do PDF</value></data>
+  <!-- ===================== Etapa 4 (0.6.0): Anotações de Texto, Comentários e Assinaturas Digitais ===================== -->
+  <data name="Menu_Save.Text" xml:space="preserve"><value>Salvar</value></data>
+  <data name="Context_Save.Text" xml:space="preserve"><value>Salvar</value></data>
+  <data name="Context_Highlight.Text" xml:space="preserve"><value>Realçar</value></data>
+  <data name="Context_HighlightWithComment.Text" xml:space="preserve"><value>Realçar com comentário…</value></data>
+  <data name="Context_MarkupSubMenu.Text" xml:space="preserve"><value>Marcação de texto</value></data>
+  <data name="Context_Underline.Text" xml:space="preserve"><value>Sublinhar</value></data>
+  <data name="Context_StrikeOut.Text" xml:space="preserve"><value>Tachado</value></data>
+  <data name="Context_Squiggly.Text" xml:space="preserve"><value>Sublinhado ondulado</value></data>
+  <data name="Context_AddComment.Text" xml:space="preserve"><value>Adicionar nota de comentário…</value></data>
+  <data name="Context_AddTextBox.Text" xml:space="preserve"><value>Adicionar caixa de texto…</value></data>
+  <data name="Context_EditAnnotation.Text" xml:space="preserve"><value>Editar comentário…</value></data>
+  <data name="Context_DeleteAnnotation.Text" xml:space="preserve"><value>Excluir anotação</value></data>
+  <data name="Context_InspectSignature.Text" xml:space="preserve"><value>Ver detalhes da assinatura digital</value></data>
+  <data name="TouchSelection_Copy_ToolTip" xml:space="preserve"><value>Copiar</value></data>
+  <data name="TouchSelection_Highlight_ToolTip" xml:space="preserve"><value>Realçar</value></data>
+  <data name="TouchSelection_Comment_ToolTip" xml:space="preserve"><value>Realçar com comentário</value></data>
+  <data name="TouchSelection_Underline.Text" xml:space="preserve"><value>Sublinhar</value></data>
+  <data name="TouchSelection_StrikeOut.Text" xml:space="preserve"><value>Tachado</value></data>
+  <data name="TouchSelection_Squiggly.Text" xml:space="preserve"><value>Sublinhado ondulado</value></data>
+  <data name="TouchEmpty_AddComment_Label" xml:space="preserve"><value>Comentário</value></data>
+  <data name="TouchEmpty_AddTextBox_Label" xml:space="preserve"><value>Caixa de texto</value></data>
+  <data name="Annot_Save" xml:space="preserve"><value>Salvar</value></data>
+  <data name="Annot_Delete" xml:space="preserve"><value>Excluir</value></data>
+  <data name="Annot_Close" xml:space="preserve"><value>Fechar</value></data>
+  <data name="Annot_CommentPlaceholder" xml:space="preserve"><value>Escreva um comentário…</value></data>
+  <data name="Annot_TextBoxPlaceholder" xml:space="preserve"><value>Digite o texto…</value></data>
+  <data name="Color_Yellow" xml:space="preserve"><value>Amarelo</value></data>
+  <data name="Color_Green" xml:space="preserve"><value>Verde</value></data>
+  <data name="Color_Blue" xml:space="preserve"><value>Azul</value></data>
+  <data name="Color_Pink" xml:space="preserve"><value>Rosa</value></data>
+  <data name="Color_Orange" xml:space="preserve"><value>Laranja</value></data>
+  <data name="Annot_Subtype_Highlight" xml:space="preserve"><value>Realce</value></data>
+  <data name="Annot_Subtype_Underline" xml:space="preserve"><value>Sublinhado</value></data>
+  <data name="Annot_Subtype_Squiggly" xml:space="preserve"><value>Ondulado</value></data>
+  <data name="Annot_Subtype_StrikeOut" xml:space="preserve"><value>Tachado</value></data>
+  <data name="Annot_Subtype_Text" xml:space="preserve"><value>Comentário</value></data>
+  <data name="Annot_Subtype_FreeText" xml:space="preserve"><value>Caixa de Texto</value></data>
+  <data name="Annot_Subtype_Ink" xml:space="preserve"><value>Desenho (Tinta)</value></data>
+  <data name="Annot_Subtype_Square" xml:space="preserve"><value>Retângulo</value></data>
+  <data name="Annot_Subtype_Circle" xml:space="preserve"><value>Círculo</value></data>
+  <data name="Annot_Subtype_Line" xml:space="preserve"><value>Linha</value></data>
+  <data name="Annot_Subtype_Polygon" xml:space="preserve"><value>Polígono</value></data>
+  <data name="Annot_Subtype_PolyLine" xml:space="preserve"><value>Polilinha</value></data>
+  <data name="Annot_Subtype_Stamp" xml:space="preserve"><value>Carimbo</value></data>
+  <data name="Annot_Subtype_Caret" xml:space="preserve"><value>Inserção</value></data>
+  <data name="Annot_Subtype_FileAttachment" xml:space="preserve"><value>Anexo</value></data>
+  <data name="Annot_Subtype_Redact" xml:space="preserve"><value>Redação</value></data>
+  <data name="Annot_Subtype_Signature" xml:space="preserve"><value>Assinatura Digital</value></data>
+  <data name="Annot_Subtype_Other" xml:space="preserve"><value>Anotação</value></data>
+  <data name="Annotations_SectionHeader.Text" xml:space="preserve"><value>Anotações e Comentários</value></data>
+  <data name="Annotations_SignaturesHeader.Text" xml:space="preserve"><value>Assinaturas Digitais</value></data>
+  <data name="Annotations_DeleteButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Excluir anotação</value></data>
+  <data name="Annotations_DeleteButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Excluir anotação</value></data>
+  <data name="Sig_Banner_SingleFormat" xml:space="preserve"><value>Assinado digitalmente por {0}</value></data>
+  <data name="Sig_Banner_MultiFormat" xml:space="preserve"><value>Assinado digitalmente ({0} assinaturas) — {1}</value></data>
+  <data name="Sig_Banner_ViewButton" xml:space="preserve"><value>Ver assinaturas</value></data>
+  <data name="Sig_Dialog_Title" xml:space="preserve"><value>Assinaturas Digitais</value></data>
+  <data name="Sig_Dialog_Signer" xml:space="preserve"><value>Signatário</value></data>
+  <data name="Sig_Dialog_Issuer" xml:space="preserve"><value>Emissor (AC)</value></data>
+  <data name="Sig_Dialog_Time" xml:space="preserve"><value>Data da assinatura</value></data>
+  <data name="Sig_Dialog_Reason" xml:space="preserve"><value>Motivo</value></data>
+  <data name="Sig_Dialog_Format" xml:space="preserve"><value>Formato da assinatura</value></data>
+  <data name="Sig_Dialog_Coverage" xml:space="preserve"><value>Abrangência no documento</value></data>
+  <data name="Sig_Dialog_CoverageWhole" xml:space="preserve"><value>Cobre o documento inteiro</value></data>
+  <data name="Sig_Dialog_CoverageModified" xml:space="preserve"><value>Alterações adicionadas após a assinatura</value></data>
+  <data name="Sig_Dialog_Permission" xml:space="preserve"><value>Política de alteração</value></data>
+  <data name="Sig_Dialog_CertValidity" xml:space="preserve"><value>Validade do certificado</value></data>
+  <data name="Sig_Dialog_Thumbprint" xml:space="preserve"><value>Impressão digital (SHA-256)</value></data>
+  <data name="Sig_Status_Valid" xml:space="preserve"><value>Assinatura digital válida</value></data>
+  <data name="Sig_Status_ValidUntrustedRoot" xml:space="preserve"><value>Integridade intacta (AC raiz fora do repositório Windows)</value></data>
+  <data name="Sig_Status_ModifiedAfterSigning" xml:space="preserve"><value>Documento modificado após a assinatura</value></data>
+  <data name="Sig_Status_Invalid" xml:space="preserve"><value>Assinatura inválida (conteúdo alterado)</value></data>
+  <data name="Sig_Status_Unknown" xml:space="preserve"><value>Assinatura desconhecida / não suportada</value></data>
+  <data name="Sig_DocMdp_NoChanges" xml:space="preserve"><value>Nenhuma alteração permitida</value></data>
+  <data name="Sig_DocMdp_FormFillAndSign" xml:space="preserve"><value>Preenchimento de formulários e assinaturas</value></data>
+  <data name="Sig_DocMdp_AnnotationsAllowed" xml:space="preserve"><value>Anotações, formulários e assinaturas</value></data>
+  <data name="Sig_DocMdp_Unspecified" xml:space="preserve"><value>Padrão</value></data>
 </root>

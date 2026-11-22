@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Globalization;
 using System.IO;
+using System.Numerics;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.WindowsRuntime;
 using Windows.ApplicationModel.DataTransfer;
@@ -407,6 +408,33 @@ public sealed partial class DocumentView : Page
     private DocumentViewModel? _activePrintDocumentVm;
     private PrintTaskOptions? _currentPrintTaskOptions;
 
+    private enum AnnotationEditorMode
+    {
+        CreateNote,
+        CreateFreeText,
+        CreateMarkupWithComment,
+        EditExisting,
+    }
+
+    private AnnotationEditorMode _annotEditorMode;
+    private int _annotEditorPageIndex = -1;
+    private int _annotEditorAnnotIndex = -1;
+    private Vector2 _annotEditorPdfPt;
+    private PdfTextSelection? _annotEditorPendingSelection;
+    private PdfAnnotationSubtype _annotEditorPendingMarkupSubtype = PdfAnnotationSubtype.Highlight;
+    private PdfAnnotationColor _annotEditorSelectedColor = PdfAnnotationColor.Yellow;
+    private bool _annotEditorCanEditText = true;
+    private bool _annotEditorCanEditColor = true;
+    private bool _isTouchEmptyHoldFlyoutOpen;
+    private PdfPageCanvas? _touchEmptyHoldCanvas;
+    private Vector2 _touchEmptyHoldPdfPt;
+    private Point _touchEmptyHoldDipPt;
+    private PdfPageCanvas? _contextTargetCanvas;
+    private Vector2 _contextTargetPdfPt;
+    private Point _contextTargetDipPt;
+    private PdfAnnotationInfo? _contextTargetAnnotation;
+    private PdfSignatureInfo? _contextTargetSignature;
+
     /// <summary>Gets the localized page prefix text.</summary>
     public string PagePrefixText => ResourceStrings.Get(ResourceKeys.StatusBarPagePrefix);
 
@@ -468,6 +496,7 @@ public sealed partial class DocumentView : Page
         _windowContext = App.CurrentApp.Services.GetRequiredService<IWindowContext>();
         _currentSidebarWidthDip = Math.Clamp(ViewModel.SettingsService.Settings.SidebarWidth, 230.0, 480.0);
         InitializeComponent();
+        InitializeAnnotationUiText();
 
         _wheelHandler = new PointerEventHandler(OnScrollViewerPointerWheelChanged);
         _autoScrollPointerPressedHandler = new PointerEventHandler(OnViewerAutoScrollPointerPressed);
@@ -517,6 +546,10 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.SelectionDragUpdated += OnCanvasSelectionDragUpdated;
         PdfPageCanvas.SelectionDragCompleted += OnCanvasSelectionDragCompleted;
         PdfPageCanvas.SelectionDragCanceled += OnCanvasSelectionDragCanceled;
+        PdfPageCanvas.AnnotationClicked += OnCanvasAnnotationClicked;
+        PdfPageCanvas.SignatureClicked += OnCanvasSignatureClicked;
+        PdfPageCanvas.TouchEmptyHoldRequested += OnCanvasTouchEmptyHoldRequested;
+        PdfPageCanvas.PlaceTextNoteRequested += OnCanvasPlaceTextNoteRequested;
         PdfPageCanvas.IsSingleTouchViewerManipulating = () => _isManipulatingSlideSwipe && _activeTouchPointers.Count <= 1;
 
         Loaded += OnLoaded;
@@ -562,6 +595,14 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.SelectionDragCompleted += OnCanvasSelectionDragCompleted;
         PdfPageCanvas.SelectionDragCanceled -= OnCanvasSelectionDragCanceled;
         PdfPageCanvas.SelectionDragCanceled += OnCanvasSelectionDragCanceled;
+        PdfPageCanvas.AnnotationClicked -= OnCanvasAnnotationClicked;
+        PdfPageCanvas.AnnotationClicked += OnCanvasAnnotationClicked;
+        PdfPageCanvas.SignatureClicked -= OnCanvasSignatureClicked;
+        PdfPageCanvas.SignatureClicked += OnCanvasSignatureClicked;
+        PdfPageCanvas.TouchEmptyHoldRequested -= OnCanvasTouchEmptyHoldRequested;
+        PdfPageCanvas.TouchEmptyHoldRequested += OnCanvasTouchEmptyHoldRequested;
+        PdfPageCanvas.PlaceTextNoteRequested -= OnCanvasPlaceTextNoteRequested;
+        PdfPageCanvas.PlaceTextNoteRequested += OnCanvasPlaceTextNoteRequested;
         PdfPageCanvas.IsSingleTouchViewerManipulating = () => _isManipulatingSlideSwipe && _activeTouchPointers.Count <= 1;
         _presentationHideTimer.Tick -= OnPresentationHideTimerTick;
         _presentationHideTimer.Tick += OnPresentationHideTimerTick;
@@ -660,6 +701,10 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.SelectionDragUpdated -= OnCanvasSelectionDragUpdated;
         PdfPageCanvas.SelectionDragCompleted -= OnCanvasSelectionDragCompleted;
         PdfPageCanvas.SelectionDragCanceled -= OnCanvasSelectionDragCanceled;
+        PdfPageCanvas.AnnotationClicked -= OnCanvasAnnotationClicked;
+        PdfPageCanvas.SignatureClicked -= OnCanvasSignatureClicked;
+        PdfPageCanvas.TouchEmptyHoldRequested -= OnCanvasTouchEmptyHoldRequested;
+        PdfPageCanvas.PlaceTextNoteRequested -= OnCanvasPlaceTextNoteRequested;
 
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.SearchFocusRequested -= OnSearchFocusRequested;
@@ -1055,12 +1100,17 @@ public sealed partial class DocumentView : Page
             _observedDocument.FitHorizontalRequested += OnFitWidthRequested;
             _observedDocument.ModeChanged += OnDocumentModeChanged;
             _observedDocument.ActiveSearchMatchScrollRequested += OnActiveSearchMatchScrollRequested;
+            _observedDocument.AnnotationFocusRequested += OnAnnotationFocusRequested;
+            _observedDocument.SignatureInspectRequested += OnSignatureInspectRequested;
             UpdateZoomSlider(doc.ZoomFactor);
             if (StatusBarPageBox is not null)
             {
                 StatusBarPageBox.Text = doc.CurrentPageNumber.ToString();
             }
         }
+
+        HideAnnotationPopupsImmediate();
+        UpdateSignatureBanner();
     }
 
     private void UnsubscribeFromDocument()
@@ -1072,8 +1122,13 @@ public sealed partial class DocumentView : Page
             _observedDocument.FitHorizontalRequested -= OnFitWidthRequested;
             _observedDocument.ModeChanged -= OnDocumentModeChanged;
             _observedDocument.ActiveSearchMatchScrollRequested -= OnActiveSearchMatchScrollRequested;
+            _observedDocument.AnnotationFocusRequested -= OnAnnotationFocusRequested;
+            _observedDocument.SignatureInspectRequested -= OnSignatureInspectRequested;
             _observedDocument = null;
         }
+
+        HideAnnotationPopupsImmediate();
+        UpdateSignatureBanner();
     }
 
     private void OnActiveSearchMatchScrollRequested(PdfSearchMatch match)
@@ -1446,6 +1501,13 @@ public sealed partial class DocumentView : Page
                 SyncPagedScrollViewerModes();
                 UpdateViewportPages(ViewModel.CurrentDocument?.ZoomFactor ?? ContinuousScrollViewer.ZoomFactor);
             });
+        }
+        else if (e.PropertyName is nameof(DocumentViewModel.HasSignatures)
+                 or nameof(DocumentViewModel.IsSignatureBannerDismissed)
+                 or nameof(DocumentViewModel.IsSignatureBannerVisible)
+                 or nameof(DocumentViewModel.SignatureBannerMessage))
+        {
+            UpdateSignatureBanner();
         }
         else if (e.PropertyName == nameof(DocumentViewModel.ZoomFactor))
         {
@@ -2660,6 +2722,21 @@ public sealed partial class DocumentView : Page
 
     private void OnEscapeAcceleratorInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
+        if (AnnotationEditorFlyout?.IsOpen == true)
+        {
+            args.Handled = true;
+            AnnotationEditorFlyout.Hide();
+            ReturnFocusToViewer();
+            return;
+        }
+
+        if (TouchEmptyHoldCommandBarFlyout?.IsOpen == true)
+        {
+            args.Handled = true;
+            TouchEmptyHoldCommandBarFlyout.Hide();
+            return;
+        }
+
         if (ViewModel.IsSearchOpen)
         {
             args.Handled = true;
@@ -2733,7 +2810,7 @@ public sealed partial class DocumentView : Page
                 if (ViewModel.HasDocument)
                 {
                     e.Handled = true;
-                    ViewModel.CloseDocument();
+                    _ = ViewModel.CloseDocumentAsync();
                 }
                 return;
             }
@@ -2866,7 +2943,15 @@ public sealed partial class DocumentView : Page
 
                 case Windows.System.VirtualKey.S:
                     e.Handled = true;
-                    _ = ViewModel.SaveAsCommand.ExecuteAsync(null);
+                    if (isShift)
+                    {
+                        _ = ViewModel.SaveAsCommand.ExecuteAsync(null);
+                    }
+                    else
+                    {
+                        _ = ViewModel.SaveCommand.ExecuteAsync(null);
+                    }
+
                     return;
 
                 case Windows.System.VirtualKey.P:
@@ -4239,6 +4324,14 @@ public sealed partial class DocumentView : Page
 
     private void OnToolHighlighterClicked(object sender, RoutedEventArgs e)
     {
+        if (ViewModel.CurrentDocument is { ActiveSelection: { HasContent: true } sel } doc)
+        {
+            _ = doc.AddMarkupForSelectionAsync(sel, PdfAnnotationSubtype.Highlight, doc.ActiveAnnotationColor);
+            HideTouchSelectionFlyout();
+            ReturnFocusToViewer();
+            return;
+        }
+
         ViewModel.SetTool(AnnotationTool.Highlighter);
     }
 
@@ -5415,7 +5508,1087 @@ public sealed partial class DocumentView : Page
         {
             // Suppress the desktop right-click MenuFlyout on touch long-press so touch uses native text selection + CommandBarFlyout
             args.Handled = true;
+            return;
         }
+
+        _contextTargetCanvas = null;
+        _contextTargetAnnotation = null;
+        _contextTargetSignature = null;
+        _contextTargetPdfPt = default;
+        _contextTargetDipPt = default;
+
+        DocumentViewModel? doc = ViewModel.CurrentDocument;
+        if (doc is not null && !ViewModel.IsPresentationMode && ScrollViewerContentRoot is not null)
+        {
+            if (args.TryGetPosition(ScrollViewerContentRoot, out Point rootPt))
+            {
+                if (TryFindCanvasAtRootPoint(rootPt, out PdfPageCanvas? hitCanvas, out Point canvasDip))
+                {
+                    _contextTargetCanvas = hitCanvas;
+                    _contextTargetDipPt = canvasDip;
+                    _contextTargetPdfPt = hitCanvas!.ToPdfPoint(canvasDip);
+                }
+            }
+            else if (FindRealizedCanvasForPage(doc.CurrentPageIndex) is { } fallbackCanvas)
+            {
+                double cw = fallbackCanvas.ActualWidth > 0 ? fallbackCanvas.ActualWidth : fallbackCanvas.Width;
+                _contextTargetCanvas = fallbackCanvas;
+                _contextTargetDipPt = new Point(Math.Max(12.0, cw * 0.5), 80.0);
+                _contextTargetPdfPt = fallbackCanvas.ToPdfPoint(_contextTargetDipPt);
+            }
+
+            if (_contextTargetCanvas?.PageInfo is { } pageInfo)
+            {
+                PdfAnnotationInfo? hitAnnot = doc.HitTestAnnotation(
+                    pageInfo.Index,
+                    _contextTargetPdfPt.X,
+                    _contextTargetPdfPt.Y,
+                    tolerancePt: 6.0);
+                if (hitAnnot is not null)
+                {
+                    if (hitAnnot.IsSignatureWidget)
+                    {
+                        _contextTargetSignature = doc.GetSignatureByIndex(hitAnnot.SignatureIndex);
+                    }
+                    else
+                    {
+                        _contextTargetAnnotation = hitAnnot;
+                    }
+                }
+            }
+        }
+
+        bool hasSel = ViewModel.HasTextSelection && !ViewModel.IsPresentationMode;
+        bool canAnnotatePage = _contextTargetCanvas is not null && doc is not null && !ViewModel.IsPresentationMode;
+
+        if (ContextHighlightMenuItem is not null)
+        {
+            ContextHighlightMenuItem.Visibility = hasSel ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (ContextHighlightWithCommentMenuItem is not null)
+        {
+            ContextHighlightWithCommentMenuItem.Visibility = hasSel ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (ContextMarkupSubMenu is not null)
+        {
+            ContextMarkupSubMenu.Visibility = hasSel ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (ContextInspectSignatureMenuItem is not null)
+        {
+            ContextInspectSignatureMenuItem.Visibility = _contextTargetSignature is not null ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (ContextEditAnnotationMenuItem is not null)
+        {
+            ContextEditAnnotationMenuItem.Visibility = _contextTargetAnnotation is not null ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (ContextDeleteAnnotationMenuItem is not null)
+        {
+            ContextDeleteAnnotationMenuItem.Visibility = _contextTargetAnnotation is not null ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (ContextAddCommentMenuItem is not null)
+        {
+            ContextAddCommentMenuItem.Visibility = canAnnotatePage ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (ContextAddTextBoxMenuItem is not null)
+        {
+            ContextAddTextBoxMenuItem.Visibility = canAnnotatePage ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (ContextAnnotSeparator is not null)
+        {
+            bool showSep = hasSel || canAnnotatePage || _contextTargetSignature is not null || _contextTargetAnnotation is not null;
+            ContextAnnotSeparator.Visibility = showSep ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private void InitializeAnnotationUiText()
+    {
+        if (TouchSelectionHighlightButton is not null)
+        {
+            ToolTipService.SetToolTip(TouchSelectionHighlightButton, ResourceStrings.Get(ResourceKeys.TouchSelectionHighlightToolTip));
+        }
+
+        if (TouchSelectionCommentButton is not null)
+        {
+            ToolTipService.SetToolTip(TouchSelectionCommentButton, ResourceStrings.Get(ResourceKeys.TouchSelectionCommentToolTip));
+        }
+
+        if (TouchSelectionUnderlineButton is not null)
+        {
+            TouchSelectionUnderlineButton.Label = ResourceStrings.Get(ResourceKeys.AnnotSubtypeUnderline);
+        }
+
+        if (TouchSelectionStrikeOutButton is not null)
+        {
+            TouchSelectionStrikeOutButton.Label = ResourceStrings.Get(ResourceKeys.AnnotSubtypeStrikeOut);
+        }
+
+        if (TouchSelectionSquigglyButton is not null)
+        {
+            TouchSelectionSquigglyButton.Label = ResourceStrings.Get(ResourceKeys.AnnotSubtypeSquiggly);
+        }
+
+        ConfigureColorButton(TouchSelectionColorYellowButton, ContextColorYellowItem, AnnotColorYellowButton, ResourceKeys.ColorYellow, PdfAnnotationColor.Yellow);
+        ConfigureColorButton(TouchSelectionColorGreenButton, ContextColorGreenItem, AnnotColorGreenButton, ResourceKeys.ColorGreen, PdfAnnotationColor.Green);
+        ConfigureColorButton(TouchSelectionColorBlueButton, ContextColorBlueItem, AnnotColorBlueButton, ResourceKeys.ColorBlue, PdfAnnotationColor.Blue);
+        ConfigureColorButton(TouchSelectionColorPinkButton, ContextColorPinkItem, AnnotColorPinkButton, ResourceKeys.ColorPink, PdfAnnotationColor.Pink);
+        ConfigureColorButton(TouchSelectionColorOrangeButton, ContextColorOrangeItem, AnnotColorOrangeButton, ResourceKeys.ColorOrange, PdfAnnotationColor.Orange);
+
+        if (TouchEmptyAddCommentButton is not null)
+        {
+            string addComment = ResourceStrings.Get(ResourceKeys.TouchEmptyAddCommentLabel);
+            TouchEmptyAddCommentButton.Label = addComment;
+            ToolTipService.SetToolTip(TouchEmptyAddCommentButton, addComment);
+        }
+
+        if (TouchEmptyAddTextBoxButton is not null)
+        {
+            string addTextBox = ResourceStrings.Get(ResourceKeys.TouchEmptyAddTextBoxLabel);
+            TouchEmptyAddTextBoxButton.Label = addTextBox;
+            ToolTipService.SetToolTip(TouchEmptyAddTextBoxButton, addTextBox);
+        }
+
+        if (SignatureBannerViewButton is not null)
+        {
+            SignatureBannerViewButton.Content = ResourceStrings.Get(ResourceKeys.SigBannerViewButton);
+        }
+
+        if (AnnotationEditorDeleteButton is not null)
+        {
+            AnnotationEditorDeleteButton.Content = ResourceStrings.Get(ResourceKeys.AnnotDelete);
+        }
+
+        if (AnnotationEditorCancelButton is not null)
+        {
+            AnnotationEditorCancelButton.Content = ResourceStrings.Get(ResourceKeys.AnnotClose);
+        }
+
+        if (AnnotationEditorSaveButton is not null)
+        {
+            AnnotationEditorSaveButton.Content = ResourceStrings.Get(ResourceKeys.AnnotSave);
+        }
+
+        if (AnnotationEditorTextBox is not null)
+        {
+            AnnotationEditorTextBox.TextChanged += OnAnnotationEditorTextBoxTextChanged;
+        }
+    }
+
+    private static void ConfigureColorButton(
+        AppBarButton? touchBtn,
+        MenuFlyoutItem? menuItem,
+        Button? swatchBtn,
+        string colorNameKey,
+        PdfAnnotationColor color)
+    {
+        string label = ResourceStrings.Get(colorNameKey);
+        Windows.UI.Color uiColor = Windows.UI.Color.FromArgb(255, color.R, color.G, color.B);
+
+        if (touchBtn is not null)
+        {
+            touchBtn.Label = label;
+            touchBtn.Icon = CreateColorDotIcon(uiColor);
+        }
+
+        if (menuItem is not null)
+        {
+            menuItem.Text = label;
+            menuItem.Icon = CreateColorDotIcon(uiColor);
+        }
+
+        if (swatchBtn is not null)
+        {
+            ToolTipService.SetToolTip(swatchBtn, label);
+        }
+    }
+
+    private static FontIcon CreateColorDotIcon(Windows.UI.Color color) => new()
+    {
+        FontFamily = new FontFamily("Segoe UI"),
+        Glyph = "●",
+        FontSize = 14,
+        Foreground = new SolidColorBrush(color),
+    };
+
+    private static PdfAnnotationColor ParseAnnotationColorTag(string? tag, PdfAnnotationColor fallback) => tag switch
+    {
+        "Yellow" => PdfAnnotationColor.Yellow,
+        "Green" => PdfAnnotationColor.Green,
+        "Blue" => PdfAnnotationColor.Blue,
+        "Pink" => PdfAnnotationColor.Pink,
+        "Orange" => PdfAnnotationColor.Orange,
+        _ => fallback,
+    };
+
+    private static PdfAnnotationSubtype ParseMarkupSubtypeTag(string? tag, PdfAnnotationSubtype fallback) => tag switch
+    {
+        "Highlight" => PdfAnnotationSubtype.Highlight,
+        "Underline" => PdfAnnotationSubtype.Underline,
+        "StrikeOut" => PdfAnnotationSubtype.StrikeOut,
+        "Squiggly" => PdfAnnotationSubtype.Squiggly,
+        _ => fallback,
+    };
+
+    private bool TryFindCanvasAtRootPoint(Point rootPt, out PdfPageCanvas? hitCanvas, out Point canvasDipPt)
+    {
+        hitCanvas = null;
+        canvasDipPt = default;
+
+        if (ScrollViewerContentRoot is null)
+        {
+            return false;
+        }
+
+        foreach (PdfPageCanvas canvas in _activeCanvases)
+        {
+            if (canvas.IsSwipePreview || !canvas.IsLoaded || canvas.PageInfo is null)
+            {
+                continue;
+            }
+
+            double cw = canvas.ActualWidth > 0 ? canvas.ActualWidth : canvas.Width;
+            double ch = canvas.ActualHeight > 0 ? canvas.ActualHeight : canvas.Height;
+            if (cw <= 0 || ch <= 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                Point localPt = ScrollViewerContentRoot.TransformToVisual(canvas).TransformPoint(rootPt);
+                if (localPt.X >= 0 && localPt.X <= cw && localPt.Y >= 0 && localPt.Y <= ch)
+                {
+                    hitCanvas = canvas;
+                    canvasDipPt = localPt;
+                    return true;
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        return false;
+    }
+
+    private void UpdateSignatureBanner()
+    {
+        if (SignatureInfoBar is null)
+        {
+            return;
+        }
+
+        DocumentViewModel? doc = _observedDocument;
+        if (doc is null || !doc.IsSignatureBannerVisible)
+        {
+            SignatureInfoBar.IsOpen = false;
+            return;
+        }
+
+        InfoBarSeverity severity = InfoBarSeverity.Informational;
+        bool hasInvalid = false;
+        bool hasModified = false;
+        bool allValid = doc.Signatures.Count > 0;
+
+        for (int i = 0; i < doc.Signatures.Count; i++)
+        {
+            PdfSignatureVerificationStatus status = doc.Signatures[i].Status;
+            if (status == PdfSignatureVerificationStatus.Invalid)
+            {
+                hasInvalid = true;
+                allValid = false;
+                break;
+            }
+
+            if (status == PdfSignatureVerificationStatus.ModifiedAfterSigning)
+            {
+                hasModified = true;
+                allValid = false;
+            }
+            else if (status != PdfSignatureVerificationStatus.Valid)
+            {
+                allValid = false;
+            }
+        }
+
+        if (hasInvalid)
+        {
+            severity = InfoBarSeverity.Error;
+        }
+        else if (hasModified)
+        {
+            severity = InfoBarSeverity.Warning;
+        }
+        else if (allValid)
+        {
+            severity = InfoBarSeverity.Success;
+        }
+
+        SignatureInfoBar.Severity = severity;
+        SignatureInfoBar.Title = ResourceStrings.Get(ResourceKeys.AnnotSubtypeSignature);
+        SignatureInfoBar.Message = doc.SignatureBannerMessage;
+        SignatureInfoBar.IsOpen = true;
+    }
+
+    private void OnSignatureBannerCloseButtonClick(InfoBar sender, object args)
+    {
+        if (_observedDocument is not null)
+        {
+            _observedDocument.IsSignatureBannerDismissed = true;
+        }
+    }
+
+    private void OnSignatureBannerViewClick(object sender, RoutedEventArgs e)
+    {
+        _ = ViewModel.ShowSignatureDetailsAsync();
+    }
+
+    private void ScrollToAnnotation(PdfAnnotationInfo annot)
+    {
+        IReadOnlyList<PdfRect> rects = annot.QuadRects.Count > 0
+            ? annot.QuadRects
+            : [annot.Bounds];
+        ScrollToSearchMatch(new PdfSearchMatch(annot.PageIndex, 0, 0, 0, rects));
+    }
+
+    private void OnAnnotationFocusRequested(PdfAnnotationInfo annot)
+    {
+        ScrollToAnnotation(annot);
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (ViewModel.CurrentDocument is null)
+            {
+                return;
+            }
+
+            PdfPageCanvas? canvas = FindRealizedCanvasForPage(annot.PageIndex);
+            if (canvas?.PageInfo is { } pageInfo)
+            {
+                PageCoordinateTransform transform = PageCoordinateTransform.FromPage(pageInfo, canvas.RotationAngle);
+                Rect pageDip = transform.ToPageRect(annot.Bounds);
+                Point centerDip = new(pageDip.Left + (pageDip.Width * 0.5), pageDip.Bottom);
+                OpenExistingAnnotationEditor(annot, canvas, centerDip);
+            }
+        });
+    }
+
+    private void OnSignatureInspectRequested(PdfSignatureInfo sig)
+    {
+        _ = ViewModel.ShowSignatureDetailsAsync(sig);
+    }
+
+    private void OnCanvasAnnotationClicked(PdfPageCanvas canvas, PdfAnnotationInfo annot, Point canvasDipPt)
+    {
+        HideAnnotationPopupsImmediate();
+        OpenExistingAnnotationEditor(annot, canvas, canvasDipPt);
+    }
+
+    private void OnCanvasSignatureClicked(PdfPageCanvas canvas, PdfSignatureInfo sig, Point canvasDipPt)
+    {
+        HideAnnotationPopupsImmediate();
+        _ = ViewModel.ShowSignatureDetailsAsync(sig);
+    }
+
+    private void OnCanvasPlaceTextNoteRequested(PdfPageCanvas canvas, Vector2 pdfPt, Point canvasDipPt)
+    {
+        if (canvas.PageInfo is not { } pageInfo)
+        {
+            return;
+        }
+
+        HideAnnotationPopupsImmediate();
+        OpenCreateAnnotationEditor(AnnotationEditorMode.CreateNote, pageInfo.Index, pdfPt, canvas, canvasDipPt, pendingSelection: null);
+    }
+
+    private void OnCanvasTouchEmptyHoldRequested(PdfPageCanvas canvas, Vector2 pdfPt, Point canvasDipPt)
+    {
+        if (TouchEmptyHoldCommandBarFlyout is null ||
+            ScrollViewerContentRoot is null ||
+            canvas.PageInfo is null ||
+            ViewModel.IsPresentationMode)
+        {
+            return;
+        }
+
+        HideTouchSelectionFlyout();
+        if (AnnotationEditorFlyout?.IsOpen == true)
+        {
+            AnnotationEditorFlyout.Hide();
+        }
+
+        ViewModel.CurrentDocument?.ClearSelection();
+        if (ViewModel.CurrentDocument is not null)
+        {
+            ViewModel.CurrentDocument.SelectedAnnotation = null;
+        }
+
+        _touchEmptyHoldCanvas = canvas;
+        _touchEmptyHoldPdfPt = pdfPt;
+        _touchEmptyHoldDipPt = canvasDipPt;
+
+        try
+        {
+            Point rootPt = canvas.TransformToVisual(ScrollViewerContentRoot).TransformPoint(canvasDipPt);
+            double rootW = Math.Max(48.0, ScrollViewerContentRoot.ActualWidth);
+            double rootH = Math.Max(48.0, ScrollViewerContentRoot.ActualHeight);
+            double clampedX = Math.Clamp(rootPt.X, 24.0, rootW - 24.0);
+            double clampedY = Math.Clamp(rootPt.Y, 24.0, rootH - 24.0);
+            bool placeBelow = clampedY < 72.0;
+
+            if (TouchEmptyHoldCommandBarFlyout.IsOpen)
+            {
+                TouchEmptyHoldCommandBarFlyout.Hide();
+            }
+
+            var options = new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions
+            {
+                Position = new Point(clampedX, clampedY),
+                Placement = placeBelow
+                    ? Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Bottom
+                    : Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Top,
+                ShowMode = Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowMode.Transient,
+            };
+            TouchEmptyHoldCommandBarFlyout.ShowAt(ScrollViewerContentRoot, options);
+            _isTouchEmptyHoldFlyoutOpen = true;
+        }
+        catch
+        {
+        }
+    }
+
+    private void OnTouchEmptyHoldFlyoutClosed(object? sender, object e)
+    {
+        _isTouchEmptyHoldFlyoutOpen = false;
+    }
+
+    private void OnTouchEmptyAddCommentClick(object sender, RoutedEventArgs e)
+    {
+        PdfPageCanvas? canvas = _touchEmptyHoldCanvas;
+        Vector2 pdfPt = _touchEmptyHoldPdfPt;
+        Point dipPt = _touchEmptyHoldDipPt;
+        HideAnnotationPopupsImmediate();
+        if (canvas?.PageInfo is { } pageInfo)
+        {
+            OpenCreateAnnotationEditor(AnnotationEditorMode.CreateNote, pageInfo.Index, pdfPt, canvas, dipPt, pendingSelection: null);
+        }
+    }
+
+    private void OnTouchEmptyAddTextBoxClick(object sender, RoutedEventArgs e)
+    {
+        PdfPageCanvas? canvas = _touchEmptyHoldCanvas;
+        Vector2 pdfPt = _touchEmptyHoldPdfPt;
+        Point dipPt = _touchEmptyHoldDipPt;
+        HideAnnotationPopupsImmediate();
+        if (canvas?.PageInfo is { } pageInfo)
+        {
+            OpenCreateAnnotationEditor(AnnotationEditorMode.CreateFreeText, pageInfo.Index, pdfPt, canvas, dipPt, pendingSelection: null);
+        }
+    }
+
+    private void OnTouchSelectionHighlightButtonClick(object sender, RoutedEventArgs e)
+    {
+        DocumentViewModel? doc = ViewModel.CurrentDocument;
+        if (doc?.ActiveSelection is { HasContent: true } sel)
+        {
+            _ = doc.AddMarkupForSelectionAsync(sel, PdfAnnotationSubtype.Highlight, doc.ActiveAnnotationColor);
+        }
+
+        HideTouchSelectionFlyout();
+    }
+
+    private void OnTouchSelectionCommentButtonClick(object sender, RoutedEventArgs e)
+    {
+        DocumentViewModel? doc = ViewModel.CurrentDocument;
+        if (doc?.ActiveSelection is not { HasContent: true } sel)
+        {
+            HideTouchSelectionFlyout();
+            return;
+        }
+
+        PdfPageCanvas? anchorCanvas = FindRealizedCanvasForPage(sel.StartPageIndex);
+        Point anchorDip = ComputeSelectionAnchorCanvasDip(sel, anchorCanvas);
+        HideTouchSelectionFlyout();
+        OpenCreateAnnotationEditor(
+            AnnotationEditorMode.CreateMarkupWithComment,
+            sel.StartPageIndex,
+            default,
+            anchorCanvas,
+            anchorDip,
+            sel);
+    }
+
+    private void OnTouchSelectionSubtypeClick(object sender, RoutedEventArgs e)
+    {
+        DocumentViewModel? doc = ViewModel.CurrentDocument;
+        if (doc?.ActiveSelection is { HasContent: true } sel && sender is FrameworkElement fe)
+        {
+            PdfAnnotationSubtype subtype = ParseMarkupSubtypeTag(fe.Tag as string, PdfAnnotationSubtype.Underline);
+            _ = doc.AddMarkupForSelectionAsync(sel, subtype, doc.ActiveAnnotationColor);
+        }
+
+        HideTouchSelectionFlyout();
+    }
+
+    private void OnTouchSelectionColorClick(object sender, RoutedEventArgs e)
+    {
+        DocumentViewModel? doc = ViewModel.CurrentDocument;
+        if (doc is not null && sender is FrameworkElement fe)
+        {
+            doc.ActiveAnnotationColor = ParseAnnotationColorTag(fe.Tag as string, doc.ActiveAnnotationColor);
+            if (doc.ActiveSelection is { HasContent: true } sel)
+            {
+                _ = doc.AddMarkupForSelectionAsync(sel, PdfAnnotationSubtype.Highlight, doc.ActiveAnnotationColor);
+            }
+        }
+
+        HideTouchSelectionFlyout();
+    }
+
+    private void OnContextHighlightClick(object sender, RoutedEventArgs e)
+    {
+        DocumentViewModel? doc = ViewModel.CurrentDocument;
+        if (doc?.ActiveSelection is { HasContent: true } sel)
+        {
+            _ = doc.AddMarkupForSelectionAsync(sel, PdfAnnotationSubtype.Highlight, doc.ActiveAnnotationColor);
+        }
+    }
+
+    private void OnContextHighlightWithCommentClick(object sender, RoutedEventArgs e)
+    {
+        DocumentViewModel? doc = ViewModel.CurrentDocument;
+        if (doc?.ActiveSelection is not { HasContent: true } sel)
+        {
+            return;
+        }
+
+        PdfPageCanvas? anchorCanvas = _contextTargetCanvas ?? FindRealizedCanvasForPage(sel.StartPageIndex);
+        Point anchorDip = ComputeSelectionAnchorCanvasDip(sel, anchorCanvas);
+        OpenCreateAnnotationEditor(
+            AnnotationEditorMode.CreateMarkupWithComment,
+            sel.StartPageIndex,
+            default,
+            anchorCanvas,
+            anchorDip,
+            sel);
+    }
+
+    private void OnContextMarkupSubtypeClick(object sender, RoutedEventArgs e)
+    {
+        DocumentViewModel? doc = ViewModel.CurrentDocument;
+        if (doc?.ActiveSelection is { HasContent: true } sel && sender is FrameworkElement fe)
+        {
+            PdfAnnotationSubtype subtype = ParseMarkupSubtypeTag(fe.Tag as string, PdfAnnotationSubtype.Underline);
+            _ = doc.AddMarkupForSelectionAsync(sel, subtype, doc.ActiveAnnotationColor);
+        }
+    }
+
+    private void OnContextColorHighlightClick(object sender, RoutedEventArgs e)
+    {
+        DocumentViewModel? doc = ViewModel.CurrentDocument;
+        if (doc is not null && sender is FrameworkElement fe)
+        {
+            doc.ActiveAnnotationColor = ParseAnnotationColorTag(fe.Tag as string, doc.ActiveAnnotationColor);
+            if (doc.ActiveSelection is { HasContent: true } sel)
+            {
+                _ = doc.AddMarkupForSelectionAsync(sel, PdfAnnotationSubtype.Highlight, doc.ActiveAnnotationColor);
+            }
+        }
+    }
+
+    private void OnContextInspectSignatureClick(object sender, RoutedEventArgs e)
+    {
+        if (_contextTargetSignature is { } sig)
+        {
+            _ = ViewModel.ShowSignatureDetailsAsync(sig);
+        }
+    }
+
+    private void OnContextEditAnnotationClick(object sender, RoutedEventArgs e)
+    {
+        if (_contextTargetAnnotation is { } annot && _contextTargetCanvas is { } canvas)
+        {
+            if (ViewModel.CurrentDocument is not null)
+            {
+                ViewModel.CurrentDocument.SelectedAnnotation = annot;
+            }
+
+            OpenExistingAnnotationEditor(annot, canvas, _contextTargetDipPt);
+        }
+    }
+
+    private void OnContextDeleteAnnotationClick(object sender, RoutedEventArgs e)
+    {
+        if (_contextTargetAnnotation is { } annot && ViewModel.CurrentDocument is { } doc)
+        {
+            _ = doc.DeleteAnnotationAsync(annot.PageIndex, annot.AnnotIndex);
+        }
+    }
+
+    private void OnContextAddCommentClick(object sender, RoutedEventArgs e)
+    {
+        if (_contextTargetCanvas?.PageInfo is { } pageInfo)
+        {
+            OpenCreateAnnotationEditor(
+                AnnotationEditorMode.CreateNote,
+                pageInfo.Index,
+                _contextTargetPdfPt,
+                _contextTargetCanvas,
+                _contextTargetDipPt,
+                pendingSelection: null);
+        }
+    }
+
+    private void OnContextAddTextBoxClick(object sender, RoutedEventArgs e)
+    {
+        if (_contextTargetCanvas?.PageInfo is { } pageInfo)
+        {
+            OpenCreateAnnotationEditor(
+                AnnotationEditorMode.CreateFreeText,
+                pageInfo.Index,
+                _contextTargetPdfPt,
+                _contextTargetCanvas,
+                _contextTargetDipPt,
+                pendingSelection: null);
+        }
+    }
+
+    private Point ComputeSelectionAnchorCanvasDip(PdfTextSelection selection, PdfPageCanvas? canvas)
+    {
+        IReadOnlyList<PdfRect> rects = selection.GetRectsForPage(selection.StartPageIndex);
+        if (rects.Count > 0 && canvas?.PageInfo is { } pageInfo)
+        {
+            PageCoordinateTransform transform = PageCoordinateTransform.FromPage(pageInfo, canvas.RotationAngle);
+            Rect r = transform.ToPageRect(rects[0]);
+            return new Point(r.Left + (r.Width * 0.5), r.Bottom);
+        }
+
+        return _contextTargetDipPt;
+    }
+
+    private void OpenCreateAnnotationEditor(
+        AnnotationEditorMode mode,
+        int pageIndex,
+        Vector2 pdfPt,
+        PdfPageCanvas? anchorCanvas,
+        Point anchorCanvasDipPt,
+        PdfTextSelection? pendingSelection)
+    {
+        if (AnnotationEditorFlyout is null || ViewModel.CurrentDocument is not { } doc)
+        {
+            return;
+        }
+
+        _annotEditorMode = mode;
+        _annotEditorPageIndex = pageIndex;
+        _annotEditorAnnotIndex = -1;
+        _annotEditorPdfPt = pdfPt;
+        _annotEditorPendingSelection = pendingSelection;
+        _annotEditorPendingMarkupSubtype = PdfAnnotationSubtype.Highlight;
+        _annotEditorSelectedColor = doc.ActiveAnnotationColor;
+        _annotEditorCanEditText = true;
+        _annotEditorCanEditColor = true;
+
+        if (AnnotationEditorTitleText is not null)
+        {
+            AnnotationEditorTitleText.Text = mode switch
+            {
+                AnnotationEditorMode.CreateFreeText => ResourceStrings.Get(ResourceKeys.AnnotSubtypeFreeText),
+                AnnotationEditorMode.CreateMarkupWithComment => ResourceStrings.Get(ResourceKeys.AnnotSubtypeHighlight),
+                _ => ResourceStrings.Get(ResourceKeys.AnnotSubtypeText),
+            };
+        }
+
+        if (AnnotationEditorMetaText is not null)
+        {
+            AnnotationEditorMetaText.Text = string.Empty;
+            AnnotationEditorMetaText.Visibility = Visibility.Collapsed;
+        }
+
+        if (AnnotationEditorQuoteBorder is not null && AnnotationEditorQuoteText is not null)
+        {
+            if (pendingSelection is { HasContent: true } && !string.IsNullOrWhiteSpace(pendingSelection.SelectedText))
+            {
+                AnnotationEditorQuoteText.Text = pendingSelection.SelectedText.Trim();
+                AnnotationEditorQuoteBorder.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                AnnotationEditorQuoteText.Text = string.Empty;
+                AnnotationEditorQuoteBorder.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        if (AnnotationEditorColorRow is not null)
+        {
+            AnnotationEditorColorRow.Visibility = Visibility.Visible;
+        }
+
+        if (AnnotationEditorDeleteButton is not null)
+        {
+            AnnotationEditorDeleteButton.Visibility = Visibility.Collapsed;
+        }
+
+        if (AnnotationEditorTextBox is not null)
+        {
+            AnnotationEditorTextBox.Text = string.Empty;
+            AnnotationEditorTextBox.PlaceholderText = mode == AnnotationEditorMode.CreateFreeText
+                ? ResourceStrings.Get(ResourceKeys.AnnotTextBoxPlaceholder)
+                : ResourceStrings.Get(ResourceKeys.AnnotCommentPlaceholder);
+        }
+
+        UpdateAnnotationEditorUiState();
+        ShowAnnotationEditorAt(anchorCanvas, anchorCanvasDipPt);
+    }
+
+    private void OpenExistingAnnotationEditor(PdfAnnotationInfo annot, PdfPageCanvas? anchorCanvas, Point anchorCanvasDipPt)
+    {
+        if (AnnotationEditorFlyout is null)
+        {
+            return;
+        }
+
+        _annotEditorMode = AnnotationEditorMode.EditExisting;
+        _annotEditorPageIndex = annot.PageIndex;
+        _annotEditorAnnotIndex = annot.AnnotIndex;
+        _annotEditorPdfPt = default;
+        _annotEditorPendingSelection = null;
+        _annotEditorSelectedColor = annot.Color;
+        _annotEditorCanEditText = !annot.IsSignatureWidget;
+        _annotEditorCanEditColor = annot.SupportsColorChange;
+
+        if (AnnotationEditorTitleText is not null)
+        {
+            AnnotationEditorTitleText.Text = ResourceStrings.Get(GetSubtypeResourceKey(annot.Subtype));
+        }
+
+        if (AnnotationEditorMetaText is not null)
+        {
+            string meta = BuildAnnotationMetadataLine(annot);
+            AnnotationEditorMetaText.Text = meta;
+            AnnotationEditorMetaText.Visibility = string.IsNullOrWhiteSpace(meta) ? Visibility.Collapsed : Visibility.Visible;
+        }
+
+        if (AnnotationEditorQuoteBorder is not null && AnnotationEditorQuoteText is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(annot.QuotedText))
+            {
+                AnnotationEditorQuoteText.Text = annot.QuotedText;
+                AnnotationEditorQuoteBorder.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                AnnotationEditorQuoteText.Text = string.Empty;
+                AnnotationEditorQuoteBorder.Visibility = Visibility.Collapsed;
+            }
+        }
+
+        if (AnnotationEditorColorRow is not null)
+        {
+            AnnotationEditorColorRow.Visibility = _annotEditorCanEditColor ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (AnnotationEditorDeleteButton is not null)
+        {
+            AnnotationEditorDeleteButton.Visibility = Visibility.Visible;
+        }
+
+        if (AnnotationEditorTextBox is not null)
+        {
+            AnnotationEditorTextBox.Text = annot.Contents ?? string.Empty;
+            AnnotationEditorTextBox.PlaceholderText = annot.Subtype == PdfAnnotationSubtype.FreeText
+                ? ResourceStrings.Get(ResourceKeys.AnnotTextBoxPlaceholder)
+                : ResourceStrings.Get(ResourceKeys.AnnotCommentPlaceholder);
+        }
+
+        UpdateAnnotationEditorUiState();
+        ShowAnnotationEditorAt(anchorCanvas, anchorCanvasDipPt);
+    }
+
+    private void ShowAnnotationEditorAt(PdfPageCanvas? anchorCanvas, Point anchorCanvasDipPt)
+    {
+        if (AnnotationEditorFlyout is null || ScrollViewerContentRoot is null)
+        {
+            return;
+        }
+
+        try
+        {
+            double rootW = Math.Max(64.0, ScrollViewerContentRoot.ActualWidth);
+            double rootH = Math.Max(64.0, ScrollViewerContentRoot.ActualHeight);
+            Point rootPt = new(rootW * 0.5, rootH * 0.35);
+
+            if (anchorCanvas is not null)
+            {
+                try
+                {
+                    rootPt = anchorCanvas.TransformToVisual(ScrollViewerContentRoot).TransformPoint(anchorCanvasDipPt);
+                }
+                catch
+                {
+                }
+            }
+
+            double clampedX = Math.Clamp(rootPt.X, 24.0, rootW - 24.0);
+            double clampedY = Math.Clamp(rootPt.Y, 24.0, rootH - 24.0);
+
+            if (AnnotationEditorFlyout.IsOpen)
+            {
+                AnnotationEditorFlyout.Hide();
+            }
+
+            var options = new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions
+            {
+                Position = new Point(clampedX, clampedY),
+                Placement = clampedY > rootH * 0.65
+                    ? Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.TopEdgeAlignedLeft
+                    : Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.BottomEdgeAlignedLeft,
+                ShowMode = Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowMode.Standard,
+            };
+            AnnotationEditorFlyout.ShowAt(ScrollViewerContentRoot, options);
+
+            if (AnnotationEditorTextBox is not null)
+            {
+                DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+                {
+                    try
+                    {
+                        AnnotationEditorTextBox.Focus(FocusState.Programmatic);
+                        AnnotationEditorTextBox.SelectionStart = AnnotationEditorTextBox.Text?.Length ?? 0;
+                    }
+                    catch
+                    {
+                    }
+                });
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private void UpdateAnnotationEditorUiState()
+    {
+        UpdateSwatchSelection(AnnotColorYellowButton, PdfAnnotationColor.Yellow);
+        UpdateSwatchSelection(AnnotColorGreenButton, PdfAnnotationColor.Green);
+        UpdateSwatchSelection(AnnotColorBlueButton, PdfAnnotationColor.Blue);
+        UpdateSwatchSelection(AnnotColorPinkButton, PdfAnnotationColor.Pink);
+        UpdateSwatchSelection(AnnotColorOrangeButton, PdfAnnotationColor.Orange);
+
+        if (AnnotationEditorTextBox is not null)
+        {
+            AnnotationEditorTextBox.IsReadOnly = !_annotEditorCanEditText;
+        }
+
+        if (AnnotationEditorSaveButton is not null)
+        {
+            bool requiresNonEmptyText = _annotEditorMode == AnnotationEditorMode.CreateFreeText;
+            string currentText = AnnotationEditorTextBox?.Text ?? string.Empty;
+            AnnotationEditorSaveButton.IsEnabled = !requiresNonEmptyText || !string.IsNullOrWhiteSpace(currentText);
+        }
+    }
+
+    private void UpdateSwatchSelection(Button? btn, PdfAnnotationColor preset)
+    {
+        if (btn is null)
+        {
+            return;
+        }
+
+        bool isSelected = Math.Abs(btn.Background is SolidColorBrush ? _annotEditorSelectedColor.R - preset.R : 255) < 12 &&
+                          Math.Abs(_annotEditorSelectedColor.G - preset.G) < 12 &&
+                          Math.Abs(_annotEditorSelectedColor.B - preset.B) < 12;
+
+        if (isSelected)
+        {
+            btn.BorderThickness = new Thickness(2.5);
+            btn.BorderBrush = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"];
+        }
+        else
+        {
+            btn.BorderThickness = new Thickness(1);
+            btn.BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
+        }
+    }
+
+    private void OnAnnotationEditorTextBoxTextChanged(object sender, TextChangedEventArgs e)
+    {
+        UpdateAnnotationEditorUiState();
+    }
+
+    private void OnAnnotationColorSwatchClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe)
+        {
+            _annotEditorSelectedColor = ParseAnnotationColorTag(fe.Tag as string, _annotEditorSelectedColor);
+            if (ViewModel.CurrentDocument is not null)
+            {
+                ViewModel.CurrentDocument.ActiveAnnotationColor = _annotEditorSelectedColor;
+            }
+
+            UpdateAnnotationEditorUiState();
+        }
+    }
+
+    private async void OnAnnotationEditorSaveClick(object sender, RoutedEventArgs e)
+    {
+        DocumentViewModel? doc = ViewModel.CurrentDocument;
+        if (doc is null)
+        {
+            AnnotationEditorFlyout?.Hide();
+            return;
+        }
+
+        string contents = (AnnotationEditorTextBox?.Text ?? string.Empty).Trim();
+        doc.ActiveAnnotationColor = _annotEditorSelectedColor;
+
+        AnnotationEditorMode mode = _annotEditorMode;
+        int pageIndex = _annotEditorPageIndex;
+        int annotIndex = _annotEditorAnnotIndex;
+        Vector2 pdfPt = _annotEditorPdfPt;
+        PdfTextSelection? pendingSel = _annotEditorPendingSelection;
+        PdfAnnotationSubtype markupSubtype = _annotEditorPendingMarkupSubtype;
+        PdfAnnotationColor color = _annotEditorSelectedColor;
+        bool canEditColor = _annotEditorCanEditColor;
+
+        AnnotationEditorFlyout?.Hide();
+
+        switch (mode)
+        {
+            case AnnotationEditorMode.CreateNote:
+                await doc.AddTextNoteAsync(pageIndex, pdfPt.X, pdfPt.Y, color, contents);
+                break;
+
+            case AnnotationEditorMode.CreateFreeText:
+                if (!string.IsNullOrWhiteSpace(contents))
+                {
+                    await doc.AddFreeTextAsync(pageIndex, pdfPt.X, pdfPt.Y, color, contents);
+                }
+
+                break;
+
+            case AnnotationEditorMode.CreateMarkupWithComment:
+                if (pendingSel is { HasContent: true })
+                {
+                    await doc.AddMarkupForSelectionAsync(pendingSel, markupSubtype, color, contents);
+                }
+
+                break;
+
+            case AnnotationEditorMode.EditExisting:
+                if (pageIndex >= 0 && annotIndex >= 0)
+                {
+                    await doc.UpdateAnnotationAsync(pageIndex, annotIndex, contents, canEditColor ? color : null);
+                }
+
+                break;
+        }
+
+        ReturnFocusToViewer();
+    }
+
+    private async void OnAnnotationEditorDeleteClick(object sender, RoutedEventArgs e)
+    {
+        DocumentViewModel? doc = ViewModel.CurrentDocument;
+        int pageIndex = _annotEditorPageIndex;
+        int annotIndex = _annotEditorAnnotIndex;
+        AnnotationEditorFlyout?.Hide();
+
+        if (doc is not null && pageIndex >= 0 && annotIndex >= 0)
+        {
+            await doc.DeleteAnnotationAsync(pageIndex, annotIndex);
+        }
+
+        ReturnFocusToViewer();
+    }
+
+    private void OnAnnotationEditorCloseClick(object sender, RoutedEventArgs e)
+    {
+        AnnotationEditorFlyout?.Hide();
+        ReturnFocusToViewer();
+    }
+
+    private void OnAnnotationEditorFlyoutClosed(object? sender, object e)
+    {
+        _annotEditorPendingSelection = null;
+    }
+
+    private void HideAnnotationPopupsImmediate()
+    {
+        HideTouchSelectionFlyout();
+
+        try
+        {
+            if (TouchEmptyHoldCommandBarFlyout?.IsOpen == true)
+            {
+                TouchEmptyHoldCommandBarFlyout.Hide();
+            }
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _isTouchEmptyHoldFlyoutOpen = false;
+        }
+
+        try
+        {
+            if (AnnotationEditorFlyout?.IsOpen == true)
+            {
+                AnnotationEditorFlyout.Hide();
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static string GetSubtypeResourceKey(PdfAnnotationSubtype subtype) => subtype switch
+    {
+        PdfAnnotationSubtype.Highlight => ResourceKeys.AnnotSubtypeHighlight,
+        PdfAnnotationSubtype.Underline => ResourceKeys.AnnotSubtypeUnderline,
+        PdfAnnotationSubtype.Squiggly => ResourceKeys.AnnotSubtypeSquiggly,
+        PdfAnnotationSubtype.StrikeOut => ResourceKeys.AnnotSubtypeStrikeOut,
+        PdfAnnotationSubtype.Text => ResourceKeys.AnnotSubtypeText,
+        PdfAnnotationSubtype.FreeText => ResourceKeys.AnnotSubtypeFreeText,
+        PdfAnnotationSubtype.Ink => ResourceKeys.AnnotSubtypeInk,
+        PdfAnnotationSubtype.Square => ResourceKeys.AnnotSubtypeSquare,
+        PdfAnnotationSubtype.Circle => ResourceKeys.AnnotSubtypeCircle,
+        PdfAnnotationSubtype.Line => ResourceKeys.AnnotSubtypeLine,
+        PdfAnnotationSubtype.Polygon => ResourceKeys.AnnotSubtypePolygon,
+        PdfAnnotationSubtype.PolyLine => ResourceKeys.AnnotSubtypePolyLine,
+        PdfAnnotationSubtype.Stamp => ResourceKeys.AnnotSubtypeStamp,
+        PdfAnnotationSubtype.Caret => ResourceKeys.AnnotSubtypeCaret,
+        PdfAnnotationSubtype.FileAttachment => ResourceKeys.AnnotSubtypeFileAttachment,
+        PdfAnnotationSubtype.Redact => ResourceKeys.AnnotSubtypeRedact,
+        PdfAnnotationSubtype.Widget => ResourceKeys.AnnotSubtypeSignature,
+        _ => ResourceKeys.AnnotSubtypeOther,
+    };
+
+    private static string BuildAnnotationMetadataLine(PdfAnnotationInfo annot)
+    {
+        string dateText = annot.ModifiedDate is { } dt
+            ? dt.ToLocalTime().ToString("g", System.Globalization.CultureInfo.CurrentCulture)
+            : string.Empty;
+
+        if (!string.IsNullOrWhiteSpace(annot.Author) && !string.IsNullOrWhiteSpace(dateText))
+        {
+            return $"{annot.Author} • {dateText}";
+        }
+
+        if (!string.IsNullOrWhiteSpace(annot.Author))
+        {
+            return annot.Author;
+        }
+
+        return dateText;
     }
 
     private void OnTouchScrollScrubberRightTapped(object sender, RightTappedRoutedEventArgs e)
@@ -5484,6 +6657,24 @@ public sealed partial class DocumentView : Page
         if (!_isDraggingSelectionHandle)
         {
             HideTouchSelectionFlyout();
+        }
+
+        if (_isTouchEmptyHoldFlyoutOpen)
+        {
+            try
+            {
+                if (TouchEmptyHoldCommandBarFlyout?.IsOpen == true)
+                {
+                    TouchEmptyHoldCommandBarFlyout.Hide();
+                }
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _isTouchEmptyHoldFlyoutOpen = false;
+            }
         }
     }
 
@@ -6710,6 +7901,18 @@ public sealed partial class DocumentView : Page
             if (updated is { HasContent: true })
             {
                 doc.SetSelection(updated);
+            }
+
+            if (!showTouchFlyout &&
+                ViewModel.ActiveTool == AnnotationTool.Highlighter &&
+                finalSel is { HasContent: true })
+            {
+                _ = doc.AddMarkupForSelectionAsync(
+                    finalSel,
+                    PdfAnnotationSubtype.Highlight,
+                    doc.ActiveAnnotationColor);
+                ReturnFocusToViewer();
+                return;
             }
 
             if (showTouchFlyout && finalSel is { HasContent: true })

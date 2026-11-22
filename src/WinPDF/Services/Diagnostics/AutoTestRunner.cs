@@ -511,7 +511,181 @@ public static partial class AutoTestRunner
         s_steps.Add(new StepResult("Phase 12: Final Reclamation", true, $"Final Memory: {finalReclaimedMem}", finalReclaimedMem));
         LogLive($"[AUTOTEST] Phase 12 PASS: Final Memory = {finalReclaimedMem}");
 
-        return true;
+        // Phase 13: Text Annotations, Comments, FreeText Rendering & Digital Signature Inspection
+        LogLive("[AUTOTEST] Phase 13: Testing annotations CRUD, FreeText rendering, in-place save, and signature API...");
+        string tempAnnotPdf = Path.Combine(Path.GetTempPath(), $"winpdf-autotest-annot-{Guid.NewGuid():N}.pdf");
+        long tempDocId = -1;
+        bool annotPass = false;
+        string annotDetails = string.Empty;
+
+        try
+        {
+            File.Copy(testPath, tempAnnotPdf, overwrite: true);
+            PdfDocumentInfo openedAnnotDoc = await pdfService.OpenDocumentAsync(tempAnnotPdf);
+            tempDocId = openedAnnotDoc.DocumentId;
+
+            IReadOnlyList<PdfSignatureInfo> sigs = await pdfService.GetDocumentSignaturesAsync(tempDocId, tempAnnotPdf);
+
+            PdfPageAnnotationMutationResult highlightRes = await pdfService.AddMarkupAnnotationAsync(
+                tempDocId,
+                new PdfCreateMarkupRequest(
+                    PageIndex: 0,
+                    Subtype: PdfAnnotationSubtype.Highlight,
+                    Rects: [new PdfRect(72f, 690f, 240f, 708f)],
+                    Color: PdfAnnotationColor.Yellow,
+                    Contents: "AutoTest Highlight Comment",
+                    Author: "WinPDF AutoTest"));
+
+            PdfPageAnnotationMutationResult noteRes = await pdfService.AddTextNoteAnnotationAsync(
+                tempDocId,
+                new PdfCreateNoteRequest(
+                    PageIndex: 0,
+                    PdfX: 120.0,
+                    PdfY: 620.0,
+                    Color: PdfAnnotationColor.Blue,
+                    Contents: "AutoTest Sticky Note",
+                    Author: "WinPDF AutoTest"));
+
+            PdfPageAnnotationMutationResult freeTextRes = await pdfService.AddFreeTextAnnotationAsync(
+                tempDocId,
+                new PdfCreateFreeTextRequest(
+                    PageIndex: 0,
+                    PdfX: 140.0,
+                    PdfY: 520.0,
+                    Color: PdfAnnotationColor.Orange,
+                    Contents: "AutoTest FreeText Box",
+                    Author: "WinPDF AutoTest"));
+
+            int nonWhitePixels = 0;
+            int darkTextPixels = 0;
+            PdfAnnotationInfo? createdFreeText = freeTextRes.Annotations.FirstOrDefault(a => a.Subtype == PdfAnnotationSubtype.FreeText);
+            if (createdFreeText is not null && openedAnnotDoc.Pages.Count > 0)
+            {
+                PdfPageInfo p0 = openedAnnotDoc.Pages[0];
+                PdfRenderRequest renderReq = PdfRenderRequest.ForFullPage(tempDocId, p0, 1.0, 1.0, 0, PdfRenderFlags.Annotations);
+                using PdfBitmapLease rendered = await pdfService.RenderAsync(renderReq, PdfJobPriority.Visible);
+
+                WinPDF.Rendering.PageCoordinateTransform transform = WinPDF.Rendering.PageCoordinateTransform.FromPage(p0, 0);
+                Windows.Foundation.Rect dipRect = transform.ToPageRect(createdFreeText.Bounds);
+                bool swap = WinPDF.Rendering.PageCoordinateTransform.NormalizeRotation(p0.Rotation) is 90 or 270;
+                double dispWidthDip = (swap ? p0.HeightPt : p0.WidthPt) * WinPDF.Rendering.PageCoordinateTransform.DipsPerPoint;
+                double dispHeightDip = (swap ? p0.WidthPt : p0.HeightPt) * WinPDF.Rendering.PageCoordinateTransform.DipsPerPoint;
+                double scaleX = rendered.Width / Math.Max(1.0, dispWidthDip);
+                double scaleY = rendered.Height / Math.Max(1.0, dispHeightDip);
+
+                int x0 = Math.Clamp((int)Math.Floor(dipRect.Left * scaleX) + 3, 0, rendered.Width - 1);
+                int x1 = Math.Clamp((int)Math.Ceiling(dipRect.Right * scaleX) - 3, 0, rendered.Width - 1);
+                int y0 = Math.Clamp((int)Math.Floor(dipRect.Top * scaleY) + 3, 0, rendered.Height - 1);
+                int y1 = Math.Clamp((int)Math.Ceiling(dipRect.Bottom * scaleY) - 3, 0, rendered.Height - 1);
+
+                for (int y = y0; y <= y1; y++)
+                {
+                    int rowOffset = y * rendered.Stride;
+                    for (int x = x0; x <= x1; x++)
+                    {
+                        int px = rowOffset + (x * 4);
+                        byte b = Marshal.ReadByte(rendered.Scan0, px);
+                        byte g = Marshal.ReadByte(rendered.Scan0, px + 1);
+                        byte r = Marshal.ReadByte(rendered.Scan0, px + 2);
+                        if (b < 252 || g < 252 || r < 252)
+                        {
+                            nonWhitePixels++;
+                        }
+
+                        if (r < 90 && g < 90 && b < 90)
+                        {
+                            darkTextPixels++;
+                        }
+                    }
+                }
+            }
+
+            _ = await pdfService.UpdateAnnotationAsync(
+                tempDocId,
+                new PdfUpdateAnnotationRequest(
+                    PageIndex: 0,
+                    AnnotIndex: highlightRes.TargetAnnotIndex,
+                    Contents: "Updated Comment",
+                    NewColor: PdfAnnotationColor.Green));
+
+            await pdfService.SaveDocumentAsync(
+                tempDocId,
+                tempAnnotPdf,
+                new PdfSaveOptions(UserRotationDegrees: 0, PageEditCommitters: null, SaveFlags: 0u));
+
+            await pdfService.CloseDocumentAsync(tempDocId);
+            tempDocId = -1;
+
+            PdfDocumentInfo reopened = await pdfService.OpenDocumentAsync(tempAnnotPdf);
+            tempDocId = reopened.DocumentId;
+            IReadOnlyList<PdfAnnotationInfo> loadedAnnots = await pdfService.GetDocumentAnnotationsAsync(tempDocId);
+
+            PdfAnnotationInfo? persistedHighlight = loadedAnnots.FirstOrDefault(a => a.Subtype == PdfAnnotationSubtype.Highlight && a.Contents == "Updated Comment");
+            PdfAnnotationInfo? persistedNote = loadedAnnots.FirstOrDefault(a => a.Subtype == PdfAnnotationSubtype.Text && a.Contents == "AutoTest Sticky Note");
+            PdfAnnotationInfo? persistedFreeText = loadedAnnots.FirstOrDefault(a => a.Subtype == PdfAnnotationSubtype.FreeText && a.Contents == "AutoTest FreeText Box");
+
+            bool colorUpdated = persistedHighlight is not null &&
+                                persistedHighlight.Color.R == PdfAnnotationColor.Green.R &&
+                                persistedHighlight.Color.G == PdfAnnotationColor.Green.G &&
+                                persistedHighlight.Color.B == PdfAnnotationColor.Green.B;
+
+            int beforeDeletePage0 = loadedAnnots.Count(a => a.PageIndex == 0);
+            int afterDeleteCount = beforeDeletePage0;
+            if (persistedNote is not null)
+            {
+                IReadOnlyList<PdfAnnotationInfo> afterDelete = await pdfService.DeleteAnnotationAsync(tempDocId, 0, persistedNote.AnnotIndex);
+                afterDeleteCount = afterDelete.Count;
+            }
+
+            await pdfService.SaveDocumentAsync(
+                tempDocId,
+                tempAnnotPdf,
+                new PdfSaveOptions(UserRotationDegrees: 0, PageEditCommitters: null, SaveFlags: 0u));
+
+            await pdfService.CloseDocumentAsync(tempDocId);
+            tempDocId = -1;
+
+            annotPass = persistedHighlight is not null &&
+                        persistedNote is not null &&
+                        persistedFreeText is not null &&
+                        colorUpdated &&
+                        nonWhitePixels > 20 &&
+                        darkTextPixels > 5 &&
+                        afterDeleteCount == beforeDeletePage0 - 1;
+
+            annotDetails =
+                $"Sigs={sigs.Count}, Persisted={loadedAnnots.Count}, ColorOk={colorUpdated}, " +
+                $"FreeTextNonWhitePx={nonWhitePixels}, FreeTextDarkTextPx={darkTextPixels}, " +
+                $"Page0BeforeDel={beforeDeletePage0}, AfterDel={afterDeleteCount}";
+        }
+        catch (Exception ex)
+        {
+            annotPass = false;
+            annotDetails = $"Exception: {ex.Message}";
+        }
+        finally
+        {
+            if (tempDocId > 0)
+            {
+                try { await pdfService.CloseDocumentAsync(tempDocId); } catch { }
+            }
+
+            try
+            {
+                if (File.Exists(tempAnnotPdf))
+                {
+                    File.Delete(tempAnnotPdf);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        s_steps.Add(new StepResult("Phase 13: Annotations & Signatures", annotPass, annotDetails, MemoryMetrics.Capture()));
+        LogLive($"[AUTOTEST] Phase 13 {(annotPass ? "PASS" : "FAIL")}: {annotDetails}");
+
+        return annotPass;
     }
 
     private static ScrollViewer? GetContinuousScrollViewer(MainWindow window)

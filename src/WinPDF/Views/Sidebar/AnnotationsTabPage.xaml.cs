@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 using WinPDF.ViewModels;
@@ -31,6 +32,31 @@ public sealed partial class AnnotationsTabPage : Page
         if (e.Parameter is ShellViewModel vm)
         {
             ViewModel = vm;
+        }
+    }
+
+    private void OnSignatureItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is SignatureItemViewModel item)
+        {
+            ViewModel.CurrentDocument?.RequestInspectSignature(item.Info);
+        }
+    }
+
+    private void OnAnnotationItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is AnnotationItemViewModel item)
+        {
+            ViewModel.CurrentDocument?.RequestFocusAnnotation(item.Info);
+        }
+    }
+
+    private void OnDeleteAnnotationClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: AnnotationItemViewModel item } &&
+            ViewModel.CurrentDocument is { } doc)
+        {
+            _ = doc.DeleteAnnotationAsync(item.PageIndex, item.AnnotIndex);
         }
     }
 }

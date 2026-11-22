@@ -130,3 +130,23 @@ internal sealed class PdfiumPageLinkHandle : SafeHandleZeroOrMinusOneIsInvalid
         return true;
     }
 }
+
+/// <summary>
+/// Owns an <c>FPDF_ANNOTATION</c> returned by <c>FPDFPage_GetAnnot</c>, <c>FPDFPage_CreateAnnot</c>, or
+/// <c>FPDFAnnot_GetLinkedAnnot</c>. Must be closed strictly before its owning <see cref="PdfiumPageHandle"/>.
+/// </summary>
+internal sealed class PdfiumAnnotationHandle : SafeHandleZeroOrMinusOneIsInvalid
+{
+    /// <summary>Initializes a new, invalid handle (required by the LibraryImport marshaller).</summary>
+    public PdfiumAnnotationHandle()
+        : base(ownsHandle: true)
+    {
+    }
+
+    /// <inheritdoc/>
+    protected override bool ReleaseHandle()
+    {
+        PdfiumNative.FPDFPage_CloseAnnot(handle);
+        return true;
+    }
+}

@@ -13,6 +13,164 @@
     KeyboardAcceleratorPlacementMode="Hidden"
     mc:Ignorable="d">
 
+    <Page.Resources>
+        <CommandBarFlyout
+            x:Name="TouchEmptyHoldCommandBarFlyout"
+            AlwaysExpanded="True"
+            Placement="Top"
+            Closed="OnTouchEmptyHoldFlyoutClosed">
+            <CommandBarFlyout.PrimaryCommands>
+                <AppBarButton
+                    x:Name="TouchEmptyAddCommentButton"
+                    IsCompact="False"
+                    MinWidth="72"
+                    Click="OnTouchEmptyAddCommentClick">
+                    <AppBarButton.Icon>
+                        <FontIcon Glyph="&#xE90A;" FontSize="15" />
+                    </AppBarButton.Icon>
+                </AppBarButton>
+                <AppBarButton
+                    x:Name="TouchEmptyAddTextBoxButton"
+                    IsCompact="False"
+                    MinWidth="76"
+                    Click="OnTouchEmptyAddTextBoxClick">
+                    <AppBarButton.Icon>
+                        <FontIcon Glyph="&#xE8D2;" FontSize="15" />
+                    </AppBarButton.Icon>
+                </AppBarButton>
+            </CommandBarFlyout.PrimaryCommands>
+        </CommandBarFlyout>
+
+        <Flyout
+            x:Name="AnnotationEditorFlyout"
+            Placement="BottomEdgeAlignedLeft"
+            ShouldConstrainToRootBounds="True"
+            Closed="OnAnnotationEditorFlyoutClosed">
+            <StackPanel Width="320" Spacing="10">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <StackPanel Spacing="2" VerticalAlignment="Center">
+                        <TextBlock
+                            x:Name="AnnotationEditorTitleText"
+                            Style="{StaticResource BodyStrongTextBlockStyle}"
+                            TextTrimming="CharacterEllipsis" />
+                        <TextBlock
+                            x:Name="AnnotationEditorMetaText"
+                            Style="{StaticResource CaptionTextBlockStyle}"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                            TextTrimming="CharacterEllipsis"
+                            Visibility="Collapsed" />
+                    </StackPanel>
+                    <Button
+                        Grid.Column="1"
+                        Width="28"
+                        Height="28"
+                        Padding="0"
+                        CornerRadius="4"
+                        Style="{StaticResource SubtleButtonStyle}"
+                        Click="OnAnnotationEditorCloseClick">
+                        <FontIcon FontSize="11" Glyph="&#xE711;" />
+                    </Button>
+                </Grid>
+
+                <Border
+                    x:Name="AnnotationEditorQuoteBorder"
+                    Padding="8,6"
+                    CornerRadius="4"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    Visibility="Collapsed">
+                    <TextBlock
+                        x:Name="AnnotationEditorQuoteText"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        MaxLines="3"
+                        TextWrapping="Wrap"
+                        TextTrimming="CharacterEllipsis" />
+                </Border>
+
+                <StackPanel
+                    x:Name="AnnotationEditorColorRow"
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <Button
+                        x:Name="AnnotColorYellowButton"
+                        Width="24"
+                        Height="24"
+                        Padding="0"
+                        CornerRadius="12"
+                        Background="#FFFFDF40"
+                        BorderThickness="2"
+                        Tag="Yellow"
+                        Click="OnAnnotationColorSwatchClick" />
+                    <Button
+                        x:Name="AnnotColorGreenButton"
+                        Width="24"
+                        Height="24"
+                        Padding="0"
+                        CornerRadius="12"
+                        Background="#FF64DC78"
+                        BorderThickness="2"
+                        Tag="Green"
+                        Click="OnAnnotationColorSwatchClick" />
+                    <Button
+                        x:Name="AnnotColorBlueButton"
+                        Width="24"
+                        Height="24"
+                        Padding="0"
+                        CornerRadius="12"
+                        Background="#FF5AB4FF"
+                        BorderThickness="2"
+                        Tag="Blue"
+                        Click="OnAnnotationColorSwatchClick" />
+                    <Button
+                        x:Name="AnnotColorPinkButton"
+                        Width="24"
+                        Height="24"
+                        Padding="0"
+                        CornerRadius="12"
+                        Background="#FFFF80B4"
+                        BorderThickness="2"
+                        Tag="Pink"
+                        Click="OnAnnotationColorSwatchClick" />
+                    <Button
+                        x:Name="AnnotColorOrangeButton"
+                        Width="24"
+                        Height="24"
+                        Padding="0"
+                        CornerRadius="12"
+                        Background="#FFFFA53C"
+                        BorderThickness="2"
+                        Tag="Orange"
+                        Click="OnAnnotationColorSwatchClick" />
+                </StackPanel>
+
+                <TextBox
+                    x:Name="AnnotationEditorTextBox"
+                    AcceptsReturn="True"
+                    TextWrapping="Wrap"
+                    MinHeight="84"
+                    MaxHeight="180" />
+
+                <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="8">
+                    <Button
+                        x:Name="AnnotationEditorDeleteButton"
+                        Click="OnAnnotationEditorDeleteClick"
+                        Visibility="Collapsed" />
+                    <Button
+                        x:Name="AnnotationEditorCancelButton"
+                        Grid.Column="2"
+                        Click="OnAnnotationEditorCloseClick" />
+                    <Button
+                        x:Name="AnnotationEditorSaveButton"
+                        Grid.Column="3"
+                        Style="{StaticResource AccentButtonStyle}"
+                        Click="OnAnnotationEditorSaveClick" />
+                </Grid>
+            </StackPanel>
+        </Flyout>
+    </Page.Resources>
+
     <Page.KeyboardAccelerators>
         <KeyboardAccelerator Key="Escape" Invoked="OnEscapeAcceleratorInvoked" />
     </Page.KeyboardAccelerators>
@@ -98,7 +256,7 @@
                 <FlyoutBase.AttachedFlyout>
                     <CommandBarFlyout
                         x:Name="TouchSelectionCommandBarFlyout"
-                        AlwaysExpanded="True"
+                        AlwaysExpanded="False"
                         Placement="Top"
                         Closed="OnTouchSelectionFlyoutClosed">
                         <CommandBarFlyout.PrimaryCommands>
@@ -111,11 +269,76 @@
                                     <FontIcon Glyph="&#xE8C8;" FontSize="15" />
                                 </AppBarButton.Icon>
                             </AppBarButton>
+                            <AppBarButton
+                                x:Name="TouchSelectionHighlightButton"
+                                Width="40"
+                                Height="36"
+                                Click="OnTouchSelectionHighlightButtonClick">
+                                <AppBarButton.Icon>
+                                    <FontIcon Glyph="&#xE7E6;" FontSize="15" />
+                                </AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarButton
+                                x:Name="TouchSelectionCommentButton"
+                                Width="40"
+                                Height="36"
+                                Click="OnTouchSelectionCommentButtonClick">
+                                <AppBarButton.Icon>
+                                    <FontIcon Glyph="&#xE90A;" FontSize="15" />
+                                </AppBarButton.Icon>
+                            </AppBarButton>
                         </CommandBarFlyout.PrimaryCommands>
+                        <CommandBarFlyout.SecondaryCommands>
+                            <AppBarButton
+                                x:Name="TouchSelectionUnderlineButton"
+                                Tag="Underline"
+                                Click="OnTouchSelectionSubtypeClick">
+                                <AppBarButton.Icon>
+                                    <FontIcon Glyph="&#xE8DC;" />
+                                </AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarButton
+                                x:Name="TouchSelectionStrikeOutButton"
+                                Tag="StrikeOut"
+                                Click="OnTouchSelectionSubtypeClick">
+                                <AppBarButton.Icon>
+                                    <FontIcon Glyph="&#xEDE0;" />
+                                </AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarButton
+                                x:Name="TouchSelectionSquigglyButton"
+                                Tag="Squiggly"
+                                Click="OnTouchSelectionSubtypeClick">
+                                <AppBarButton.Icon>
+                                    <FontIcon Glyph="&#xE8D3;" />
+                                </AppBarButton.Icon>
+                            </AppBarButton>
+                            <AppBarSeparator />
+                            <AppBarButton
+                                x:Name="TouchSelectionColorYellowButton"
+                                Tag="Yellow"
+                                Click="OnTouchSelectionColorClick" />
+                            <AppBarButton
+                                x:Name="TouchSelectionColorGreenButton"
+                                Tag="Green"
+                                Click="OnTouchSelectionColorClick" />
+                            <AppBarButton
+                                x:Name="TouchSelectionColorBlueButton"
+                                Tag="Blue"
+                                Click="OnTouchSelectionColorClick" />
+                            <AppBarButton
+                                x:Name="TouchSelectionColorPinkButton"
+                                Tag="Pink"
+                                Click="OnTouchSelectionColorClick" />
+                            <AppBarButton
+                                x:Name="TouchSelectionColorOrangeButton"
+                                Tag="Orange"
+                                Click="OnTouchSelectionColorClick" />
+                        </CommandBarFlyout.SecondaryCommands>
                     </CommandBarFlyout>
                 </FlyoutBase.AttachedFlyout>
                 <Grid.ContextFlyout>
-                    <MenuFlyout>
+                    <MenuFlyout x:Name="DocumentContextMenuFlyout">
                         <MenuFlyoutItem
                             x:Name="ContextCopyMenuItem"
                             x:Uid="Context_Copy"
@@ -124,6 +347,118 @@
                             KeyboardAcceleratorTextOverride="Ctrl+C">
                             <MenuFlyoutItem.Icon>
                                 <FontIcon Glyph="&#xE8C8;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutItem
+                            x:Name="ContextHighlightMenuItem"
+                            x:Uid="Context_Highlight"
+                            Click="OnContextHighlightClick"
+                            Visibility="Collapsed">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE7E6;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutItem
+                            x:Name="ContextHighlightWithCommentMenuItem"
+                            x:Uid="Context_HighlightWithComment"
+                            Click="OnContextHighlightWithCommentClick"
+                            Visibility="Collapsed">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE90A;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutSubItem
+                            x:Name="ContextMarkupSubMenu"
+                            x:Uid="Context_MarkupSubMenu"
+                            Visibility="Collapsed">
+                            <MenuFlyoutSubItem.Icon>
+                                <FontIcon Glyph="&#xE8D2;" />
+                            </MenuFlyoutSubItem.Icon>
+                            <MenuFlyoutItem
+                                x:Uid="Context_Underline"
+                                Tag="Underline"
+                                Click="OnContextMarkupSubtypeClick" />
+                            <MenuFlyoutItem
+                                x:Uid="Context_StrikeOut"
+                                Tag="StrikeOut"
+                                Click="OnContextMarkupSubtypeClick" />
+                            <MenuFlyoutItem
+                                x:Uid="Context_Squiggly"
+                                Tag="Squiggly"
+                                Click="OnContextMarkupSubtypeClick" />
+                            <MenuFlyoutSeparator />
+                            <MenuFlyoutItem
+                                x:Name="ContextColorYellowItem"
+                                Tag="Yellow"
+                                Click="OnContextColorHighlightClick" />
+                            <MenuFlyoutItem
+                                x:Name="ContextColorGreenItem"
+                                Tag="Green"
+                                Click="OnContextColorHighlightClick" />
+                            <MenuFlyoutItem
+                                x:Name="ContextColorBlueItem"
+                                Tag="Blue"
+                                Click="OnContextColorHighlightClick" />
+                            <MenuFlyoutItem
+                                x:Name="ContextColorPinkItem"
+                                Tag="Pink"
+                                Click="OnContextColorHighlightClick" />
+                            <MenuFlyoutItem
+                                x:Name="ContextColorOrangeItem"
+                                Tag="Orange"
+                                Click="OnContextColorHighlightClick" />
+                        </MenuFlyoutSubItem>
+
+                        <MenuFlyoutSeparator x:Name="ContextAnnotSeparator" />
+
+                        <MenuFlyoutItem
+                            x:Name="ContextInspectSignatureMenuItem"
+                            x:Uid="Context_InspectSignature"
+                            Click="OnContextInspectSignatureClick"
+                            Visibility="Collapsed">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE8D7;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutItem
+                            x:Name="ContextEditAnnotationMenuItem"
+                            x:Uid="Context_EditAnnotation"
+                            Click="OnContextEditAnnotationClick"
+                            Visibility="Collapsed">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE70F;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutItem
+                            x:Name="ContextDeleteAnnotationMenuItem"
+                            x:Uid="Context_DeleteAnnotation"
+                            Click="OnContextDeleteAnnotationClick"
+                            Visibility="Collapsed">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE74D;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutItem
+                            x:Name="ContextAddCommentMenuItem"
+                            x:Uid="Context_AddComment"
+                            Click="OnContextAddCommentClick">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE90A;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutItem
+                            x:Name="ContextAddTextBoxMenuItem"
+                            x:Uid="Context_AddTextBox"
+                            Click="OnContextAddTextBoxClick">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE8D2;" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
 
@@ -227,11 +562,20 @@
                         <MenuFlyoutSeparator />
 
                         <MenuFlyoutItem
-                            x:Uid="Context_SaveAs"
-                            Command="{x:Bind ViewModel.SaveAsCommand}"
+                            x:Uid="Context_Save"
+                            Command="{x:Bind ViewModel.SaveCommand}"
                             KeyboardAcceleratorTextOverride="Ctrl+S">
                             <MenuFlyoutItem.Icon>
                                 <FontIcon Glyph="&#xE74E;" />
+                            </MenuFlyoutItem.Icon>
+                        </MenuFlyoutItem>
+
+                        <MenuFlyoutItem
+                            x:Uid="Context_SaveAs"
+                            Command="{x:Bind ViewModel.SaveAsCommand}"
+                            KeyboardAcceleratorTextOverride="Ctrl+Shift+S">
+                            <MenuFlyoutItem.Icon>
+                                <FontIcon Glyph="&#xE792;" />
                             </MenuFlyoutItem.Icon>
                         </MenuFlyoutItem>
 
@@ -723,6 +1067,31 @@
                     <StackPanel.RenderTransform>
                         <CompositeTransform x:Name="FloatingTopTransform" />
                     </StackPanel.RenderTransform>
+
+                    <!-- Floating digital signature status banner (dismissible per document) -->
+                    <InfoBar
+                        x:Name="SignatureInfoBar"
+                        Severity="Informational"
+                        IsOpen="False"
+                        IsIconVisible="True"
+                        IsClosable="True"
+                        HorizontalAlignment="Center"
+                        MaxWidth="640"
+                        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        CloseButtonClick="OnSignatureBannerCloseButtonClick">
+                        <InfoBar.Resources>
+                            <StaticResource x:Key="InfoBarInformationalSeverityBackgroundBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
+                            <StaticResource x:Key="InfoBarBackgroundFillColorDefaultBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
+                        </InfoBar.Resources>
+                        <InfoBar.ActionButton>
+                            <Button
+                                x:Name="SignatureBannerViewButton"
+                                Click="OnSignatureBannerViewClick" />
+                        </InfoBar.ActionButton>
+                    </InfoBar>
 
                     <!-- Native Informational InfoBar for unimplemented annotation feature (closes only via X button) -->
                     <InfoBar

@@ -106,6 +106,8 @@ public sealed partial class MainWindow : Window
     private bool _suppressSidebarAnimation;
     private bool _isSidebarOpenCloseAnimating;
     private int _previousSidebarIndex = -1;
+    private bool _isClosingConfirmed;
+    private bool _isPromptingUnsavedClose;
     private IntPtr _hwnd;
     private SubclassProc? _subclassDelegate;
     private IntPtr _subclassPtr;
@@ -496,6 +498,7 @@ public sealed partial class MainWindow : Window
         SelectSidebarTab(ViewModel.SidebarTab);
 
         AppWindow.Changed += OnAppWindowChanged;
+        AppWindow.Closing += OnAppWindowClosing;
 
         // Position and size the window while it is still hidden (before Activate() is called)
         // so it never flashes at the default Win32 cascade position before centering.
@@ -1653,6 +1656,35 @@ public sealed partial class MainWindow : Window
         Storyboard.SetTarget(anim, target);
         Storyboard.SetTargetProperty(anim, property);
         sb.Children.Add(anim);
+    }
+
+    private async void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (_isClosingConfirmed || ViewModel.CurrentDocument is not { HasUnsavedChanges: true })
+        {
+            return;
+        }
+
+        args.Cancel = true;
+        if (_isPromptingUnsavedClose)
+        {
+            return;
+        }
+
+        _isPromptingUnsavedClose = true;
+        try
+        {
+            bool canClose = await ViewModel.ConfirmUnsavedChangesIfNeededAsync();
+            if (canClose)
+            {
+                _isClosingConfirmed = true;
+                Close();
+            }
+        }
+        finally
+        {
+            _isPromptingUnsavedClose = false;
+        }
     }
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)

@@ -353,4 +353,101 @@ public interface IPdfService : IDisposable
     /// </returns>
     /// <exception cref="OperationCanceledException">The job was cancelled or the document was closed.</exception>
     Task<PdfBitmapLease> RenderAsync(PdfRenderRequest request, PdfJobPriority priority, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reads and verifies all digital signatures embedded in the document on the dedicated PDFium thread.
+    /// Returns immediately with an empty list when the document contains no signatures.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="filePath">Path to the PDF file on disk used to hash signed byte ranges.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The verified digital signatures in document order.</returns>
+    Task<IReadOnlyList<PdfSignatureInfo>> GetDocumentSignaturesAsync(
+        long documentId,
+        string filePath,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Scans all pages of the document on the dedicated PDFium thread to extract existing annotations and comments.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>Ordered list of annotations across the document.</returns>
+    Task<IReadOnlyList<PdfAnnotationInfo>> GetDocumentAnnotationsAsync(
+        long documentId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Reads all annotations present on a single page.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>Ordered list of annotations on <paramref name="pageIndex"/>.</returns>
+    Task<IReadOnlyList<PdfAnnotationInfo>> GetPageAnnotationsAsync(
+        long documentId,
+        int pageIndex,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates a text markup annotation (Highlight, Underline, StrikeOut, or Squiggly) on a page.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="request">Markup creation parameters.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The created annotation index and refreshed annotations for the page.</returns>
+    Task<PdfPageAnnotationMutationResult> AddMarkupAnnotationAsync(
+        long documentId,
+        PdfCreateMarkupRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates a sticky-note text comment annotation (<c>/Text</c>) on a page.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="request">Note creation parameters.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The created annotation index and refreshed annotations for the page.</returns>
+    Task<PdfPageAnnotationMutationResult> AddTextNoteAnnotationAsync(
+        long documentId,
+        PdfCreateNoteRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates a direct-on-page <c>/FreeText</c> text-box annotation on a page.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="request">FreeText creation parameters.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The created annotation index and refreshed annotations for the page.</returns>
+    Task<PdfPageAnnotationMutationResult> AddFreeTextAnnotationAsync(
+        long documentId,
+        PdfCreateFreeTextRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Updates the comment body and optional color of an existing annotation.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="request">Update parameters.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The updated annotation index and refreshed annotations for the page.</returns>
+    Task<PdfPageAnnotationMutationResult> UpdateAnnotationAsync(
+        long documentId,
+        PdfUpdateAnnotationRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes an annotation (and any linked popup) from a page and returns refreshed page annotations.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="annotIndex">Zero-based annotation index on <paramref name="pageIndex"/>.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>Refreshed list of annotations remaining on the page.</returns>
+    Task<IReadOnlyList<PdfAnnotationInfo>> DeleteAnnotationAsync(
+        long documentId,
+        int pageIndex,
+        int annotIndex,
+        CancellationToken cancellationToken = default);
 }

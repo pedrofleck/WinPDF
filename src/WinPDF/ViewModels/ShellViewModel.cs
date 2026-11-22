@@ -901,6 +901,11 @@ public sealed partial class ShellViewModel : ObservableObject
 
             if (CurrentDocument is { } oldDoc)
             {
+                if (!isStartupSessionRestore && !await ConfirmUnsavedChangesIfNeededAsync(cancellationToken))
+                {
+                    return;
+                }
+
                 long oldId = oldDoc.DocumentId;
                 CurrentDocument = null;
                 oldDoc.Dispose();
@@ -948,6 +953,7 @@ public sealed partial class ShellViewModel : ObservableObject
             {
                 ViewMode = targetViewMode;
                 CurrentDocument = doc;
+                _ = doc.LoadAnnotationsAndSignaturesAsync();
             }
             else
             {
@@ -955,6 +961,7 @@ public sealed partial class ShellViewModel : ObservableObject
                 {
                     ViewMode = targetViewMode;
                     CurrentDocument = doc;
+                    _ = doc.LoadAnnotationsAndSignaturesAsync();
                 });
             }
         }
@@ -1035,7 +1042,61 @@ public sealed partial class ShellViewModel : ObservableObject
     public IAsyncRelayCommand PrintDocumentCommand => PrintCommand;
 
     /// <summary>
-    /// Saves the current document (including any rotation and future annotation edits) in-place,
+    /// Prompts the user to save, discard, or cancel when the current document has unsaved annotation changes.
+    /// </summary>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns><see langword="true"/> if it is safe to proceed; <see langword="false"/> if cancelled.</returns>
+    public async Task<bool> ConfirmUnsavedChangesIfNeededAsync(CancellationToken cancellationToken = default)
+    {
+        if (CurrentDocument is not { HasUnsavedChanges: true } doc)
+        {
+            return true;
+        }
+
+        UnsavedChangesChoice choice = await _dialogService.ShowUnsavedChangesAsync(doc.FileName, cancellationToken);
+        switch (choice)
+        {
+            case UnsavedChangesChoice.Save:
+                await SaveAsync(cancellationToken);
+                return !doc.HasUnsavedChanges;
+
+            case UnsavedChangesChoice.DontSave:
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Displays the modal inspector dialog listing all embedded digital signatures on the current document.
+    /// </summary>
+    /// <param name="focused">Optional focused signature to show first.</param>
+    [RelayCommand]
+    public async Task ShowSignatureDetailsAsync(PdfSignatureInfo? focused = null)
+    {
+        if (CurrentDocument is not { Signatures.Count: > 0 } doc)
+        {
+            return;
+        }
+
+        List<PdfSignatureInfo> list = new(doc.Signatures.Count);
+        int focusIdx = 0;
+        for (int i = 0; i < doc.Signatures.Count; i++)
+        {
+            PdfSignatureInfo info = doc.Signatures[i].Info;
+            list.Add(info);
+            if (focused is not null && info.Index == focused.Index)
+            {
+                focusIdx = i;
+            }
+        }
+
+        await _dialogService.ShowSignatureDetailsAsync(list, focusIdx);
+    }
+
+    /// <summary>
+    /// Saves the current document (including any rotation and annotation edits) in-place,
     /// or prompts for a target location if the file cannot be overwritten directly.
     /// </summary>
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
@@ -1055,10 +1116,11 @@ public sealed partial class ShellViewModel : ObservableObject
 
         try
         {
+            uint saveFlags = CurrentDocument.HasSignatures ? 1u : 0u;
             PdfSaveOptions options = new(
                 UserRotationDegrees: CurrentDocument.Rotation,
                 PageEditCommitters: null,
-                SaveFlags: 0);
+                SaveFlags: saveFlags);
 
             await _pdfService.SaveDocumentAsync(
                 CurrentDocument.DocumentId,
@@ -1070,6 +1132,10 @@ public sealed partial class ShellViewModel : ObservableObject
             CurrentDocument.RefreshFileInfo();
             UpdateTitle();
             UpdateFormattedStrings();
+            if (CurrentDocument.HasSignatures)
+            {
+                _ = CurrentDocument.LoadAnnotationsAndSignaturesAsync();
+            }
 
             string savedTitle = ResourceStrings.Get(ResourceKeys.StatusSaved);
             NotificationRequested?.Invoke(savedTitle, CurrentDocument.FileName);
@@ -1088,7 +1154,7 @@ public sealed partial class ShellViewModel : ObservableObject
 
     /// <summary>
     /// Prompts the user for a destination file path via the native Windows Save Picker and writes
-    /// the PDF document (including any committed page rotations and future annotation layers) via PDFium.
+    /// the PDF document (including any committed page rotations and annotation layers) via PDFium.
     /// </summary>
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     [RelayCommand]
@@ -1107,10 +1173,11 @@ public sealed partial class ShellViewModel : ObservableObject
 
         try
         {
+            uint saveFlags = CurrentDocument.HasSignatures ? 1u : 0u;
             PdfSaveOptions options = new(
                 UserRotationDegrees: CurrentDocument.Rotation,
                 PageEditCommitters: null,
-                SaveFlags: 0);
+                SaveFlags: saveFlags);
 
             await _pdfService.SaveDocumentAsync(
                 CurrentDocument.DocumentId,
@@ -1124,6 +1191,10 @@ public sealed partial class ShellViewModel : ObservableObject
             CurrentDocument.RefreshFileInfo();
             UpdateTitle();
             UpdateFormattedStrings();
+            if (CurrentDocument.HasSignatures)
+            {
+                _ = CurrentDocument.LoadAnnotationsAndSignaturesAsync();
+            }
 
             _settingsService.Update(s =>
             {
@@ -1408,6 +1479,16 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     public void SetTool(AnnotationTool tool)
     {
+        if (tool is AnnotationTool.Pen or AnnotationTool.Eraser)
+        {
+            IsAnnotationNoticeOpen = true;
+            if (ActiveTool != AnnotationTool.Select)
+            {
+                ActiveTool = AnnotationTool.Select;
+            }
+            return;
+        }
+
         if (ActiveTool != tool)
         {
             ActiveTool = tool;
@@ -1424,13 +1505,20 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Toggles the visibility of the floating annotation tool bar and displays the not-implemented notice.
+    /// Toggles the visibility of the floating annotation tool bar.
     /// </summary>
     [RelayCommand]
     public void ToggleAnnotationToolbar()
     {
         IsAnnotationToolbarOpen = !IsAnnotationToolbarOpen;
-        IsAnnotationNoticeOpen = IsAnnotationToolbarOpen;
+        if (!IsAnnotationToolbarOpen)
+        {
+            IsAnnotationNoticeOpen = false;
+            if (ActiveTool != AnnotationTool.Select)
+            {
+                ActiveTool = AnnotationTool.Select;
+            }
+        }
     }
 
     /// <summary>
@@ -1630,12 +1718,18 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Closes the active PDF document and returns to the initial empty state screen.
+    /// Closes the active PDF document (confirming unsaved annotation edits if any) and returns to the empty state screen.
     /// </summary>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     [RelayCommand]
-    public void CloseDocument()
+    public async Task CloseDocumentAsync(CancellationToken cancellationToken = default)
     {
         if (CurrentDocument is null)
+        {
+            return;
+        }
+
+        if (!await ConfirmUnsavedChangesIfNeededAsync(cancellationToken))
         {
             return;
         }

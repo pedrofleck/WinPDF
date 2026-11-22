@@ -345,6 +345,26 @@ public sealed partial class PdfPageCanvas : Grid
     public static event Action<PdfPageCanvas>? SelectionDragCanceled;
 
     /// <summary>
+    /// Event raised when the user taps or clicks an existing annotation on the page.
+    /// </summary>
+    public static event Action<PdfPageCanvas, PdfAnnotationInfo, Point>? AnnotationClicked;
+
+    /// <summary>
+    /// Event raised when the user taps or clicks an embedded digital signature stamp/widget on the page.
+    /// </summary>
+    public static event Action<PdfPageCanvas, PdfSignatureInfo, Point>? SignatureClicked;
+
+    /// <summary>
+    /// Event raised when the user holds touch on an empty page area (no text and no annotation) for 300 ms.
+    /// </summary>
+    public static event Action<PdfPageCanvas, Vector2, Point>? TouchEmptyHoldRequested;
+
+    /// <summary>
+    /// Event raised when the user taps or clicks a page while the Text Note tool is active.
+    /// </summary>
+    public static event Action<PdfPageCanvas, Vector2, Point>? PlaceTextNoteRequested;
+
+    /// <summary>
     /// Optional callback queried to check whether the parent viewer is currently tracking a single-finger XAML manipulation.
     /// </summary>
     public static Func<bool>? IsSingleTouchViewerManipulating { get; set; }
@@ -702,6 +722,7 @@ public sealed partial class PdfPageCanvas : Grid
                     _observedDocument = doc;
                     _observedDocument.PropertyChanged += OnObservedDocumentPropertyChanged;
                     _observedDocument.PageOverlaysInvalidated += OnPageOverlaysInvalidated;
+                    _observedDocument.PageContentInvalidated += OnPageContentInvalidated;
                 }
             }
         }
@@ -716,6 +737,7 @@ public sealed partial class PdfPageCanvas : Grid
         {
             doc.PropertyChanged -= OnObservedDocumentPropertyChanged;
             doc.PageOverlaysInvalidated -= OnPageOverlaysInvalidated;
+            doc.PageContentInvalidated -= OnPageContentInvalidated;
             _observedDocument = null;
         }
     }
@@ -755,6 +777,42 @@ public sealed partial class PdfPageCanvas : Grid
         {
             InvalidateOverlays();
         }
+    }
+
+    private void OnPageContentInvalidated(int targetPageIndex)
+    {
+        if (PageInfo is not null && (targetPageIndex < 0 || targetPageIndex == PageInfo.Index))
+        {
+            InvalidatePageContent();
+        }
+    }
+
+    /// <summary>
+    /// Clears cached rendered bitmaps for this page and schedules an immediate re-rasterization
+    /// so annotation additions, edits, or deletions appear without flashing blank.
+    /// </summary>
+    public void InvalidatePageContent()
+    {
+        if (_isUnloaded || PageInfo is null || EffectiveDocumentId <= 0)
+        {
+            return;
+        }
+
+        _baseCts?.Cancel();
+        _baseCts?.Dispose();
+        _baseCts = null;
+        _isBaseRenderInFlight = false;
+
+        ReleaseHighResPatch();
+        _tileCache.RemovePage(EffectiveDocumentId, PageInfo.Index);
+        EnsureBaseBitmapRenderStarted();
+
+        if (EffectiveZoom > DetailZoomThreshold)
+        {
+            UpdateViewport(EffectiveZoom);
+        }
+
+        _baseCanvas.Invalidate();
     }
 
     /// <summary>
@@ -897,7 +955,7 @@ public sealed partial class PdfPageCanvas : Grid
             return false;
         }
 
-        return shell.ActiveTool == AnnotationTool.Select;
+        return shell.ActiveTool is AnnotationTool.Select or AnnotationTool.Highlighter or AnnotationTool.TextNote;
     }
 
     private void FocusParentViewerIfNeeded()
@@ -1199,6 +1257,36 @@ public sealed partial class PdfPageCanvas : Grid
             _observedDocument.ClearSelection();
         }
 
+        if (!isTouch &&
+            (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool == AnnotationTool.TextNote)
+        {
+            Vector2 notePdfPt = ToPdfPoint(pt.Position);
+            PdfAnnotationInfo? hitAnnot = _observedDocument?.HitTestAnnotation(PageInfo.Index, notePdfPt.X, notePdfPt.Y, tolerancePt: 6.0);
+            if (hitAnnot is not null)
+            {
+                if (hitAnnot.IsSignatureWidget && _observedDocument?.GetSignatureByIndex(hitAnnot.SignatureIndex) is { } sig)
+                {
+                    SignatureClicked?.Invoke(this, sig, pt.Position);
+                }
+                else
+                {
+                    if (_observedDocument is not null)
+                    {
+                        _observedDocument.SelectedAnnotation = hitAnnot;
+                    }
+
+                    AnnotationClicked?.Invoke(this, hitAnnot, pt.Position);
+                }
+            }
+            else
+            {
+                PlaceTextNoteRequested?.Invoke(this, notePdfPt, pt.Position);
+            }
+
+            e.Handled = true;
+            return;
+        }
+
         long now = Environment.TickCount64;
         bool sameSpot = IsWithinMultiClickDistance(pt.Position, _lastClickDipPoint);
 
@@ -1422,6 +1510,41 @@ public sealed partial class PdfPageCanvas : Grid
         if (_touchHoldHitResult.CharIndex < 0)
         {
             _isTouchWaitingForHold = false;
+            double moveDx = _touchCurrentDipPoint.X - _touchPressDipPoint.X;
+            double moveDy = _touchCurrentDipPoint.Y - _touchPressDipPoint.Y;
+            if (((moveDx * moveDx) + (moveDy * moveDy)) > (TouchSingleTapMaxMoveDip * TouchSingleTapMaxMoveDip) ||
+                _activeCanvasTouchPointerTicks.Count > 1 ||
+                IsSingleTouchViewerManipulating?.Invoke() == true)
+            {
+                return;
+            }
+
+            PdfAnnotationInfo? hitAnnot = _observedDocument?.HitTestAnnotation(
+                PageInfo.Index,
+                _touchPressPdfPoint.X,
+                _touchPressPdfPoint.Y,
+                tolerancePt: 12.0);
+            if (hitAnnot is not null)
+            {
+                if (hitAnnot.IsSignatureWidget && _observedDocument?.GetSignatureByIndex(hitAnnot.SignatureIndex) is { } sig)
+                {
+                    SignatureClicked?.Invoke(this, sig, _touchCurrentDipPoint);
+                }
+                else
+                {
+                    if (_observedDocument is not null)
+                    {
+                        _observedDocument.SelectedAnnotation = hitAnnot;
+                    }
+
+                    AnnotationClicked?.Invoke(this, hitAnnot, _touchCurrentDipPoint);
+                }
+            }
+            else
+            {
+                TouchEmptyHoldRequested?.Invoke(this, _touchPressPdfPoint, _touchCurrentDipPoint);
+            }
+
             return;
         }
 
@@ -1794,6 +1917,44 @@ public sealed partial class PdfPageCanvas : Grid
             return;
         }
 
+        if (PageInfo is not null && _observedDocument is { } tappedDoc)
+        {
+            PdfAnnotationInfo? hitAnnot = tappedDoc.HitTestAnnotation(
+                PageInfo.Index,
+                _touchPressPdfPoint.X,
+                _touchPressPdfPoint.Y,
+                tolerancePt: 10.0);
+            if (hitAnnot is not null)
+            {
+                if (hitAnnot.IsSignatureWidget && tappedDoc.GetSignatureByIndex(hitAnnot.SignatureIndex) is { } sig)
+                {
+                    _lastTouchTapTick = 0;
+                    tappedDoc.ClearSelection();
+                    SignatureClicked?.Invoke(this, sig, releaseDip);
+                    return;
+                }
+
+                if (hitAnnot.Subtype is PdfAnnotationSubtype.Text or PdfAnnotationSubtype.FreeText ||
+                    hitAnnot.HasComment ||
+                    hitAnnot.IsTextMarkup)
+                {
+                    _lastTouchTapTick = 0;
+                    tappedDoc.ClearSelection();
+                    tappedDoc.SelectedAnnotation = hitAnnot;
+                    AnnotationClicked?.Invoke(this, hitAnnot, releaseDip);
+                    return;
+                }
+            }
+
+            ShellViewModel? activeShell = _shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>();
+            if (activeShell?.ActiveTool == AnnotationTool.TextNote)
+            {
+                _lastTouchTapTick = 0;
+                PlaceTextNoteRequested?.Invoke(this, _touchPressPdfPoint, releaseDip);
+                return;
+            }
+        }
+
         Point curRootPt = new(_touchPressRootDipPoint.X + tdx, _touchPressRootDipPoint.Y + tdy);
         double tapDistX = curRootPt.X - prevTapRootPt.X;
         double tapDistY = curRootPt.Y - prevTapRootPt.Y;
@@ -2133,6 +2294,29 @@ public sealed partial class PdfPageCanvas : Grid
                 _ = shell.HandleLinkClickedAsync(pressedLink);
             }
         }
+        else if (PageInfo is not null && _observedDocument is { } clickedDoc)
+        {
+            PdfAnnotationInfo? hitAnnot = clickedDoc.HitTestAnnotation(PageInfo.Index, anchorPdf.X, anchorPdf.Y, tolerancePt: 6.0);
+            if (hitAnnot is not null)
+            {
+                e.Handled = true;
+                clickedDoc.ClearSelection();
+                if (hitAnnot.IsSignatureWidget && clickedDoc.GetSignatureByIndex(hitAnnot.SignatureIndex) is { } sig)
+                {
+                    SignatureClicked?.Invoke(this, sig, releasePosDip);
+                }
+                else
+                {
+                    clickedDoc.SelectedAnnotation = hitAnnot;
+                    AnnotationClicked?.Invoke(this, hitAnnot, releasePosDip);
+                }
+            }
+            else
+            {
+                clickedDoc.ClearSelection();
+                clickedDoc.SelectedAnnotation = null;
+            }
+        }
         else
         {
             _observedDocument?.ClearSelection();
@@ -2345,6 +2529,13 @@ public sealed partial class PdfPageCanvas : Grid
                 }
 
                 if (hit.Link.IsValid)
+                {
+                    SetCursorShape(InputSystemCursorShape.Hand);
+                }
+                else if (_observedDocument?.HitTestAnnotation(pageIndex, pdfPt.X, pdfPt.Y, tolerancePt: 4.0) is { } hoverAnnot &&
+                         (hoverAnnot.IsSignatureWidget ||
+                          hoverAnnot.Subtype is PdfAnnotationSubtype.Text or PdfAnnotationSubtype.FreeText ||
+                          hoverAnnot.HasComment))
                 {
                     SetCursorShape(InputSystemCursorShape.Hand);
                 }
@@ -2794,8 +2985,10 @@ public sealed partial class PdfPageCanvas : Grid
             ? activeSelection.GetRectsForPage(pageIndex)
             : Array.Empty<PdfRect>();
         bool hasSelectionOnPage = selectionRects.Count > 0;
+        PdfAnnotationInfo? selectedAnnot = doc.SelectedAnnotation;
+        bool hasSelectedAnnotOnPage = selectedAnnot is not null && selectedAnnot.PageIndex == pageIndex;
 
-        if (pageMatches.Count == 0 && !hasSelectionOnPage)
+        if (pageMatches.Count == 0 && !hasSelectionOnPage && !hasSelectedAnnotOnPage)
         {
             return;
         }
@@ -2871,6 +3064,30 @@ public sealed partial class PdfPageCanvas : Grid
                     dipRect.Height + 1.5);
 
                 ds.FillRoundedRectangle(drawRect, 2.5f, 2.5f, selectionFill);
+            }
+        }
+
+        // 3. Focused annotation highlight border (drawn cleanly over bitmaps without extra UI elements)
+        if (hasSelectedAnnotOnPage && selectedAnnot is not null && !selectedAnnot.Bounds.IsEmpty)
+        {
+            Rect dipRect = transform.ToPageRect(selectedAnnot.Bounds);
+            if (dipRect.Width > 0.1 && dipRect.Height > 0.1)
+            {
+                Rect focusRect = new(
+                    dipRect.X + offsetX - 2.0,
+                    dipRect.Y + offsetY - 2.0,
+                    dipRect.Width + 4.0,
+                    dipRect.Height + 4.0);
+
+                Windows.UI.Color focusFill = IsNightMode
+                    ? Windows.UI.Color.FromArgb(40, 120, 195, 255)
+                    : Windows.UI.Color.FromArgb(28, 0, 120, 215);
+                Windows.UI.Color focusStroke = IsNightMode
+                    ? Windows.UI.Color.FromArgb(230, 120, 195, 255)
+                    : Windows.UI.Color.FromArgb(225, 0, 108, 200);
+
+                ds.FillRoundedRectangle(focusRect, 3.0f, 3.0f, focusFill);
+                ds.DrawRoundedRectangle(focusRect, 3.0f, 3.0f, focusStroke, 1.75f);
             }
         }
     }

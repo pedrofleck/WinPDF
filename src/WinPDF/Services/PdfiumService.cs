@@ -403,6 +403,114 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
     }
 
     /// <inheritdoc/>
+    public Task<IReadOnlyList<PdfSignatureInfo>> GetDocumentSignaturesAsync(
+        long documentId,
+        string filePath,
+        CancellationToken cancellationToken = default)
+        => Enqueue<IReadOnlyList<PdfSignatureInfo>>(
+            new PdfiumJob<IReadOnlyList<PdfSignatureInfo>>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.ReadDocumentSignatures(documentId, filePath, token),
+                cancellationToken),
+            highPriority: true);
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<PdfAnnotationInfo>> GetDocumentAnnotationsAsync(
+        long documentId,
+        CancellationToken cancellationToken = default)
+        => Enqueue<IReadOnlyList<PdfAnnotationInfo>>(
+            new PdfiumJob<IReadOnlyList<PdfAnnotationInfo>>(
+                PdfJobPriority.Background,
+                (engine, token) => engine.ReadDocumentAnnotations(documentId, token),
+                cancellationToken),
+            highPriority: false);
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<PdfAnnotationInfo>> GetPageAnnotationsAsync(
+        long documentId,
+        int pageIndex,
+        CancellationToken cancellationToken = default)
+        => Enqueue<IReadOnlyList<PdfAnnotationInfo>>(
+            new PdfiumJob<IReadOnlyList<PdfAnnotationInfo>>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.ReadPageAnnotations(documentId, pageIndex, token),
+                cancellationToken),
+            highPriority: true);
+
+    /// <inheritdoc/>
+    public Task<PdfPageAnnotationMutationResult> AddMarkupAnnotationAsync(
+        long documentId,
+        PdfCreateMarkupRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Enqueue<PdfPageAnnotationMutationResult>(
+            new PdfiumJob<PdfPageAnnotationMutationResult>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.AddMarkupAnnotation(documentId, request, token),
+                cancellationToken),
+            highPriority: true);
+    }
+
+    /// <inheritdoc/>
+    public Task<PdfPageAnnotationMutationResult> AddTextNoteAnnotationAsync(
+        long documentId,
+        PdfCreateNoteRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Enqueue<PdfPageAnnotationMutationResult>(
+            new PdfiumJob<PdfPageAnnotationMutationResult>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.AddTextNoteAnnotation(documentId, request, token),
+                cancellationToken),
+            highPriority: true);
+    }
+
+    /// <inheritdoc/>
+    public Task<PdfPageAnnotationMutationResult> AddFreeTextAnnotationAsync(
+        long documentId,
+        PdfCreateFreeTextRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Enqueue<PdfPageAnnotationMutationResult>(
+            new PdfiumJob<PdfPageAnnotationMutationResult>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.AddFreeTextAnnotation(documentId, request, token),
+                cancellationToken),
+            highPriority: true);
+    }
+
+    /// <inheritdoc/>
+    public Task<PdfPageAnnotationMutationResult> UpdateAnnotationAsync(
+        long documentId,
+        PdfUpdateAnnotationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Enqueue<PdfPageAnnotationMutationResult>(
+            new PdfiumJob<PdfPageAnnotationMutationResult>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.UpdateAnnotation(documentId, request, token),
+                cancellationToken),
+            highPriority: true);
+    }
+
+    /// <inheritdoc/>
+    public Task<IReadOnlyList<PdfAnnotationInfo>> DeleteAnnotationAsync(
+        long documentId,
+        int pageIndex,
+        int annotIndex,
+        CancellationToken cancellationToken = default)
+        => Enqueue<IReadOnlyList<PdfAnnotationInfo>>(
+            new PdfiumJob<IReadOnlyList<PdfAnnotationInfo>>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.DeleteAnnotation(documentId, pageIndex, annotIndex, token),
+                cancellationToken),
+            highPriority: true);
+
+    /// <inheritdoc/>
     void IPdfiumBitmapOwner.ReleaseBitmap(PdfiumBitmapHandle bitmap)
     {
         BitmapReleaseJob job = new(bitmap);

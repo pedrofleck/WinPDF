@@ -213,4 +213,175 @@ public static class ResourceKeys
 
     /// <summary>Close button text for legal notice dialogs.</summary>
     public const string DialogCloseButton = "Dialog_CloseButton";
+
+    /// <summary>Touch selection flyout copy tooltip.</summary>
+    public const string TouchSelectionCopyToolTip = "TouchSelection_Copy_ToolTip";
+
+    /// <summary>Touch selection flyout highlight tooltip.</summary>
+    public const string TouchSelectionHighlightToolTip = "TouchSelection_Highlight_ToolTip";
+
+    /// <summary>Touch selection flyout highlight-with-comment tooltip.</summary>
+    public const string TouchSelectionCommentToolTip = "TouchSelection_Comment_ToolTip";
+
+    /// <summary>Touch empty-hold flyout add comment label.</summary>
+    public const string TouchEmptyAddCommentLabel = "TouchEmpty_AddComment_Label";
+
+    /// <summary>Touch empty-hold flyout add text box label.</summary>
+    public const string TouchEmptyAddTextBoxLabel = "TouchEmpty_AddTextBox_Label";
+
+    /// <summary>Annotation popup save button text.</summary>
+    public const string AnnotSave = "Annot_Save";
+
+    /// <summary>Annotation popup delete button text.</summary>
+    public const string AnnotDelete = "Annot_Delete";
+
+    /// <summary>Annotation popup close button text.</summary>
+    public const string AnnotClose = "Annot_Close";
+
+    /// <summary>Annotation comment textbox placeholder.</summary>
+    public const string AnnotCommentPlaceholder = "Annot_CommentPlaceholder";
+
+    /// <summary>Annotation FreeText textbox placeholder.</summary>
+    public const string AnnotTextBoxPlaceholder = "Annot_TextBoxPlaceholder";
+
+    /// <summary>Color name: Yellow.</summary>
+    public const string ColorYellow = "Color_Yellow";
+
+    /// <summary>Color name: Green.</summary>
+    public const string ColorGreen = "Color_Green";
+
+    /// <summary>Color name: Blue.</summary>
+    public const string ColorBlue = "Color_Blue";
+
+    /// <summary>Color name: Pink.</summary>
+    public const string ColorPink = "Color_Pink";
+
+    /// <summary>Color name: Orange.</summary>
+    public const string ColorOrange = "Color_Orange";
+
+    /// <summary>Annotation subtype label: Highlight.</summary>
+    public const string AnnotSubtypeHighlight = "Annot_Subtype_Highlight";
+
+    /// <summary>Annotation subtype label: Underline.</summary>
+    public const string AnnotSubtypeUnderline = "Annot_Subtype_Underline";
+
+    /// <summary>Annotation subtype label: Squiggly.</summary>
+    public const string AnnotSubtypeSquiggly = "Annot_Subtype_Squiggly";
+
+    /// <summary>Annotation subtype label: StrikeOut.</summary>
+    public const string AnnotSubtypeStrikeOut = "Annot_Subtype_StrikeOut";
+
+    /// <summary>Annotation subtype label: Sticky Note / Text.</summary>
+    public const string AnnotSubtypeText = "Annot_Subtype_Text";
+
+    /// <summary>Annotation subtype label: FreeText box.</summary>
+    public const string AnnotSubtypeFreeText = "Annot_Subtype_FreeText";
+
+    /// <summary>Annotation subtype label: Ink drawing.</summary>
+    public const string AnnotSubtypeInk = "Annot_Subtype_Ink";
+
+    /// <summary>Annotation subtype label: Rectangle / Square.</summary>
+    public const string AnnotSubtypeSquare = "Annot_Subtype_Square";
+
+    /// <summary>Annotation subtype label: Circle.</summary>
+    public const string AnnotSubtypeCircle = "Annot_Subtype_Circle";
+
+    /// <summary>Annotation subtype label: Line.</summary>
+    public const string AnnotSubtypeLine = "Annot_Subtype_Line";
+
+    /// <summary>Annotation subtype label: Polygon.</summary>
+    public const string AnnotSubtypePolygon = "Annot_Subtype_Polygon";
+
+    /// <summary>Annotation subtype label: PolyLine.</summary>
+    public const string AnnotSubtypePolyLine = "Annot_Subtype_PolyLine";
+
+    /// <summary>Annotation subtype label: Stamp.</summary>
+    public const string AnnotSubtypeStamp = "Annot_Subtype_Stamp";
+
+    /// <summary>Annotation subtype label: Caret.</summary>
+    public const string AnnotSubtypeCaret = "Annot_Subtype_Caret";
+
+    /// <summary>Annotation subtype label: File Attachment.</summary>
+    public const string AnnotSubtypeFileAttachment = "Annot_Subtype_FileAttachment";
+
+    /// <summary>Annotation subtype label: Redact.</summary>
+    public const string AnnotSubtypeRedact = "Annot_Subtype_Redact";
+
+    /// <summary>Annotation subtype label: Digital Signature.</summary>
+    public const string AnnotSubtypeSignature = "Annot_Subtype_Signature";
+
+    /// <summary>Annotation subtype label: Generic annotation.</summary>
+    public const string AnnotSubtypeOther = "Annot_Subtype_Other";
+
+    /// <summary>Digital signature banner message format for 1 signature. {0} = signer name.</summary>
+    public const string SigBannerSingleFormat = "Sig_Banner_SingleFormat";
+
+    /// <summary>Digital signature banner message format for multiple signatures. {0} = count, {1} = primary signer name.</summary>
+    public const string SigBannerMultiFormat = "Sig_Banner_MultiFormat";
+
+    /// <summary>Digital signature banner button text.</summary>
+    public const string SigBannerViewButton = "Sig_Banner_ViewButton";
+
+    /// <summary>Digital signatures dialog title.</summary>
+    public const string SigDialogTitle = "Sig_Dialog_Title";
+
+    /// <summary>Digital signature dialog field: Signer.</summary>
+    public const string SigDialogSigner = "Sig_Dialog_Signer";
+
+    /// <summary>Digital signature dialog field: Issuer (CA).</summary>
+    public const string SigDialogIssuer = "Sig_Dialog_Issuer";
+
+    /// <summary>Digital signature dialog field: Signing time.</summary>
+    public const string SigDialogTime = "Sig_Dialog_Time";
+
+    /// <summary>Digital signature dialog field: Reason.</summary>
+    public const string SigDialogReason = "Sig_Dialog_Reason";
+
+    /// <summary>Digital signature dialog field: Format / SubFilter.</summary>
+    public const string SigDialogFormat = "Sig_Dialog_Format";
+
+    /// <summary>Digital signature dialog field: Document coverage.</summary>
+    public const string SigDialogCoverage = "Sig_Dialog_Coverage";
+
+    /// <summary>Digital signature dialog coverage value: whole document.</summary>
+    public const string SigDialogCoverageWhole = "Sig_Dialog_CoverageWhole";
+
+    /// <summary>Digital signature dialog coverage value: incremental edits appended.</summary>
+    public const string SigDialogCoverageModified = "Sig_Dialog_CoverageModified";
+
+    /// <summary>Digital signature dialog field: DocMDP modification policy.</summary>
+    public const string SigDialogPermission = "Sig_Dialog_Permission";
+
+    /// <summary>Digital signature dialog field: Certificate validity.</summary>
+    public const string SigDialogCertValidity = "Sig_Dialog_CertValidity";
+
+    /// <summary>Digital signature dialog field: SHA-256 thumbprint.</summary>
+    public const string SigDialogThumbprint = "Sig_Dialog_Thumbprint";
+
+    /// <summary>Digital signature status: Valid.</summary>
+    public const string SigStatusValid = "Sig_Status_Valid";
+
+    /// <summary>Digital signature status: Valid cryptographic signature with untrusted root CA.</summary>
+    public const string SigStatusValidUntrustedRoot = "Sig_Status_ValidUntrustedRoot";
+
+    /// <summary>Digital signature status: Modified after signing.</summary>
+    public const string SigStatusModifiedAfterSigning = "Sig_Status_ModifiedAfterSigning";
+
+    /// <summary>Digital signature status: Invalid.</summary>
+    public const string SigStatusInvalid = "Sig_Status_Invalid";
+
+    /// <summary>Digital signature status: Unknown / unsupported.</summary>
+    public const string SigStatusUnknown = "Sig_Status_Unknown";
+
+    /// <summary>DocMDP permission level 1 label.</summary>
+    public const string SigDocMdpNoChanges = "Sig_DocMdp_NoChanges";
+
+    /// <summary>DocMDP permission level 2 label.</summary>
+    public const string SigDocMdpFormFillAndSign = "Sig_DocMdp_FormFillAndSign";
+
+    /// <summary>DocMDP permission level 3 label.</summary>
+    public const string SigDocMdpAnnotationsAllowed = "Sig_DocMdp_AnnotationsAllowed";
+
+    /// <summary>DocMDP default permission label.</summary>
+    public const string SigDocMdpUnspecified = "Sig_DocMdp_Unspecified";
 }

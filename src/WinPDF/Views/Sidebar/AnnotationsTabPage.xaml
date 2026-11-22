@@ -11,13 +11,13 @@
     mc:Ignorable="d">
 
     <Grid Background="Transparent">
-        <!-- Empty state when there are no comments / annotations -->
+        <!-- Empty state when there are no comments / annotations / digital signatures -->
         <StackPanel
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
             Margin="24"
             Spacing="8"
-            Visibility="{x:Bind converters:UiHelpers.HasNoItems(ViewModel.CurrentDocument.AnnotationsSummary.Count), Mode=OneWay}">
+            Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.CurrentDocument.HasAnnotationsOrSignatures), Mode=OneWay}">
             <FontIcon
                 HorizontalAlignment="Center"
                 FontSize="28"
@@ -32,34 +32,213 @@
                 TextWrapping="Wrap" />
         </StackPanel>
 
-        <!-- Annotations list -->
-        <ListView
-            Padding="4"
-            ItemsSource="{x:Bind ViewModel.CurrentDocument.AnnotationsSummary, Mode=OneWay}"
-            Visibility="{x:Bind converters:UiHelpers.HasItems(ViewModel.CurrentDocument.AnnotationsSummary.Count), Mode=OneWay}">
-            <ListView.ItemTemplate>
-                <DataTemplate x:DataType="vm:AnnotationItemViewModel">
-                    <Border
-                        Margin="0,4,0,0"
-                        Padding="8,4,8,4"
-                        Background="{ThemeResource LayerFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1"
-                        CornerRadius="4">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <FontIcon
-                                FontSize="14"
-                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                Glyph="&#xE90A;" />
-                            <TextBlock
-                                VerticalAlignment="Center"
-                                Style="{StaticResource BodyTextBlockStyle}"
-                                Text="{x:Bind Text}"
-                                TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Border>
-                </DataTemplate>
-            </ListView.ItemTemplate>
-        </ListView>
+        <!-- Signatures + Annotations & Comments list -->
+        <ScrollViewer
+            VerticalScrollBarVisibility="Auto"
+            HorizontalScrollBarVisibility="Disabled"
+            Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasAnnotationsOrSignatures), Mode=OneWay}">
+            <StackPanel Padding="8,4,8,12" Spacing="10">
+
+                <!-- Digital Signatures section (only when document is signed) -->
+                <StackPanel
+                    Spacing="4"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasSignatures), Mode=OneWay}">
+                    <TextBlock
+                        x:Uid="Annotations_SignaturesHeader"
+                        Margin="4,4,4,2"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        FontWeight="SemiBold"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+
+                    <ListView
+                        IsItemClickEnabled="True"
+                        ItemClick="OnSignatureItemClick"
+                        SelectionMode="None"
+                        ItemsSource="{x:Bind ViewModel.CurrentDocument.Signatures, Mode=OneWay}">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Margin" Value="0,2,0,2" />
+                                <Setter Property="MinHeight" Value="36" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:SignatureItemViewModel">
+                                <Border
+                                    Padding="10,8"
+                                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6">
+                                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                                        <FontIcon
+                                            Grid.Column="0"
+                                            FontSize="16"
+                                            VerticalAlignment="Top"
+                                            Margin="0,2,0,0"
+                                            Glyph="{x:Bind StatusGlyph}">
+                                            <FontIcon.Foreground>
+                                                <SolidColorBrush Color="{x:Bind StatusColor}" />
+                                            </FontIcon.Foreground>
+                                        </FontIcon>
+                                        <StackPanel Grid.Column="1" Spacing="2">
+                                            <TextBlock
+                                                FontWeight="SemiBold"
+                                                FontSize="13"
+                                                Text="{x:Bind SignerName}"
+                                                TextTrimming="CharacterEllipsis"
+                                                MaxLines="2"
+                                                TextWrapping="Wrap" />
+                                            <TextBlock
+                                                FontSize="12"
+                                                Text="{x:Bind StatusText}"
+                                                TextWrapping="Wrap">
+                                                <TextBlock.Foreground>
+                                                    <SolidColorBrush Color="{x:Bind StatusColor}" />
+                                                </TextBlock.Foreground>
+                                            </TextBlock>
+                                            <TextBlock
+                                                FontSize="11.5"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="{x:Bind IssuerName}"
+                                                TextTrimming="CharacterEllipsis"
+                                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasIssuerName)}" />
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                    Text="{x:Bind FormattedSigningTime}"
+                                                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasSigningTime)}" />
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                    Text="{x:Bind PageBadgeText}"
+                                                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasPageLocation)}" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </StackPanel>
+
+                <!-- Annotations & Comments section -->
+                <StackPanel
+                    Spacing="4"
+                    Visibility="{x:Bind converters:UiHelpers.HasItems(ViewModel.CurrentDocument.AnnotationsSummary.Count), Mode=OneWay}">
+                    <TextBlock
+                        x:Uid="Annotations_SectionHeader"
+                        Margin="4,4,4,2"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        FontWeight="SemiBold"
+                        Style="{StaticResource CaptionTextBlockStyle}" />
+
+                    <ListView
+                        IsItemClickEnabled="True"
+                        ItemClick="OnAnnotationItemClick"
+                        SelectionMode="None"
+                        ItemsSource="{x:Bind ViewModel.CurrentDocument.AnnotationsSummary, Mode=OneWay}">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                <Setter Property="Padding" Value="0" />
+                                <Setter Property="Margin" Value="0,2,0,2" />
+                                <Setter Property="MinHeight" Value="36" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate x:DataType="vm:AnnotationItemViewModel">
+                                <Border
+                                    Padding="10,8"
+                                    Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6">
+                                    <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8" RowSpacing="3">
+                                        <Grid Grid.Row="0" Grid.Column="0" Width="16" Height="16" VerticalAlignment="Center">
+                                            <FontIcon
+                                                FontSize="14"
+                                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                                Glyph="{x:Bind IconGlyph}" />
+                                        </Grid>
+
+                                        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                            <Ellipse Width="8" Height="8" VerticalAlignment="Center">
+                                                <Ellipse.Fill>
+                                                    <SolidColorBrush Color="{x:Bind SwatchColor}" />
+                                                </Ellipse.Fill>
+                                            </Ellipse>
+                                            <TextBlock
+                                                FontWeight="SemiBold"
+                                                FontSize="12.5"
+                                                Text="{x:Bind TitleText}"
+                                                VerticalAlignment="Center" />
+                                            <TextBlock
+                                                FontSize="11.5"
+                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                Text="·"
+                                                VerticalAlignment="Center" />
+                                            <TextBlock
+                                                FontSize="11.5"
+                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                Text="{x:Bind PageBadgeText}"
+                                                VerticalAlignment="Center" />
+                                        </StackPanel>
+
+                                        <Button
+                                            x:Uid="Annotations_DeleteButton"
+                                            Grid.Row="0"
+                                            Grid.Column="2"
+                                            Width="24"
+                                            Height="24"
+                                            MinWidth="24"
+                                            MinHeight="24"
+                                            Padding="0"
+                                            CornerRadius="4"
+                                            Click="OnDeleteAnnotationClick"
+                                            Tag="{x:Bind}"
+                                            Visibility="{x:Bind converters:UiHelpers.VisibleIf(CanDelete)}"
+                                            Style="{StaticResource SubtleButtonStyle}">
+                                            <FontIcon FontSize="11" Glyph="&#xE74D;" />
+                                        </Button>
+
+                                        <TextBlock
+                                            Grid.Row="1"
+                                            Grid.Column="1"
+                                            Grid.ColumnSpan="2"
+                                            FontSize="12.5"
+                                            Text="{x:Bind Text}"
+                                            MaxLines="3"
+                                            TextTrimming="CharacterEllipsis"
+                                            TextWrapping="Wrap"
+                                            Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasBodyText)}" />
+
+                                        <StackPanel
+                                            Grid.Row="2"
+                                            Grid.Column="1"
+                                            Grid.ColumnSpan="2"
+                                            Orientation="Horizontal"
+                                            Spacing="8">
+                                            <TextBlock
+                                                FontSize="11"
+                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                Text="{x:Bind Author}"
+                                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasAuthor)}" />
+                                            <TextBlock
+                                                FontSize="11"
+                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                Text="{x:Bind FormattedDate}"
+                                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasDate)}" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
     </Grid>
 </Page>

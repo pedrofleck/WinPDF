@@ -380,4 +380,163 @@ internal static unsafe partial class PdfiumNative
     [LibraryImport(Lib)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial uint FPDFAttachment_GetName(nint attachment, void* buffer, uint bufferLength);
+
+    // ------------------------------------------------------------------------------------------
+    // Annotations (fpdf_annot.h)
+    // ------------------------------------------------------------------------------------------
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPage_GetAnnotCount(PdfiumPageHandle page);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial PdfiumAnnotationHandle FPDFPage_GetAnnot(PdfiumPageHandle page, int index);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial PdfiumAnnotationHandle FPDFPage_CreateAnnot(PdfiumPageHandle page, int subtype);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPage_GetAnnotIndex(PdfiumPageHandle page, PdfiumAnnotationHandle annot);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial void FPDFPage_CloseAnnot(nint annot);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPage_RemoveAnnot(PdfiumPageHandle page, int index);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_GetSubtype(PdfiumAnnotationHandle annot);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_GetRect(PdfiumAnnotationHandle annot, FsRectF* rect);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_SetRect(PdfiumAnnotationHandle annot, FsRectF* rect);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_GetColor(
+        PdfiumAnnotationHandle annot,
+        int type,
+        out uint r,
+        out uint g,
+        out uint b,
+        out uint a);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_SetColor(
+        PdfiumAnnotationHandle annot,
+        int type,
+        uint r,
+        uint g,
+        uint b,
+        uint a);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_HasAttachmentPoints(PdfiumAnnotationHandle annot);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial nuint FPDFAnnot_CountAttachmentPoints(PdfiumAnnotationHandle annot);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_GetAttachmentPoints(
+        PdfiumAnnotationHandle annot,
+        nuint quadIndex,
+        FsQuadPointsF* quadPoints);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_AppendAttachmentPoints(
+        PdfiumAnnotationHandle annot,
+        FsQuadPointsF* quadPoints);
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_HasKey(PdfiumAnnotationHandle annot, string key);
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_GetValueType(PdfiumAnnotationHandle annot, string key);
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint FPDFAnnot_GetStringValue(
+        PdfiumAnnotationHandle annot,
+        string key,
+        char* buffer,
+        uint buflen);
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_SetStringValue(
+        PdfiumAnnotationHandle annot,
+        string key,
+        char* value);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_SetAP(
+        PdfiumAnnotationHandle annot,
+        int appearanceMode,
+        char* value);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_GetFlags(PdfiumAnnotationHandle annot);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_SetFlags(PdfiumAnnotationHandle annot, int flags);
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial PdfiumAnnotationHandle FPDFAnnot_GetLinkedAnnot(PdfiumAnnotationHandle annot, string key);
+
+    // ------------------------------------------------------------------------------------------
+    // Digital signatures (fpdf_signature.h)
+    // ------------------------------------------------------------------------------------------
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDF_GetSignatureCount(PdfiumDocumentHandle document);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial nint FPDF_GetSignatureObject(PdfiumDocumentHandle document, int index);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint FPDFSignatureObj_GetContents(nint signature, byte* buffer, uint length);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint FPDFSignatureObj_GetByteRange(nint signature, int* buffer, uint length);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint FPDFSignatureObj_GetSubFilter(nint signature, byte* buffer, uint length);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint FPDFSignatureObj_GetReason(nint signature, char* buffer, uint length);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint FPDFSignatureObj_GetTime(nint signature, byte* buffer, uint length);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint FPDFSignatureObj_GetDocMDPPermission(nint signature);
 }
