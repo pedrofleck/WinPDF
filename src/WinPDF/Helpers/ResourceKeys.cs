@@ -259,6 +259,9 @@ public static class ResourceKeys
     /// <summary>Color name: Orange.</summary>
     public const string ColorOrange = "Color_Orange";
 
+    /// <summary>Color name: Red.</summary>
+    public const string ColorRed = "Color_Red";
+
     /// <summary>Annotation subtype label: Highlight.</summary>
     public const string AnnotSubtypeHighlight = "Annot_Subtype_Highlight";
 
@@ -384,4 +387,46 @@ public static class ResourceKeys
 
     /// <summary>DocMDP default permission label.</summary>
     public const string SigDocMdpUnspecified = "Sig_DocMdp_Unspecified";
+
+    /// <summary>Status bar signed document indicator label.</summary>
+    public const string StatusBarSignedLabel = "StatusBar_SignedLabel";
+
+    /// <summary>Compact annotation quick-bar tooltip: add or edit comment.</summary>
+    public const string AnnotAddCommentToolTip = "Annot_AddComment_ToolTip";
+
+    /// <summary>Compact annotation quick-bar tooltip: change color.</summary>
+    public const string AnnotColorToolTip = "Annot_Color_ToolTip";
+
+    /// <summary>Compact annotation quick-bar tooltip: copy annotation.</summary>
+    public const string AnnotCopyToolTip = "Annot_Copy_ToolTip";
+
+    /// <summary>Compact annotation quick-bar tooltip: cut annotation.</summary>
+    public const string AnnotCutToolTip = "Annot_Cut_ToolTip";
+
+    /// <summary>Touch empty-hold flyout paste button label.</summary>
+    public const string TouchEmptyPasteLabel = "TouchEmpty_Paste_Label";
+
+    /// <summary>Detailed signature verification description: valid and trusted chain.</summary>
+    public const string SigDetailValid = "Sig_Detail_Valid";
+
+    /// <summary>Detailed signature verification description: valid cryptographic integrity with root CA not in Windows store.</summary>
+    public const string SigDetailValidUntrustedRoot = "Sig_Detail_ValidUntrustedRoot";
+
+    /// <summary>Detailed signature verification description: modified after signing.</summary>
+    public const string SigDetailModifiedAfterSigning = "Sig_Detail_ModifiedAfterSigning";
+
+    /// <summary>Detailed signature verification description: invalid cryptographic signature or altered content.</summary>
+    public const string SigDetailInvalid = "Sig_Detail_Invalid";
+
+    /// <summary>Detailed signature verification description: unknown or unsupported signature format.</summary>
+    public const string SigDetailUnknown = "Sig_Detail_Unknown";
+
+    /// <summary>Tooltip for the annotation undo action.</summary>
+    public const string AnnotUndoToolTip = "Annot_Undo_ToolTip";
+
+    /// <summary>Context menu item for undoing the last annotation edit.</summary>
+    public const string ContextUndoAnnotation = "Context_UndoAnnotation";
+
+    /// <summary>Tooltip for the top annotation toolbar default color picker.</summary>
+    public const string ToolbarColorToolTip = "Toolbar_Color_ToolTip";
 }

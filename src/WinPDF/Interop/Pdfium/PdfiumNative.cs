@@ -539,4 +539,171 @@ internal static unsafe partial class PdfiumNative
     [LibraryImport(Lib)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial uint FPDFSignatureObj_GetDocMDPPermission(nint signature);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint FPDFAnnot_GetInkListCount(PdfiumAnnotationHandle annot);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint FPDFAnnot_GetInkListPath(
+        PdfiumAnnotationHandle annot,
+        uint pathIndex,
+        FsPointF* buffer,
+        uint length);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_RemoveInkList(PdfiumAnnotationHandle annot);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_AddInkStroke(
+        PdfiumAnnotationHandle annot,
+        FsPointF* points,
+        nuint pointCount);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_GetBorder(
+        PdfiumAnnotationHandle annot,
+        out float horizontalRadius,
+        out float verticalRadius,
+        out float borderWidth);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_SetBorder(
+        PdfiumAnnotationHandle annot,
+        float horizontalRadius,
+        float verticalRadius,
+        float borderWidth);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint FPDFAnnot_GetVertices(
+        PdfiumAnnotationHandle annot,
+        FsPointF* buffer,
+        uint length);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_GetLine(
+        PdfiumAnnotationHandle annot,
+        FsPointF* start,
+        FsPointF* end);
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_GetNumberValue(
+        PdfiumAnnotationHandle annot,
+        string key,
+        out float value);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_GetObjectCount(PdfiumAnnotationHandle annot);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial nint FPDFAnnot_GetObject(PdfiumAnnotationHandle annot, int index);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPageObj_GetType(nint pageObject);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPageObj_GetStrokeColor(
+        nint pageObject,
+        out uint r,
+        out uint g,
+        out uint b,
+        out uint a);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPageObj_GetFillColor(
+        nint pageObject,
+        out uint r,
+        out uint g,
+        out uint b,
+        out uint a);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPageObj_GetStrokeWidth(nint pageObject, out float width);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPageObj_GetMatrix(nint pageObject, FsMatrix* matrix);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPath_GetDrawMode(nint path, out int fillMode, out int stroke);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPath_CountSegments(nint path);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial nint FPDFPath_GetPathSegment(nint path, int index);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPathSegment_GetPoint(nint segment, out float x, out float y);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPathSegment_GetType(nint segment);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPathSegment_GetClose(nint segment);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial uint FPDFAnnot_GetAP(PdfiumAnnotationHandle annot, int appearanceMode, char* buffer, uint buflen);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFFormObj_CountObjects(nint formObject);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial nint FPDFFormObj_GetObject(nint formObject, uint index);
+
+    // ------------------------------------------------------------------------------------------
+    // FormFill & interactive widget rendering (fpdf_formfill.h)
+    // ------------------------------------------------------------------------------------------
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial nint FPDFDOC_InitFormFillEnvironment(PdfiumDocumentHandle document, void* formInfo);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial void FPDFDOC_ExitFormFillEnvironment(nint hHandle);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial void FORM_OnAfterLoadPage(PdfiumPageHandle page, nint hHandle);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial void FORM_OnBeforeClosePage(PdfiumPageHandle page, nint hHandle);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial void FPDF_FFLDraw(
+        nint hHandle,
+        PdfiumBitmapHandle bitmap,
+        PdfiumPageHandle page,
+        int startX,
+        int startY,
+        int sizeX,
+        int sizeY,
+        int rotate,
+        int flags);
 }

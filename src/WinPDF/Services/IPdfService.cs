@@ -438,6 +438,30 @@ public interface IPdfService : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Translates an existing movable annotation on its page by a PDF-space delta and updates its appearance.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="request">Move parameters.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The updated annotation index and refreshed annotations for the page.</returns>
+    Task<PdfPageAnnotationMutationResult> MoveAnnotationAsync(
+        long documentId,
+        PdfMoveAnnotationRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Pastes a non-markup annotation snapshot (comment note, text box, ink drawing, or shape) onto a target page.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="request">Paste parameters including source annotation geometry.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The created annotation index and refreshed annotations for the page.</returns>
+    Task<PdfPageAnnotationMutationResult> PasteAnnotationAsync(
+        long documentId,
+        PdfPasteAnnotationRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Deletes an annotation (and any linked popup) from a page and returns refreshed page annotations.
     /// </summary>
     /// <param name="documentId">Document identifier.</param>

@@ -289,13 +289,13 @@
   <data name="Menu_Save.Text" xml:space="preserve"><value>Save</value></data>
   <data name="Context_Save.Text" xml:space="preserve"><value>Save</value></data>
   <data name="Context_Highlight.Text" xml:space="preserve"><value>Highlight</value></data>
-  <data name="Context_HighlightWithComment.Text" xml:space="preserve"><value>Highlight with comment…</value></data>
+  <data name="Context_HighlightWithComment.Text" xml:space="preserve"><value>Add comment to selection…</value></data>
   <data name="Context_MarkupSubMenu.Text" xml:space="preserve"><value>Text markup</value></data>
   <data name="Context_Underline.Text" xml:space="preserve"><value>Underline</value></data>
   <data name="Context_StrikeOut.Text" xml:space="preserve"><value>Strikethrough</value></data>
   <data name="Context_Squiggly.Text" xml:space="preserve"><value>Squiggly underline</value></data>
   <data name="Context_AddComment.Text" xml:space="preserve"><value>Add comment note…</value></data>
-  <data name="Context_AddTextBox.Text" xml:space="preserve"><value>Add text box…</value></data>
+  <data name="Context_AddTextBox.Text" xml:space="preserve"><value>Add comment…</value></data>
   <data name="Context_EditAnnotation.Text" xml:space="preserve"><value>Edit comment…</value></data>
   <data name="Context_DeleteAnnotation.Text" xml:space="preserve"><value>Delete annotation</value></data>
   <data name="Context_InspectSignature.Text" xml:space="preserve"><value>View digital signature details</value></data>
@@ -306,7 +306,7 @@
   <data name="TouchSelection_StrikeOut.Text" xml:space="preserve"><value>Strikethrough</value></data>
   <data name="TouchSelection_Squiggly.Text" xml:space="preserve"><value>Squiggly underline</value></data>
   <data name="TouchEmpty_AddComment_Label" xml:space="preserve"><value>Comment</value></data>
-  <data name="TouchEmpty_AddTextBox_Label" xml:space="preserve"><value>Text box</value></data>
+  <data name="TouchEmpty_AddTextBox_Label" xml:space="preserve"><value>Comment</value></data>
   <data name="Annot_Save" xml:space="preserve"><value>Save</value></data>
   <data name="Annot_Delete" xml:space="preserve"><value>Delete</value></data>
   <data name="Annot_Close" xml:space="preserve"><value>Close</value></data>
@@ -317,6 +317,7 @@
   <data name="Color_Blue" xml:space="preserve"><value>Blue</value></data>
   <data name="Color_Pink" xml:space="preserve"><value>Pink</value></data>
   <data name="Color_Orange" xml:space="preserve"><value>Orange</value></data>
+  <data name="Color_Red" xml:space="preserve"><value>Red</value></data>
   <data name="Annot_Subtype_Highlight" xml:space="preserve"><value>Highlight</value></data>
   <data name="Annot_Subtype_Underline" xml:space="preserve"><value>Underline</value></data>
   <data name="Annot_Subtype_Squiggly" xml:space="preserve"><value>Squiggly</value></data>
@@ -355,7 +356,7 @@
   <data name="Sig_Dialog_CertValidity" xml:space="preserve"><value>Certificate validity</value></data>
   <data name="Sig_Dialog_Thumbprint" xml:space="preserve"><value>Thumbprint (SHA-256)</value></data>
   <data name="Sig_Status_Valid" xml:space="preserve"><value>Valid digital signature</value></data>
-  <data name="Sig_Status_ValidUntrustedRoot" xml:space="preserve"><value>Intact integrity (root CA not in Windows store)</value></data>
+  <data name="Sig_Status_ValidUntrustedRoot" xml:space="preserve"><value>Valid signature (integrity verified)</value></data>
   <data name="Sig_Status_ModifiedAfterSigning" xml:space="preserve"><value>Document modified after signing</value></data>
   <data name="Sig_Status_Invalid" xml:space="preserve"><value>Invalid signature (content altered)</value></data>
   <data name="Sig_Status_Unknown" xml:space="preserve"><value>Unknown / unsupported signature</value></data>
@@ -363,4 +364,21 @@
   <data name="Sig_DocMdp_FormFillAndSign" xml:space="preserve"><value>Form fill and signing allowed</value></data>
   <data name="Sig_DocMdp_AnnotationsAllowed" xml:space="preserve"><value>Annotations, form fill and signing allowed</value></data>
   <data name="Sig_DocMdp_Unspecified" xml:space="preserve"><value>Standard</value></data>
+  <data name="StatusBar_SignedLabel" xml:space="preserve"><value>Digitally signed</value></data>
+  <data name="Annot_AddComment_ToolTip" xml:space="preserve"><value>Add comment</value></data>
+  <data name="Annot_Color_ToolTip" xml:space="preserve"><value>Change color</value></data>
+  <data name="Annot_Copy_ToolTip" xml:space="preserve"><value>Copy annotation</value></data>
+  <data name="Annot_Cut_ToolTip" xml:space="preserve"><value>Cut annotation</value></data>
+  <data name="Context_CopyAnnotation.Text" xml:space="preserve"><value>Copy annotation</value></data>
+  <data name="Context_CutAnnotation.Text" xml:space="preserve"><value>Cut annotation</value></data>
+  <data name="Context_PasteAnnotation.Text" xml:space="preserve"><value>Paste annotation</value></data>
+  <data name="TouchEmpty_Paste_Label" xml:space="preserve"><value>Paste</value></data>
+  <data name="Sig_Detail_Valid" xml:space="preserve"><value>The cryptographic signature is valid, the document has not been altered, and the certificate chain is trusted by Windows.</value></data>
+  <data name="Sig_Detail_ValidUntrustedRoot" xml:space="preserve"><value>The cryptographic signature and document integrity are valid. Note: the issuer's root CA is not installed in the default Windows certificate store.</value></data>
+  <data name="Sig_Detail_ModifiedAfterSigning" xml:space="preserve"><value>The signature is intact over its signed revision, but data or annotations were appended afterwards.</value></data>
+  <data name="Sig_Detail_Invalid" xml:space="preserve"><value>The cryptographic signature verification failed or the signed byte range was altered.</value></data>
+  <data name="Sig_Detail_Unknown" xml:space="preserve"><value>The embedded signature format could not be verified offline.</value></data>
+  <data name="Annot_Undo_ToolTip" xml:space="preserve"><value>Undo (Ctrl+Z)</value></data>
+  <data name="Context_UndoAnnotation.Text" xml:space="preserve"><value>Undo</value></data>
+  <data name="Toolbar_Color_ToolTip" xml:space="preserve"><value>Default annotation color</value></data>
 </root>

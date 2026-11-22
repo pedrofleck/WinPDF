@@ -145,6 +145,16 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Gets or sets the default annotation RGBA color applied when opening documents or creating new annotations.
+    /// </summary>
+    public PdfAnnotationColor DefaultAnnotationColor { get; set; } = PdfAnnotationColor.Yellow;
+
+    /// <summary>
+    /// Gets a value indicating whether at least one annotation edit, move, creation, or deletion in the active document can be undone.
+    /// </summary>
+    public bool CanUndoAnnotation => CurrentDocument?.CanUndoAnnotation == true;
+
+    /// <summary>
     /// Gets or sets the active interaction tool on the document canvas.
     /// </summary>
     [ObservableProperty]
@@ -695,6 +705,7 @@ public sealed partial class ShellViewModel : ObservableObject
             newValue.IsContinuous = (ViewMode == ViewMode.Continuous);
             newValue.IsDoublePage = IsDualPage;
             newValue.IsPresentationMode = IsPresentationMode;
+            newValue.ActiveAnnotationColor = DefaultAnnotationColor;
             newValue.PropertyChanged += OnDocumentPropertyChanged;
             newValue.SetThumbnailsActive(IsSidebarOpen && SidebarTab == SidebarTab.Thumbnails);
 
@@ -714,8 +725,10 @@ public sealed partial class ShellViewModel : ObservableObject
         UpdateFormattedStrings();
         OnPropertyChanged(nameof(HasDocument));
         OnPropertyChanged(nameof(HasTextSelection));
+        OnPropertyChanged(nameof(CanUndoAnnotation));
         OnPropertyChanged(nameof(SearchStatusText));
         CopySelectedTextCommand.NotifyCanExecuteChanged();
+        UndoAnnotationCommand.NotifyCanExecuteChanged();
     }
 
     private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -757,6 +770,11 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             OnPropertyChanged(nameof(HasTextSelection));
             CopySelectedTextCommand.NotifyCanExecuteChanged();
+        }
+        else if (e.PropertyName == nameof(DocumentViewModel.CanUndoAnnotation))
+        {
+            OnPropertyChanged(nameof(CanUndoAnnotation));
+            UndoAnnotationCommand.NotifyCanExecuteChanged();
         }
         else if (e.PropertyName == nameof(DocumentViewModel.SearchStatusText))
         {
@@ -1069,30 +1087,18 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Displays the modal inspector dialog listing all embedded digital signatures on the current document.
+    /// Displays the document properties modal dialog scrolled to the embedded digital signatures section.
     /// </summary>
-    /// <param name="focused">Optional focused signature to show first.</param>
+    /// <param name="focused">Optional signature parameter (kept for command bindings).</param>
     [RelayCommand]
     public async Task ShowSignatureDetailsAsync(PdfSignatureInfo? focused = null)
     {
-        if (CurrentDocument is not { Signatures.Count: > 0 } doc)
+        if (CurrentDocument is null)
         {
             return;
         }
 
-        List<PdfSignatureInfo> list = new(doc.Signatures.Count);
-        int focusIdx = 0;
-        for (int i = 0; i < doc.Signatures.Count; i++)
-        {
-            PdfSignatureInfo info = doc.Signatures[i].Info;
-            list.Add(info);
-            if (focused is not null && info.Index == focused.Index)
-            {
-                focusIdx = i;
-            }
-        }
-
-        await _dialogService.ShowSignatureDetailsAsync(list, focusIdx);
+        await _dialogService.ShowDocumentPropertiesAsync(CurrentDocument, focusSignatures: true);
     }
 
     /// <summary>
@@ -1518,6 +1524,19 @@ public sealed partial class ShellViewModel : ObservableObject
             {
                 ActiveTool = AnnotationTool.Select;
             }
+        }
+    }
+
+    /// <summary>
+    /// Undoes the most recent annotation edit, move, creation, or deletion in the active document.
+    /// </summary>
+    /// <returns>A task representing the asynchronous undo operation.</returns>
+    [RelayCommand]
+    private async Task UndoAnnotationAsync()
+    {
+        if (CurrentDocument is { CanUndoAnnotation: true } doc)
+        {
+            _ = await doc.UndoAnnotationAsync();
         }
     }
 

@@ -498,6 +498,36 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
     }
 
     /// <inheritdoc/>
+    public Task<PdfPageAnnotationMutationResult> MoveAnnotationAsync(
+        long documentId,
+        PdfMoveAnnotationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Enqueue<PdfPageAnnotationMutationResult>(
+            new PdfiumJob<PdfPageAnnotationMutationResult>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.MoveAnnotation(documentId, request, token),
+                cancellationToken),
+            highPriority: true);
+    }
+
+    /// <inheritdoc/>
+    public Task<PdfPageAnnotationMutationResult> PasteAnnotationAsync(
+        long documentId,
+        PdfPasteAnnotationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Enqueue<PdfPageAnnotationMutationResult>(
+            new PdfiumJob<PdfPageAnnotationMutationResult>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.PasteAnnotation(documentId, request, token),
+                cancellationToken),
+            highPriority: true);
+    }
+
+    /// <inheritdoc/>
     public Task<IReadOnlyList<PdfAnnotationInfo>> DeleteAnnotationAsync(
         long documentId,
         int pageIndex,

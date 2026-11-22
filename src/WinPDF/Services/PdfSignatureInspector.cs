@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Numerics;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using WinPDF.Helpers;
 using WinPDF.Models;
 
 namespace WinPDF.Services;
@@ -293,26 +294,22 @@ internal static class PdfSignatureInspector
             if (!cryptoValid)
             {
                 status = PdfSignatureVerificationStatus.Invalid;
-                statusDetails = digestMatches
-                    ? "CMS cryptographic signature check failed."
-                    : "Signed byte range hash mismatch — file content was altered.";
+                statusDetails = ResourceStrings.Get(ResourceKeys.SigDetailInvalid);
             }
             else if (!coversWholeDoc)
             {
                 status = PdfSignatureVerificationStatus.ModifiedAfterSigning;
-                statusDetails = "Signature is intact over its signed revision, but data or annotations were appended later.";
+                statusDetails = ResourceStrings.Get(ResourceKeys.SigDetailModifiedAfterSigning);
             }
             else if (chainTrusted)
             {
                 status = PdfSignatureVerificationStatus.Valid;
-                statusDetails = "Signature is valid and the certificate chain is trusted.";
+                statusDetails = ResourceStrings.Get(ResourceKeys.SigDetailValid);
             }
             else
             {
                 status = PdfSignatureVerificationStatus.ValidUntrustedRoot;
-                statusDetails = string.IsNullOrWhiteSpace(chainStatusDetail)
-                    ? "Document integrity verified, but the issuing root authority is not in the Windows Trusted Root store."
-                    : $"Document integrity verified ({chainStatusDetail})";
+                statusDetails = ResourceStrings.Get(ResourceKeys.SigDetailValidUntrustedRoot);
             }
 
             string thumbprint = Convert.ToHexString(signerCert.GetCertHash(HashAlgorithmName.SHA256));

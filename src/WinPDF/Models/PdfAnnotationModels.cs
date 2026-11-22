@@ -103,7 +103,7 @@ public enum PdfAnnotationSubtype
 public readonly record struct PdfAnnotationColor(byte R, byte G, byte B, byte A = 255)
 {
     /// <summary>Preset yellow highlight/note color.</summary>
-    public static readonly PdfAnnotationColor Yellow = new(255, 226, 74, 255);
+    public static readonly PdfAnnotationColor Yellow = new(255, 230, 32, 255);
 
     /// <summary>Preset mint-green highlight/note color.</summary>
     public static readonly PdfAnnotationColor Green = new(118, 224, 138, 255);
@@ -116,7 +116,40 @@ public readonly record struct PdfAnnotationColor(byte R, byte G, byte B, byte A 
 
     /// <summary>Preset warm-orange highlight/note color.</summary>
     public static readonly PdfAnnotationColor Orange = new(255, 178, 92, 255);
+
+    /// <summary>Preset crimson-red highlight/note color.</summary>
+    public static readonly PdfAnnotationColor Red = new(242, 76, 76, 255);
 }
+
+/// <summary>
+/// Captured vector path segment from a PDF annotation appearance stream (<c>/AP</c>).
+/// </summary>
+/// <param name="Type">Segment type: <c>0</c> = LineTo, <c>1</c> = BezierTo, <c>2</c> = MoveTo.</param>
+/// <param name="X">X coordinate in page user space (points).</param>
+/// <param name="Y">Y coordinate in page user space (points).</param>
+/// <param name="IsClosed">Whether the subpath is closed after this segment.</param>
+public readonly record struct PdfCapturedPathSegment(
+    byte Type,
+    float X,
+    float Y,
+    bool IsClosed);
+
+/// <summary>
+/// Captured vector path object from an annotation appearance stream so ink strokes and arbitrary shapes can be pasted faithfully.
+/// </summary>
+/// <param name="Segments">Ordered path segments in page user space (points).</param>
+/// <param name="StrokeColor">Stroke RGBA color, if stroked.</param>
+/// <param name="FillColor">Fill RGBA color, if filled.</param>
+/// <param name="StrokeWidthPt">Stroke width in PDF points.</param>
+/// <param name="FillMode">PDFium fill mode (<c>0</c> = none, <c>1</c> = alternate/even-odd, <c>2</c> = winding).</param>
+/// <param name="HasStroke">Whether the path is stroked.</param>
+public sealed record PdfCapturedPath(
+    IReadOnlyList<PdfCapturedPathSegment> Segments,
+    PdfAnnotationColor? StrokeColor,
+    PdfAnnotationColor? FillColor,
+    float StrokeWidthPt,
+    int FillMode,
+    bool HasStroke);
 
 /// <summary>
 /// Immutable snapshot of a PDF annotation read from a page dictionary.
@@ -136,6 +169,10 @@ public readonly record struct PdfAnnotationColor(byte R, byte G, byte B, byte A 
 /// <param name="QuotedText">Optional quoted document text covered by a text markup annotation.</param>
 /// <param name="IsSignatureWidget">Whether this widget hosts a digital signature appearance stamp.</param>
 /// <param name="SignatureIndex">Matched index into the document signature list, or -1 if none.</param>
+/// <param name="InteriorColor">Optional interior fill color (<c>/IC</c>) for shape annotations.</param>
+/// <param name="BorderWidthPt">Stroke / border width in PDF points.</param>
+/// <param name="Strokes">Optional vector stroke paths for ink, line, polygon, or polyline annotations.</param>
+/// <param name="CapturedPaths">Optional captured vector paths from the annotation's appearance stream (<c>/AP</c>).</param>
 public sealed record PdfAnnotationInfo(
     int PageIndex,
     int AnnotIndex,
@@ -151,7 +188,11 @@ public sealed record PdfAnnotationInfo(
     string Subject,
     string QuotedText,
     bool IsSignatureWidget = false,
-    int SignatureIndex = -1)
+    int SignatureIndex = -1,
+    PdfAnnotationColor? InteriorColor = null,
+    float BorderWidthPt = 2.0f,
+    IReadOnlyList<IReadOnlyList<System.Numerics.Vector2>>? Strokes = null,
+    IReadOnlyList<PdfCapturedPath>? CapturedPaths = null)
 {
     /// <summary>Gets a value indicating whether this annotation carries a non-empty comment or text body.</summary>
     public bool HasComment => !string.IsNullOrWhiteSpace(Contents);
@@ -161,6 +202,12 @@ public sealed record PdfAnnotationInfo(
 
     /// <summary>Gets a value indicating whether the user can recolor this annotation directly.</summary>
     public bool SupportsColorChange => IsTextMarkup || Subtype is PdfAnnotationSubtype.Text or PdfAnnotationSubtype.FreeText;
+
+    /// <summary>Gets a value indicating whether this annotation can be dragged to a new position on the page.</summary>
+    public bool IsMovable => !IsSignatureWidget && !IsTextMarkup;
+
+    /// <summary>Gets a value indicating whether this annotation can be copied, cut, or pasted.</summary>
+    public bool CanCopyOrCut => !IsSignatureWidget && !IsTextMarkup;
 
     /// <summary>
     /// Determines whether the specified PDF user-space point lies inside this annotation's hit area.
@@ -262,6 +309,7 @@ public sealed record PdfSignatureInfo(
 /// <param name="Contents">Optional comment body.</param>
 /// <param name="Author">Author display name.</param>
 /// <param name="Subject">Optional subject label.</param>
+/// <param name="SkipPadding">Whether to use <paramref name="Rects"/> verbatim without applying extra visual padding.</param>
 public sealed record PdfCreateMarkupRequest(
     int PageIndex,
     PdfAnnotationSubtype Subtype,
@@ -269,7 +317,8 @@ public sealed record PdfCreateMarkupRequest(
     PdfAnnotationColor Color,
     string Contents,
     string Author,
-    string Subject = "");
+    string Subject = "",
+    bool SkipPadding = false);
 
 /// <summary>
 /// Request to create a sticky-note comment annotation (<c>/Text</c>) at a point in PDF space.
@@ -319,6 +368,32 @@ public sealed record PdfUpdateAnnotationRequest(
     int AnnotIndex,
     string Contents,
     PdfAnnotationColor? NewColor = null);
+
+/// <summary>
+/// Request to translate a movable annotation (<c>FreeText</c>, <c>Text</c>, <c>Ink</c>, shapes, etc.) by a PDF-space delta.
+/// </summary>
+/// <param name="PageIndex">Zero-based page index.</param>
+/// <param name="AnnotIndex">Zero-based index in the page's annotation list.</param>
+/// <param name="DeltaPdfX">Horizontal translation in PDF points.</param>
+/// <param name="DeltaPdfY">Vertical translation in PDF points.</param>
+public sealed record PdfMoveAnnotationRequest(
+    int PageIndex,
+    int AnnotIndex,
+    double DeltaPdfX,
+    double DeltaPdfY);
+
+/// <summary>
+/// Request to paste a non-markup annotation snapshot (comment note, text box, ink drawing, or shape) onto a target page.
+/// </summary>
+/// <param name="Source">Source annotation snapshot.</param>
+/// <param name="TargetPageIndex">Destination zero-based page index.</param>
+/// <param name="TargetPdfX">Target X coordinate in PDF user space (points).</param>
+/// <param name="TargetPdfY">Target Y coordinate in PDF user space (points).</param>
+public sealed record PdfPasteAnnotationRequest(
+    PdfAnnotationInfo Source,
+    int TargetPageIndex,
+    double TargetPdfX,
+    double TargetPdfY);
 
 /// <summary>
 /// Result returned after creating or updating an annotation, carrying refreshed page annotations and target index.

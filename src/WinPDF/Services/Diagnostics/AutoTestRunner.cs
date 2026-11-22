@@ -600,6 +600,61 @@ public static partial class AutoTestRunner
                 }
             }
 
+            double origFreeTextLeft = createdFreeText?.Bounds.Left ?? 0.0;
+            if (createdFreeText is not null)
+            {
+                PdfPageAnnotationMutationResult movedRes = await pdfService.MoveAnnotationAsync(
+                    tempDocId,
+                    new PdfMoveAnnotationRequest(
+                        PageIndex: 0,
+                        AnnotIndex: createdFreeText.AnnotIndex,
+                        DeltaPdfX: 25.0,
+                        DeltaPdfY: -18.0));
+                _ = movedRes;
+            }
+
+            PdfPageAnnotationMutationResult blueNoteRes = await pdfService.AddTextNoteAnnotationAsync(
+                tempDocId,
+                new PdfCreateNoteRequest(
+                    PageIndex: 0,
+                    PdfX: 260.0,
+                    PdfY: 460.0,
+                    Color: PdfAnnotationColor.Blue,
+                    Contents: "Blue Comment",
+                    Author: "WinPDF AutoTest"));
+
+            PdfPageAnnotationMutationResult movedBlueNote = await pdfService.MoveAnnotationAsync(
+                tempDocId,
+                new PdfMoveAnnotationRequest(
+                    PageIndex: 0,
+                    AnnotIndex: blueNoteRes.TargetAnnotIndex,
+                    DeltaPdfX: 16.0,
+                    DeltaPdfY: -12.0));
+            PdfAnnotationInfo? blueNoteAfterMove = movedBlueNote.Annotations.FirstOrDefault(a => a.AnnotIndex == movedBlueNote.TargetAnnotIndex);
+            bool movedNoteKeptColor = blueNoteAfterMove is not null &&
+                                      Math.Abs(blueNoteAfterMove.Color.R - PdfAnnotationColor.Blue.R) < 8 &&
+                                      Math.Abs(blueNoteAfterMove.Color.G - PdfAnnotationColor.Blue.G) < 8 &&
+                                      Math.Abs(blueNoteAfterMove.Color.B - PdfAnnotationColor.Blue.B) < 8;
+
+            PdfPageAnnotationMutationResult underlineRes = await pdfService.AddMarkupAnnotationAsync(
+                tempDocId,
+                new PdfCreateMarkupRequest(
+                    PageIndex: 0,
+                    Subtype: PdfAnnotationSubtype.Underline,
+                    Rects: [new PdfRect(100f, 680f, 220f, 694f)],
+                    Color: PdfAnnotationColor.Green,
+                    Contents: string.Empty,
+                    Author: "WinPDF AutoTest"));
+
+            bool pastedOk = false;
+            if (createdFreeText is not null)
+            {
+                PdfPageAnnotationMutationResult pasteRes = await pdfService.PasteAnnotationAsync(
+                    tempDocId,
+                    new PdfPasteAnnotationRequest(createdFreeText, 0, 320.0, 520.0));
+                pastedOk = pasteRes.TargetAnnotIndex >= 0;
+            }
+
             _ = await pdfService.UpdateAnnotationAsync(
                 tempDocId,
                 new PdfUpdateAnnotationRequest(
@@ -622,7 +677,16 @@ public static partial class AutoTestRunner
 
             PdfAnnotationInfo? persistedHighlight = loadedAnnots.FirstOrDefault(a => a.Subtype == PdfAnnotationSubtype.Highlight && a.Contents == "Updated Comment");
             PdfAnnotationInfo? persistedNote = loadedAnnots.FirstOrDefault(a => a.Subtype == PdfAnnotationSubtype.Text && a.Contents == "AutoTest Sticky Note");
+            PdfAnnotationInfo? persistedBlueNote = loadedAnnots.FirstOrDefault(a => a.Subtype == PdfAnnotationSubtype.Text && a.Contents == "Blue Comment");
             PdfAnnotationInfo? persistedFreeText = loadedAnnots.FirstOrDefault(a => a.Subtype == PdfAnnotationSubtype.FreeText && a.Contents == "AutoTest FreeText Box");
+            PdfAnnotationInfo? persistedUnderline = loadedAnnots.FirstOrDefault(a => a.Subtype == PdfAnnotationSubtype.Underline);
+
+            bool persistedBlueColor = persistedBlueNote is not null &&
+                                      Math.Abs(persistedBlueNote.Color.R - PdfAnnotationColor.Blue.R) < 8 &&
+                                      Math.Abs(persistedBlueNote.Color.B - PdfAnnotationColor.Blue.B) < 8;
+
+            bool movedOk = persistedFreeText is not null &&
+                           Math.Abs((persistedFreeText.Bounds.Left - origFreeTextLeft) - 25.0) < 2.0;
 
             bool colorUpdated = persistedHighlight is not null &&
                                 persistedHighlight.Color.R == PdfAnnotationColor.Green.R &&
@@ -645,18 +709,45 @@ public static partial class AutoTestRunner
             await pdfService.CloseDocumentAsync(tempDocId);
             tempDocId = -1;
 
+            // Verify DocumentViewModel undo chain (Create -> Move -> Update -> Delete -> Undo x4)
+            int initialDocAnnots = doc.AnnotationsSummary.Count;
+            PdfAnnotationInfo? undoTestCreated = await doc.AddTextNoteAsync(0, 180.0, 420.0, PdfAnnotationColor.Pink, "Undo Note");
+            PdfAnnotationInfo? undoTestMoved = undoTestCreated is not null
+                ? await doc.MoveAnnotationAsync(undoTestCreated.PageIndex, undoTestCreated.AnnotIndex, 24.0, -16.0)
+                : null;
+            PdfAnnotationInfo? undoTestUpdated = undoTestMoved is not null
+                ? await doc.UpdateAnnotationAsync(undoTestMoved.PageIndex, undoTestMoved.AnnotIndex, "Undo Note Edited", PdfAnnotationColor.Green)
+                : null;
+            if (undoTestUpdated is not null)
+            {
+                await doc.DeleteAnnotationAsync(undoTestUpdated.PageIndex, undoTestUpdated.AnnotIndex);
+            }
+
+            bool u1 = await doc.UndoAnnotationAsync();
+            bool u2 = await doc.UndoAnnotationAsync();
+            bool u3 = await doc.UndoAnnotationAsync();
+            bool u4 = await doc.UndoAnnotationAsync();
+            bool undoOk = u1 && u2 && u3 && u4 && !doc.CanUndoAnnotation && doc.AnnotationsSummary.Count == initialDocAnnots;
+
             annotPass = persistedHighlight is not null &&
                         persistedNote is not null &&
                         persistedFreeText is not null &&
+                        persistedUnderline is not null &&
+                        underlineRes.TargetAnnotIndex >= 0 &&
+                        movedNoteKeptColor &&
+                        persistedBlueColor &&
+                        pastedOk &&
                         colorUpdated &&
+                        movedOk &&
+                        undoOk &&
                         nonWhitePixels > 20 &&
                         darkTextPixels > 5 &&
                         afterDeleteCount == beforeDeletePage0 - 1;
 
             annotDetails =
-                $"Sigs={sigs.Count}, Persisted={loadedAnnots.Count}, ColorOk={colorUpdated}, " +
-                $"FreeTextNonWhitePx={nonWhitePixels}, FreeTextDarkTextPx={darkTextPixels}, " +
-                $"Page0BeforeDel={beforeDeletePage0}, AfterDel={afterDeleteCount}";
+                $"Sigs={sigs.Count}, Persisted={loadedAnnots.Count}, ColorOk={colorUpdated}, NoteColorOk={movedNoteKeptColor && persistedBlueColor}, " +
+                $"MovedOk={movedOk}, PastedOk={pastedOk}, UnderlineOk={persistedUnderline is not null}, UndoOk={undoOk}, " +
+                $"FreeTextNonWhitePx={nonWhitePixels}, FreeTextDarkTextPx={darkTextPixels}, Page0BeforeDel={beforeDeletePage0}, AfterDel={afterDeleteCount}";
         }
         catch (Exception ex)
         {

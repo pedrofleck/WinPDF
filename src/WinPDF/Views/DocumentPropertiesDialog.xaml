@@ -42,6 +42,7 @@
 
         <!-- Row 1: Single-Column Scrollable Properties Body in Acrylic -->
         <ScrollViewer
+            x:Name="PropertiesScrollViewer"
             Grid.Row="1"
             MaxHeight="440"
             Padding="24,0,24,24"
@@ -226,6 +227,24 @@
                         Style="{StaticResource BodyTextBlockStyle}"
                         Text="{x:Bind Document.MetaProducer, Mode=OneWay}"
                         TextWrapping="Wrap" />
+                </StackPanel>
+
+                <!-- Digital Signatures (shown only when the document contains embedded signatures) -->
+                <StackPanel
+                    x:Name="SignaturesSection"
+                    Spacing="10"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(Document.HasSignatures), Mode=OneWay}">
+                    <Border
+                        Height="1"
+                        Margin="0,4,0,2"
+                        Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                    <TextBlock
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        Text="{x:Bind SignaturesSectionTitle, Mode=OneTime}" />
+                    <StackPanel
+                        x:Name="SignatureCardsHost"
+                        Spacing="10" />
                 </StackPanel>
 
                 <!-- File Location + Open File Location Link (Windows 11 Media Player Style) -->

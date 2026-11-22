@@ -81,6 +81,7 @@ public sealed partial class PdfPageCanvas : Grid
     private static readonly InputSystemCursor s_arrowCursor = InputSystemCursor.Create(InputSystemCursorShape.Arrow);
     private static readonly InputSystemCursor s_iBeamCursor = InputSystemCursor.Create(InputSystemCursorShape.IBeam);
     private static readonly InputSystemCursor s_handCursor = InputSystemCursor.Create(InputSystemCursorShape.Hand);
+    private static readonly InputSystemCursor s_sizeAllCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeAll);
 
     [ComImport]
     [Guid("905a0fef-bc53-11df-8c49-001e4fc686da")]
@@ -257,6 +258,9 @@ public sealed partial class PdfPageCanvas : Grid
     private int _selectionAnchorCharIndex = -1;
     private int _lastDragEndCharIndex = -2;
     private PdfLinkTarget _pressedLink = PdfLinkTarget.None;
+    private PdfAnnotationInfo? _pressedMovableAnnotation;
+    private bool _isDraggingAnnotation;
+    private Point _annotationDragDeltaDip;
     private int _clickCount;
     private long _lastClickTick;
     private Point _lastClickDipPoint = new(-1000, -1000);
@@ -363,6 +367,16 @@ public sealed partial class PdfPageCanvas : Grid
     /// Event raised when the user taps or clicks a page while the Text Note tool is active.
     /// </summary>
     public static event Action<PdfPageCanvas, Vector2, Point>? PlaceTextNoteRequested;
+
+    /// <summary>
+    /// Event raised when the user finishes dragging a movable annotation to a new location on the page.
+    /// </summary>
+    public static event Action<PdfPageCanvas, PdfAnnotationInfo, Vector2>? AnnotationMoved;
+
+    /// <summary>
+    /// Event raised when the user presses a mouse button over this page canvas, reporting the PDF-space point.
+    /// </summary>
+    public static event Action<PdfPageCanvas, Vector2>? MouseClickedOnPage;
 
     /// <summary>
     /// Optional callback queried to check whether the parent viewer is currently tracking a single-finger XAML manipulation.
@@ -982,6 +996,7 @@ public sealed partial class PdfPageCanvas : Grid
         {
             InputSystemCursorShape.IBeam => s_iBeamCursor,
             InputSystemCursorShape.Hand => s_handCursor,
+            InputSystemCursorShape.SizeAll => s_sizeAllCursor,
             _ => s_arrowCursor,
         };
     }
@@ -1234,6 +1249,15 @@ public sealed partial class PdfPageCanvas : Grid
 
     private void OnCanvasPointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        if (PageInfo is not null && e.Pointer.PointerDeviceType == PointerDeviceType.Mouse)
+        {
+            PointerPoint mousePt = e.GetCurrentPoint(this);
+            if (mousePt.Properties.IsLeftButtonPressed || mousePt.Properties.IsRightButtonPressed)
+            {
+                MouseClickedOnPage?.Invoke(this, ToPdfPoint(mousePt.Position));
+            }
+        }
+
         if (!IsSelectInteractionAllowed() || PageInfo is null)
         {
             return;
@@ -1285,6 +1309,35 @@ public sealed partial class PdfPageCanvas : Grid
 
             e.Handled = true;
             return;
+        }
+
+        if (!isTouch &&
+            (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool == AnnotationTool.Select &&
+            _observedDocument is not null)
+        {
+            Vector2 pressPdf = ToPdfPoint(pt.Position);
+            PdfAnnotationInfo? hitMovable = _observedDocument.HitTestAnnotation(PageInfo.Index, pressPdf.X, pressPdf.Y, tolerancePt: 4.0);
+            if (hitMovable is { IsMovable: true })
+            {
+                _pressedMovableAnnotation = hitMovable;
+                _isDraggingAnnotation = false;
+                _annotationDragDeltaDip = default;
+                _isPointerDown = true;
+                _hasDraggedSelection = false;
+                _pressedLink = PdfLinkTarget.None;
+                _pressDipPoint = pt.Position;
+                _pressPdfPoint = pressPdf;
+                try
+                {
+                    _ = CapturePointer(e.Pointer);
+                }
+                catch
+                {
+                }
+
+                e.Handled = true;
+                return;
+            }
         }
 
         long now = Environment.TickCount64;
@@ -1934,9 +1987,7 @@ public sealed partial class PdfPageCanvas : Grid
                     return;
                 }
 
-                if (hitAnnot.Subtype is PdfAnnotationSubtype.Text or PdfAnnotationSubtype.FreeText ||
-                    hitAnnot.HasComment ||
-                    hitAnnot.IsTextMarkup)
+                if (!hitAnnot.IsSignatureWidget)
                 {
                     _lastTouchTapTick = 0;
                     tappedDoc.ClearSelection();
@@ -2158,6 +2209,26 @@ public sealed partial class PdfPageCanvas : Grid
 
         Point posDip = e.GetCurrentPoint(this).Position;
 
+        if (_isPointerDown && _pressedMovableAnnotation is not null)
+        {
+            double adx = posDip.X - _pressDipPoint.X;
+            double ady = posDip.Y - _pressDipPoint.Y;
+            if (!_isDraggingAnnotation && ((adx * adx) + (ady * ady)) >= (DragStartThresholdDip * DragStartThresholdDip))
+            {
+                _isDraggingAnnotation = true;
+            }
+
+            if (_isDraggingAnnotation)
+            {
+                _annotationDragDeltaDip = new Point(adx, ady);
+                SetCursorShape(InputSystemCursorShape.SizeAll);
+                InvalidateOverlays();
+            }
+
+            e.Handled = true;
+            return;
+        }
+
         if (_isPointerDown)
         {
             double dx = posDip.X - _pressDipPoint.X;
@@ -2229,6 +2300,8 @@ public sealed partial class PdfPageCanvas : Grid
         // Capture local state BEFORE calling ReleasePointerCapture, because ReleasePointerCapture
         // synchronously raises OnCanvasPointerCaptureLost in WinUI 3!
         bool wasDragged = _hasDraggedSelection;
+        bool wasAnnotDragged = _isDraggingAnnotation;
+        PdfAnnotationInfo? pressedMovableAnnot = _pressedMovableAnnotation;
         PdfLinkTarget pressedLink = _pressedLink;
         long activeSession = _selectionSessionId;
         int anchorChar = _selectionAnchorCharIndex;
@@ -2237,6 +2310,9 @@ public sealed partial class PdfPageCanvas : Grid
 
         _isPointerDown = false;
         _hasDraggedSelection = false;
+        _isDraggingAnnotation = false;
+        _pressedMovableAnnotation = null;
+        _annotationDragDeltaDip = default;
         _pressedLink = PdfLinkTarget.None;
 
         _isReleasingCapture = true;
@@ -2250,6 +2326,31 @@ public sealed partial class PdfPageCanvas : Grid
         finally
         {
             _isReleasingCapture = false;
+        }
+
+        if (pressedMovableAnnot is not null)
+        {
+            e.Handled = true;
+            SetCursorShape(InputSystemCursorShape.Arrow);
+            InvalidateOverlays();
+
+            if (wasAnnotDragged)
+            {
+                Vector2 releasePdf = ToPdfPoint(releasePosDip);
+                Vector2 deltaPdf = releasePdf - anchorPdf;
+                if (MathF.Abs(deltaPdf.X) > 0.5f || MathF.Abs(deltaPdf.Y) > 0.5f)
+                {
+                    AnnotationMoved?.Invoke(this, pressedMovableAnnot, deltaPdf);
+                }
+            }
+            else if (_observedDocument is { } clickedAnnotDoc)
+            {
+                clickedAnnotDoc.ClearSelection();
+                clickedAnnotDoc.SelectedAnnotation = pressedMovableAnnot;
+                AnnotationClicked?.Invoke(this, pressedMovableAnnot, releasePosDip);
+            }
+
+            return;
         }
 
         long now = Environment.TickCount64;
@@ -2407,6 +2508,14 @@ public sealed partial class PdfPageCanvas : Grid
         // Do NOT clear _hasDraggedSelection or _observedDocument.ActiveSelection here so any selection
         // already made by the user remains intact.
         _isPointerDown = false;
+        if (_pressedMovableAnnotation is not null || _isDraggingAnnotation)
+        {
+            _pressedMovableAnnotation = null;
+            _isDraggingAnnotation = false;
+            _annotationDragDeltaDip = default;
+            SetCursorShape(InputSystemCursorShape.Arrow);
+            InvalidateOverlays();
+        }
     }
 
     private void OnCanvasPointerExited(object sender, PointerRoutedEventArgs e)
@@ -2534,7 +2643,7 @@ public sealed partial class PdfPageCanvas : Grid
                 }
                 else if (_observedDocument?.HitTestAnnotation(pageIndex, pdfPt.X, pdfPt.Y, tolerancePt: 4.0) is { } hoverAnnot &&
                          (hoverAnnot.IsSignatureWidget ||
-                          hoverAnnot.Subtype is PdfAnnotationSubtype.Text or PdfAnnotationSubtype.FreeText ||
+                          hoverAnnot.IsMovable ||
                           hoverAnnot.HasComment))
                 {
                     SetCursorShape(InputSystemCursorShape.Hand);
@@ -2987,8 +3096,10 @@ public sealed partial class PdfPageCanvas : Grid
         bool hasSelectionOnPage = selectionRects.Count > 0;
         PdfAnnotationInfo? selectedAnnot = doc.SelectedAnnotation;
         bool hasSelectedAnnotOnPage = selectedAnnot is not null && selectedAnnot.PageIndex == pageIndex;
+        PdfAnnotationInfo? draggedAnnot = _isDraggingAnnotation ? _pressedMovableAnnotation : null;
+        bool hasDraggedAnnotOnPage = draggedAnnot is not null && draggedAnnot.PageIndex == pageIndex;
 
-        if (pageMatches.Count == 0 && !hasSelectionOnPage && !hasSelectedAnnotOnPage)
+        if (pageMatches.Count == 0 && !hasSelectionOnPage && !hasSelectedAnnotOnPage && !hasDraggedAnnotOnPage)
         {
             return;
         }
@@ -3088,6 +3199,30 @@ public sealed partial class PdfPageCanvas : Grid
 
                 ds.FillRoundedRectangle(focusRect, 3.0f, 3.0f, focusFill);
                 ds.DrawRoundedRectangle(focusRect, 3.0f, 3.0f, focusStroke, 1.75f);
+            }
+        }
+
+        // 4. Drag-to-move live ghost preview outline
+        if (hasDraggedAnnotOnPage && draggedAnnot is not null && !draggedAnnot.Bounds.IsEmpty)
+        {
+            Rect dipRect = transform.ToPageRect(draggedAnnot.Bounds);
+            if (dipRect.Width > 0.1 && dipRect.Height > 0.1)
+            {
+                Rect ghostRect = new(
+                    dipRect.X + offsetX + _annotationDragDeltaDip.X,
+                    dipRect.Y + offsetY + _annotationDragDeltaDip.Y,
+                    dipRect.Width,
+                    dipRect.Height);
+
+                Windows.UI.Color ghostFill = IsNightMode
+                    ? Windows.UI.Color.FromArgb(48, 120, 195, 255)
+                    : Windows.UI.Color.FromArgb(36, 0, 120, 215);
+                Windows.UI.Color ghostStroke = IsNightMode
+                    ? Windows.UI.Color.FromArgb(245, 130, 205, 255)
+                    : Windows.UI.Color.FromArgb(235, 0, 108, 200);
+
+                ds.FillRoundedRectangle(ghostRect, 3.0f, 3.0f, ghostFill);
+                ds.DrawRoundedRectangle(ghostRect, 3.0f, 3.0f, ghostStroke, 2.0f);
             }
         }
     }

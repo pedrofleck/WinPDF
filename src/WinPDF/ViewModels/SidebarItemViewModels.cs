@@ -84,7 +84,7 @@ public sealed partial class BookmarkItemViewModel : ObservableObject
 public sealed partial class AnnotationItemViewModel : ObservableObject
 {
     /// <summary>Gets the underlying annotation model.</summary>
-    public PdfAnnotationInfo Info { get; }
+    public PdfAnnotationInfo Info { get; private set; }
 
     /// <summary>Gets the zero-based page index.</summary>
     public int PageIndex => Info.PageIndex;
@@ -99,10 +99,10 @@ public sealed partial class AnnotationItemViewModel : ObservableObject
     public PdfAnnotationSubtype Subtype => Info.Subtype;
 
     /// <summary>Gets the localized subtype title (e.g. Highlight, Comment, Text Box, Drawing).</summary>
-    public string TitleText { get; }
+    public string TitleText { get; private set; }
 
     /// <summary>Gets the annotation comment body or quoted document text snippet.</summary>
-    public string Text { get; }
+    public string Text { get; private set; }
 
     /// <summary>Gets a value indicating whether there is non-empty body or quoted text to display.</summary>
     public bool HasBodyText => !string.IsNullOrWhiteSpace(Text);
@@ -114,7 +114,7 @@ public sealed partial class AnnotationItemViewModel : ObservableObject
     public bool HasAuthor => !string.IsNullOrWhiteSpace(Info.Author);
 
     /// <summary>Gets the formatted local modification timestamp.</summary>
-    public string FormattedDate { get; }
+    public string FormattedDate { get; private set; }
 
     /// <summary>Gets a value indicating whether a valid timestamp string is available.</summary>
     public bool HasDate => !string.IsNullOrWhiteSpace(FormattedDate);
@@ -123,10 +123,10 @@ public sealed partial class AnnotationItemViewModel : ObservableObject
     public string PageBadgeText => UiHelpers.FormatBookmarkPage(PageNumber);
 
     /// <summary>Gets the Segoe Fluent icon glyph representing this annotation subtype.</summary>
-    public string IconGlyph { get; }
+    public string IconGlyph { get; private set; }
 
     /// <summary>Gets the opaque swatch color of this annotation.</summary>
-    public Windows.UI.Color SwatchColor => Windows.UI.Color.FromArgb(255, Info.Color.R, Info.Color.G, Info.Color.B);
+    public Windows.UI.Color SwatchColor { get; private set; }
 
     /// <summary>Gets a value indicating whether the user can delete this annotation from the sidebar.</summary>
     public bool CanDelete => !Info.IsSignatureWidget;
@@ -143,6 +143,70 @@ public sealed partial class AnnotationItemViewModel : ObservableObject
         Text = !string.IsNullOrWhiteSpace(info.Contents) ? info.Contents.Trim() : info.QuotedText.Trim();
         FormattedDate = info.ModifiedDate?.ToLocalTime().ToString("g") ?? string.Empty;
         IconGlyph = ResolveIconGlyph(info);
+        SwatchColor = Windows.UI.Color.FromArgb(255, info.Color.R, info.Color.G, info.Color.B);
+    }
+
+    /// <summary>
+    /// Updates this item in place from a refreshed <see cref="PdfAnnotationInfo"/> snapshot,
+    /// raising <see cref="ObservableObject.PropertyChanged"/> only for properties that visibly changed.
+    /// </summary>
+    /// <param name="updated">Refreshed annotation record.</param>
+    public void UpdateFrom(PdfAnnotationInfo updated)
+    {
+        ArgumentNullException.ThrowIfNull(updated);
+        PdfAnnotationInfo previous = Info;
+        Info = updated;
+
+        string newTitle = ResolveSubtypeTitle(updated);
+        if (!string.Equals(TitleText, newTitle, StringComparison.Ordinal))
+        {
+            TitleText = newTitle;
+            OnPropertyChanged(nameof(TitleText));
+        }
+
+        string newText = !string.IsNullOrWhiteSpace(updated.Contents) ? updated.Contents.Trim() : updated.QuotedText.Trim();
+        if (!string.Equals(Text, newText, StringComparison.Ordinal))
+        {
+            bool oldHasBody = HasBodyText;
+            Text = newText;
+            OnPropertyChanged(nameof(Text));
+            if (oldHasBody != HasBodyText)
+            {
+                OnPropertyChanged(nameof(HasBodyText));
+            }
+        }
+
+        string newDate = updated.ModifiedDate?.ToLocalTime().ToString("g") ?? string.Empty;
+        if (!string.Equals(FormattedDate, newDate, StringComparison.Ordinal))
+        {
+            bool oldHasDate = HasDate;
+            FormattedDate = newDate;
+            OnPropertyChanged(nameof(FormattedDate));
+            if (oldHasDate != HasDate)
+            {
+                OnPropertyChanged(nameof(HasDate));
+            }
+        }
+
+        string newGlyph = ResolveIconGlyph(updated);
+        if (!string.Equals(IconGlyph, newGlyph, StringComparison.Ordinal))
+        {
+            IconGlyph = newGlyph;
+            OnPropertyChanged(nameof(IconGlyph));
+        }
+
+        Windows.UI.Color newSwatch = Windows.UI.Color.FromArgb(255, updated.Color.R, updated.Color.G, updated.Color.B);
+        if (SwatchColor != newSwatch)
+        {
+            SwatchColor = newSwatch;
+            OnPropertyChanged(nameof(SwatchColor));
+        }
+
+        if (!string.Equals(previous.Author, updated.Author, StringComparison.Ordinal))
+        {
+            OnPropertyChanged(nameof(Author));
+            OnPropertyChanged(nameof(HasAuthor));
+        }
     }
 
     /// <summary>Gets a localized human-readable label for a PDF annotation subtype.</summary>
@@ -276,8 +340,7 @@ public sealed partial class SignatureItemViewModel : ObservableObject
 
     private static (string Glyph, Windows.UI.Color Color) ResolveStatusVisual(PdfSignatureVerificationStatus status) => status switch
     {
-        PdfSignatureVerificationStatus.Valid => ("\uE73E", Windows.UI.Color.FromArgb(255, 16, 124, 16)),
-        PdfSignatureVerificationStatus.ValidUntrustedRoot => ("\uE946", Windows.UI.Color.FromArgb(255, 202, 80, 16)),
+        PdfSignatureVerificationStatus.Valid or PdfSignatureVerificationStatus.ValidUntrustedRoot => ("\uE73E", Windows.UI.Color.FromArgb(255, 16, 124, 16)),
         PdfSignatureVerificationStatus.ModifiedAfterSigning => ("\uE7BA", Windows.UI.Color.FromArgb(255, 202, 80, 16)),
         PdfSignatureVerificationStatus.Invalid => ("\uEA39", Windows.UI.Color.FromArgb(255, 197, 15, 31)),
         _ => ("\uE9CE", Windows.UI.Color.FromArgb(255, 118, 118, 118)),

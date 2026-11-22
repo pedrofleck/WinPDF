@@ -200,6 +200,29 @@ internal struct FsRectF
     public float Bottom;
 }
 
+/// <summary>Managed mirror of <c>FS_MATRIX</c> (2D affine transform <c>[a b c d e f]</c>).</summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct FsMatrix
+{
+    /// <summary>Scale X / m11.</summary>
+    public float A;
+
+    /// <summary>Shear Y / m12.</summary>
+    public float B;
+
+    /// <summary>Shear X / m21.</summary>
+    public float C;
+
+    /// <summary>Scale Y / m22.</summary>
+    public float D;
+
+    /// <summary>Translate X.</summary>
+    public float E;
+
+    /// <summary>Translate Y.</summary>
+    public float F;
+}
+
 /// <summary>
 /// Managed mirror of <c>FPDF_FILEWRITE</c> (<c>fpdf_save.h</c>) with an embedded user context pointer
 /// passed back via the <c>pThis</c> first argument of <see cref="WriteBlock"/>.

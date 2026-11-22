@@ -53,16 +53,11 @@ public interface IDialogService
     /// Displays the modal properties dialog for the specified document.
     /// </summary>
     /// <param name="document">The document view model whose properties should be displayed.</param>
+    /// <param name="focusSignatures">Whether to scroll directly to the digital signatures section when opened.</param>
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     /// <returns>A task representing the asynchronous operation.</returns>
-    Task ShowDocumentPropertiesAsync(ViewModels.DocumentViewModel document, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Displays a modal dialog inspecting the embedded digital signatures and certificate details.
-    /// </summary>
-    /// <param name="signatures">List of inspected digital signatures.</param>
-    /// <param name="initialIndex">Optional signature index to focus first.</param>
-    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
-    /// <returns>A task representing the asynchronous operation.</returns>
-    Task ShowSignatureDetailsAsync(IReadOnlyList<Models.PdfSignatureInfo> signatures, int initialIndex = 0, CancellationToken cancellationToken = default);
+    Task ShowDocumentPropertiesAsync(
+        ViewModels.DocumentViewModel document,
+        bool focusSignatures = false,
+        CancellationToken cancellationToken = default);
 }

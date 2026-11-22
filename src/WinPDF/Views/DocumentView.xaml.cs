@@ -434,6 +434,19 @@ public sealed partial class DocumentView : Page
     private Point _contextTargetDipPt;
     private PdfAnnotationInfo? _contextTargetAnnotation;
     private PdfSignatureInfo? _contextTargetSignature;
+    private PdfAnnotationInfo? _copiedAnnotation;
+    private bool _isCutClipboard;
+    private Action? _pendingAfterContextMenuClosed;
+    private Action? _pendingAfterQuickBarClosed;
+    private Action? _pendingAfterMouseSelectionClosed;
+    private long _quickBarOpenedTick;
+    private PdfAnnotationInfo? _quickBarAnnotation;
+    private PdfPageCanvas? _quickBarCanvas;
+    private Point _quickBarAnchorDipPt;
+    private bool _quickBarClosedProgrammatically;
+    private int _lastMouseClickPageIndex = -1;
+    private Vector2 _lastMouseClickPdfPt;
+    private bool _hasLastMouseClickPdfPt;
 
     /// <summary>Gets the localized page prefix text.</summary>
     public string PagePrefixText => ResourceStrings.Get(ResourceKeys.StatusBarPagePrefix);
@@ -550,6 +563,8 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.SignatureClicked += OnCanvasSignatureClicked;
         PdfPageCanvas.TouchEmptyHoldRequested += OnCanvasTouchEmptyHoldRequested;
         PdfPageCanvas.PlaceTextNoteRequested += OnCanvasPlaceTextNoteRequested;
+        PdfPageCanvas.AnnotationMoved += OnCanvasAnnotationMoved;
+        PdfPageCanvas.MouseClickedOnPage += OnCanvasMouseClickedOnPage;
         PdfPageCanvas.IsSingleTouchViewerManipulating = () => _isManipulatingSlideSwipe && _activeTouchPointers.Count <= 1;
 
         Loaded += OnLoaded;
@@ -603,6 +618,10 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.TouchEmptyHoldRequested += OnCanvasTouchEmptyHoldRequested;
         PdfPageCanvas.PlaceTextNoteRequested -= OnCanvasPlaceTextNoteRequested;
         PdfPageCanvas.PlaceTextNoteRequested += OnCanvasPlaceTextNoteRequested;
+        PdfPageCanvas.AnnotationMoved -= OnCanvasAnnotationMoved;
+        PdfPageCanvas.AnnotationMoved += OnCanvasAnnotationMoved;
+        PdfPageCanvas.MouseClickedOnPage -= OnCanvasMouseClickedOnPage;
+        PdfPageCanvas.MouseClickedOnPage += OnCanvasMouseClickedOnPage;
         PdfPageCanvas.IsSingleTouchViewerManipulating = () => _isManipulatingSlideSwipe && _activeTouchPointers.Count <= 1;
         _presentationHideTimer.Tick -= OnPresentationHideTimerTick;
         _presentationHideTimer.Tick += OnPresentationHideTimerTick;
@@ -705,6 +724,8 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.SignatureClicked -= OnCanvasSignatureClicked;
         PdfPageCanvas.TouchEmptyHoldRequested -= OnCanvasTouchEmptyHoldRequested;
         PdfPageCanvas.PlaceTextNoteRequested -= OnCanvasPlaceTextNoteRequested;
+        PdfPageCanvas.AnnotationMoved -= OnCanvasAnnotationMoved;
+        PdfPageCanvas.MouseClickedOnPage -= OnCanvasMouseClickedOnPage;
 
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.SearchFocusRequested -= OnSearchFocusRequested;
@@ -1109,8 +1130,11 @@ public sealed partial class DocumentView : Page
             }
         }
 
+        _hasLastMouseClickPdfPt = false;
+        _lastMouseClickPageIndex = -1;
         HideAnnotationPopupsImmediate();
-        UpdateSignatureBanner();
+        UpdateStatusBarSignatureIndicator();
+        SyncDefaultColorIndicator();
     }
 
     private void UnsubscribeFromDocument()
@@ -1127,8 +1151,11 @@ public sealed partial class DocumentView : Page
             _observedDocument = null;
         }
 
+        _hasLastMouseClickPdfPt = false;
+        _lastMouseClickPageIndex = -1;
         HideAnnotationPopupsImmediate();
-        UpdateSignatureBanner();
+        UpdateStatusBarSignatureIndicator();
+        SyncDefaultColorIndicator();
     }
 
     private void OnActiveSearchMatchScrollRequested(PdfSearchMatch match)
@@ -1503,11 +1530,15 @@ public sealed partial class DocumentView : Page
             });
         }
         else if (e.PropertyName is nameof(DocumentViewModel.HasSignatures)
-                 or nameof(DocumentViewModel.IsSignatureBannerDismissed)
-                 or nameof(DocumentViewModel.IsSignatureBannerVisible)
-                 or nameof(DocumentViewModel.SignatureBannerMessage))
+                 or nameof(DocumentViewModel.OverallSignatureStatus)
+                 or nameof(DocumentViewModel.SignatureStatusGlyph)
+                 or nameof(DocumentViewModel.SignatureStatusTooltip))
         {
-            UpdateSignatureBanner();
+            UpdateStatusBarSignatureIndicator();
+        }
+        else if (e.PropertyName == nameof(DocumentViewModel.ActiveAnnotationColor))
+        {
+            SyncDefaultColorIndicator();
         }
         else if (e.PropertyName == nameof(DocumentViewModel.ZoomFactor))
         {
@@ -2722,6 +2753,30 @@ public sealed partial class DocumentView : Page
 
     private void OnEscapeAcceleratorInvoked(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
+        if (MouseSelectionFlyout?.IsOpen == true)
+        {
+            args.Handled = true;
+            MouseSelectionFlyout.Hide();
+            ReturnFocusToViewer();
+            return;
+        }
+
+        if (ToolbarColorFlyout?.IsOpen == true)
+        {
+            args.Handled = true;
+            ToolbarColorFlyout.Hide();
+            ReturnFocusToViewer();
+            return;
+        }
+
+        if (AnnotationQuickBarFlyout?.IsOpen == true)
+        {
+            args.Handled = true;
+            AnnotationQuickBarFlyout.Hide();
+            ReturnFocusToViewer();
+            return;
+        }
+
         if (AnnotationEditorFlyout?.IsOpen == true)
         {
             args.Handled = true;
@@ -2938,6 +2993,38 @@ public sealed partial class DocumentView : Page
                     {
                         e.Handled = true;
                         ViewModel.CopySelectedText();
+                    }
+                    else if (doc.SelectedAnnotation is { CanCopyOrCut: true } copySel)
+                    {
+                        e.Handled = true;
+                        HideAnnotationPopupsImmediate();
+                        CopyAnnotationToClipboard(copySel);
+                    }
+                    return;
+
+                case Windows.System.VirtualKey.X when !isShift:
+                    if (!ViewModel.HasTextSelection && doc.SelectedAnnotation is { CanCopyOrCut: true } cutSel)
+                    {
+                        e.Handled = true;
+                        HideAnnotationPopupsImmediate();
+                        _ = CutAnnotationToClipboardAsync(doc, cutSel);
+                    }
+                    return;
+
+                case Windows.System.VirtualKey.V when !isShift:
+                    if (_copiedAnnotation is not null)
+                    {
+                        e.Handled = true;
+                        _ = PasteCopiedAnnotationFromKeyboardAsync(doc);
+                    }
+                    return;
+
+                case Windows.System.VirtualKey.Z when !isShift:
+                    if (doc.CanUndoAnnotation)
+                    {
+                        e.Handled = true;
+                        HideAnnotationPopupsImmediate();
+                        _ = doc.UndoAnnotationAsync();
                     }
                     return;
 
@@ -4460,6 +4547,16 @@ public sealed partial class DocumentView : Page
         var point = e.GetCurrentPoint(ScrollViewerContentRoot);
         var props = point.Properties;
 
+        if (point.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse &&
+            (props.IsLeftButtonPressed || props.IsRightButtonPressed) &&
+            TryFindCanvasAtRootPoint(point.Position, out PdfPageCanvas? clickedCanvas, out Point clickedDip) &&
+            clickedCanvas?.PageInfo is { } clickedPage)
+        {
+            _lastMouseClickPageIndex = clickedPage.Index;
+            _lastMouseClickPdfPt = clickedCanvas.ToPdfPoint(clickedDip);
+            _hasLastMouseClickPdfPt = true;
+        }
+
         if (_isAutoScrolling)
         {
             StopAutoScroll();
@@ -5511,22 +5608,44 @@ public sealed partial class DocumentView : Page
             return;
         }
 
+        args.Handled = true;
+        _pendingAfterContextMenuClosed = null;
         _contextTargetCanvas = null;
         _contextTargetAnnotation = null;
         _contextTargetSignature = null;
         _contextTargetPdfPt = default;
         _contextTargetDipPt = default;
 
-        DocumentViewModel? doc = ViewModel.CurrentDocument;
-        if (doc is not null && !ViewModel.IsPresentationMode && ScrollViewerContentRoot is not null)
+        if (ScrollViewerContentRoot is null || DocumentContextMenuFlyout is null)
         {
-            if (args.TryGetPosition(ScrollViewerContentRoot, out Point rootPt))
+            return;
+        }
+
+        Point showRootPt = new(
+            Math.Max(24.0, ScrollViewerContentRoot.ActualWidth * 0.5),
+            Math.Max(24.0, ScrollViewerContentRoot.ActualHeight * 0.35));
+        bool hasPointerPosition = args.TryGetPosition(ScrollViewerContentRoot, out Point pointerRootPt);
+        if (hasPointerPosition)
+        {
+            showRootPt = pointerRootPt;
+        }
+
+        DocumentViewModel? doc = ViewModel.CurrentDocument;
+        if (doc is not null && !ViewModel.IsPresentationMode)
+        {
+            if (hasPointerPosition)
             {
-                if (TryFindCanvasAtRootPoint(rootPt, out PdfPageCanvas? hitCanvas, out Point canvasDip))
+                if (TryFindCanvasAtRootPoint(pointerRootPt, out PdfPageCanvas? hitCanvas, out Point canvasDip))
                 {
                     _contextTargetCanvas = hitCanvas;
                     _contextTargetDipPt = canvasDip;
                     _contextTargetPdfPt = hitCanvas!.ToPdfPoint(canvasDip);
+                    if (hitCanvas.PageInfo is { } hitPageInfo)
+                    {
+                        _lastMouseClickPageIndex = hitPageInfo.Index;
+                        _lastMouseClickPdfPt = _contextTargetPdfPt;
+                        _hasLastMouseClickPdfPt = true;
+                    }
                 }
             }
             else if (FindRealizedCanvasForPage(doc.CurrentPageIndex) is { } fallbackCanvas)
@@ -5535,6 +5654,13 @@ public sealed partial class DocumentView : Page
                 _contextTargetCanvas = fallbackCanvas;
                 _contextTargetDipPt = new Point(Math.Max(12.0, cw * 0.5), 80.0);
                 _contextTargetPdfPt = fallbackCanvas.ToPdfPoint(_contextTargetDipPt);
+                try
+                {
+                    showRootPt = fallbackCanvas.TransformToVisual(ScrollViewerContentRoot).TransformPoint(_contextTargetDipPt);
+                }
+                catch
+                {
+                }
             }
 
             if (_contextTargetCanvas?.PageInfo is { } pageInfo)
@@ -5559,53 +5685,253 @@ public sealed partial class DocumentView : Page
         }
 
         bool hasSel = ViewModel.HasTextSelection && !ViewModel.IsPresentationMode;
+        if (hasSel && MouseSelectionFlyout is not null)
+        {
+            HideAnnotationPopupsImmediate();
+            ShowMouseSelectionFlyoutAt(showRootPt);
+            return;
+        }
+
         bool canAnnotatePage = _contextTargetCanvas is not null && doc is not null && !ViewModel.IsPresentationMode;
+        bool onSignature = !hasSel && _contextTargetSignature is not null;
+        bool onAnnotation = !hasSel && _contextTargetAnnotation is not null;
+        bool canCopyOrCutAnnot = onAnnotation && _contextTargetAnnotation is { CanCopyOrCut: true };
+        bool onEmptyPage = !hasSel && !onSignature && !onAnnotation && canAnnotatePage;
+        bool canUndo = doc is { CanUndoAnnotation: true } && !ViewModel.IsPresentationMode;
 
-        if (ContextHighlightMenuItem is not null)
+        SetVisible(ContextCopyMenuItem, false);
+        SetVisible(ContextHighlightMenuItem, false);
+        SetVisible(ContextHighlightWithCommentMenuItem, false);
+        SetVisible(ContextMarkupSubMenu, false);
+        SetVisible(ContextInspectSignatureMenuItem, onSignature);
+        SetVisible(ContextEditAnnotationMenuItem, onAnnotation);
+        SetVisible(ContextCopyAnnotationMenuItem, canCopyOrCutAnnot);
+        SetVisible(ContextCutAnnotationMenuItem, canCopyOrCutAnnot);
+        SetVisible(ContextDeleteAnnotationMenuItem, onAnnotation);
+        SetVisible(ContextAddTextBoxMenuItem, onEmptyPage);
+        SetVisible(ContextPasteAnnotationMenuItem, onEmptyPage && _copiedAnnotation is not null);
+        SetVisible(ContextUndoAnnotationMenuItem, canUndo);
+        SetVisible(ContextAnnotSeparator, onSignature || onAnnotation || onEmptyPage || canUndo);
+
+        HideAnnotationPopupsImmediate();
+
+        try
         {
-            ContextHighlightMenuItem.Visibility = hasSel ? Visibility.Visible : Visibility.Collapsed;
+            DocumentContextMenuFlyout.ShowAt(
+                ScrollViewerContentRoot,
+                new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions { Position = showRootPt });
+        }
+        catch
+        {
+        }
+    }
+
+    private void ShowMouseSelectionFlyoutAt(Point rootPt)
+    {
+        if (MouseSelectionFlyout is null || ScrollViewerContentRoot is null)
+        {
+            return;
         }
 
-        if (ContextHighlightWithCommentMenuItem is not null)
+        try
         {
-            ContextHighlightWithCommentMenuItem.Visibility = hasSel ? Visibility.Visible : Visibility.Collapsed;
+            SyncDefaultColorIndicator();
+            double rootW = Math.Max(64.0, ScrollViewerContentRoot.ActualWidth);
+            double rootH = Math.Max(64.0, ScrollViewerContentRoot.ActualHeight);
+            double clampedX = Math.Clamp(rootPt.X, 24.0, rootW - 24.0);
+            double clampedY = Math.Clamp(rootPt.Y, 24.0, rootH - 24.0);
+            bool placeBelow = clampedY < 96.0;
+            double offsetY = placeBelow ? Math.Min(rootH - 24.0, clampedY + 14.0) : Math.Max(24.0, clampedY - 14.0);
+
+            if (MouseSelectionFlyout.IsOpen)
+            {
+                MouseSelectionFlyout.Hide();
+            }
+
+            var options = new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions
+            {
+                Position = new Point(clampedX, offsetY),
+                Placement = placeBelow
+                    ? Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Bottom
+                    : Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Top,
+                ShowMode = Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowMode.Standard,
+            };
+            MouseSelectionFlyout.ShowAt(ScrollViewerContentRoot, options);
+        }
+        catch
+        {
+        }
+    }
+
+    private void OnMouseSelectionFlyoutClosed(object? sender, object e)
+    {
+        Action? pending = _pendingAfterMouseSelectionClosed;
+        _pendingAfterMouseSelectionClosed = null;
+        if (pending is not null)
+        {
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Normal, () => pending());
+        }
+    }
+
+    private void OnMouseSelectionCopyClick(object sender, RoutedEventArgs e)
+    {
+        _pendingAfterMouseSelectionClosed = null;
+        MouseSelectionFlyout?.Hide();
+        ViewModel.CopySelectedText();
+        ReturnFocusToViewer();
+    }
+
+    private void OnMouseSelectionHighlightClick(object sender, RoutedEventArgs e)
+    {
+        _pendingAfterMouseSelectionClosed = null;
+        MouseSelectionFlyout?.Hide();
+        if (ViewModel.CurrentDocument is { ActiveSelection: { HasContent: true } sel } doc)
+        {
+            _ = doc.AddMarkupForSelectionAsync(sel, PdfAnnotationSubtype.Highlight, doc.ActiveAnnotationColor);
         }
 
-        if (ContextMarkupSubMenu is not null)
+        ReturnFocusToViewer();
+    }
+
+    private void OnMouseSelectionCommentClick(object sender, RoutedEventArgs e)
+    {
+        DocumentViewModel? doc = ViewModel.CurrentDocument;
+        if (doc?.ActiveSelection is not { HasContent: true } sel)
         {
-            ContextMarkupSubMenu.Visibility = hasSel ? Visibility.Visible : Visibility.Collapsed;
+            MouseSelectionFlyout?.Hide();
+            return;
         }
 
-        if (ContextInspectSignatureMenuItem is not null)
+        PdfPageCanvas? anchorCanvas = _contextTargetCanvas?.PageInfo?.Index == sel.StartPageIndex
+            ? _contextTargetCanvas
+            : FindRealizedCanvasForPage(sel.StartPageIndex);
+        Point anchorDip = ComputeSelectionAnchorCanvasDip(sel, anchorCanvas);
+
+        _pendingAfterMouseSelectionClosed = () => OpenCreateAnnotationEditor(
+            AnnotationEditorMode.CreateMarkupWithComment,
+            sel.StartPageIndex,
+            default,
+            anchorCanvas,
+            anchorDip,
+            sel);
+
+        if (MouseSelectionFlyout?.IsOpen == true)
         {
-            ContextInspectSignatureMenuItem.Visibility = _contextTargetSignature is not null ? Visibility.Visible : Visibility.Collapsed;
+            MouseSelectionFlyout.Hide();
+        }
+        else
+        {
+            OnMouseSelectionFlyoutClosed(null, EventArgs.Empty);
+        }
+    }
+
+    private void OnMouseSelectionMarkupSubtypeClick(object sender, RoutedEventArgs e)
+    {
+        _pendingAfterMouseSelectionClosed = null;
+        MouseSelectionFlyout?.Hide();
+        if (ViewModel.CurrentDocument is { ActiveSelection: { HasContent: true } sel } doc && sender is FrameworkElement fe)
+        {
+            PdfAnnotationSubtype subtype = ParseMarkupSubtypeTag(fe.Tag as string, PdfAnnotationSubtype.Underline);
+            _ = doc.AddMarkupForSelectionAsync(sel, subtype, doc.ActiveAnnotationColor);
         }
 
-        if (ContextEditAnnotationMenuItem is not null)
+        ReturnFocusToViewer();
+    }
+
+    private void OnMouseSelectionColorClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe)
         {
-            ContextEditAnnotationMenuItem.Visibility = _contextTargetAnnotation is not null ? Visibility.Visible : Visibility.Collapsed;
+            PdfAnnotationColor current = ViewModel.CurrentDocument?.ActiveAnnotationColor ?? ViewModel.DefaultAnnotationColor;
+            PdfAnnotationColor color = ParseAnnotationColorTag(fe.Tag as string, current);
+            SetDefaultAnnotationColor(color);
+        }
+    }
+
+    private void OnToolbarDefaultColorSelectClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe)
+        {
+            PdfAnnotationColor current = ViewModel.CurrentDocument?.ActiveAnnotationColor ?? ViewModel.DefaultAnnotationColor;
+            SetDefaultAnnotationColor(ParseAnnotationColorTag(fe.Tag as string, current));
         }
 
-        if (ContextDeleteAnnotationMenuItem is not null)
+        ToolbarColorFlyout?.Hide();
+    }
+
+    private void OnContextUndoAnnotationClick(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.CurrentDocument is { CanUndoAnnotation: true } doc)
         {
-            ContextDeleteAnnotationMenuItem.Visibility = _contextTargetAnnotation is not null ? Visibility.Visible : Visibility.Collapsed;
+            _ = doc.UndoAnnotationAsync();
+        }
+    }
+
+    private void SetDefaultAnnotationColor(PdfAnnotationColor color)
+    {
+        ViewModel.DefaultAnnotationColor = color;
+        if (ViewModel.CurrentDocument is { } doc && !doc.ActiveAnnotationColor.Equals(color))
+        {
+            doc.ActiveAnnotationColor = color;
         }
 
-        if (ContextAddCommentMenuItem is not null)
+        SyncDefaultColorIndicator();
+    }
+
+    private void SyncDefaultColorIndicator()
+    {
+        PdfAnnotationColor color = ViewModel.CurrentDocument?.ActiveAnnotationColor ?? ViewModel.DefaultAnnotationColor;
+        if (ToolbarColorIndicatorDot is not null)
         {
-            ContextAddCommentMenuItem.Visibility = canAnnotatePage ? Visibility.Visible : Visibility.Collapsed;
+            ToolbarColorIndicatorDot.Fill = new SolidColorBrush(Windows.UI.Color.FromArgb(255, color.R, color.G, color.B));
         }
 
-        if (ContextAddTextBoxMenuItem is not null)
+        ApplySwatchSelectedState(ToolbarColorYellowButton, IsSameColor(color, PdfAnnotationColor.Yellow));
+        ApplySwatchSelectedState(ToolbarColorGreenButton, IsSameColor(color, PdfAnnotationColor.Green));
+        ApplySwatchSelectedState(ToolbarColorBlueButton, IsSameColor(color, PdfAnnotationColor.Blue));
+        ApplySwatchSelectedState(ToolbarColorPinkButton, IsSameColor(color, PdfAnnotationColor.Pink));
+        ApplySwatchSelectedState(ToolbarColorOrangeButton, IsSameColor(color, PdfAnnotationColor.Orange));
+        ApplySwatchSelectedState(ToolbarColorRedButton, IsSameColor(color, PdfAnnotationColor.Red));
+        ApplySwatchSelectedState(MouseSelColorYellowButton, IsSameColor(color, PdfAnnotationColor.Yellow));
+        ApplySwatchSelectedState(MouseSelColorGreenButton, IsSameColor(color, PdfAnnotationColor.Green));
+        ApplySwatchSelectedState(MouseSelColorBlueButton, IsSameColor(color, PdfAnnotationColor.Blue));
+        ApplySwatchSelectedState(MouseSelColorPinkButton, IsSameColor(color, PdfAnnotationColor.Pink));
+        ApplySwatchSelectedState(MouseSelColorOrangeButton, IsSameColor(color, PdfAnnotationColor.Orange));
+        ApplySwatchSelectedState(MouseSelColorRedButton, IsSameColor(color, PdfAnnotationColor.Red));
+    }
+
+    private static void SetVisible(UIElement? element, bool visible)
+    {
+        if (element is not null)
         {
-            ContextAddTextBoxMenuItem.Visibility = canAnnotatePage ? Visibility.Visible : Visibility.Collapsed;
+            element.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        }
+    }
+
+    private void OnDocumentContextMenuClosed(object? sender, object e)
+    {
+        Action? pending = _pendingAfterContextMenuClosed;
+        _pendingAfterContextMenuClosed = null;
+        if (pending is not null)
+        {
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Normal, () => pending());
+        }
+    }
+
+    /// <summary>
+    /// Defers <paramref name="action"/> until the right-click menu has fully closed so a follow-up flyout
+    /// is not light-dismissed together with the menu.
+    /// </summary>
+    private void RunAfterContextMenuClosed(Action action)
+    {
+        if (DocumentContextMenuFlyout?.IsOpen == true)
+        {
+            _pendingAfterContextMenuClosed = action;
+            return;
         }
 
-        if (ContextAnnotSeparator is not null)
-        {
-            bool showSep = hasSel || canAnnotatePage || _contextTargetSignature is not null || _contextTargetAnnotation is not null;
-            ContextAnnotSeparator.Visibility = showSep ? Visibility.Visible : Visibility.Collapsed;
-        }
+        _pendingAfterContextMenuClosed = null;
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Normal, () => action());
     }
 
     private void InitializeAnnotationUiText()
@@ -5635,18 +5961,12 @@ public sealed partial class DocumentView : Page
             TouchSelectionSquigglyButton.Label = ResourceStrings.Get(ResourceKeys.AnnotSubtypeSquiggly);
         }
 
-        ConfigureColorButton(TouchSelectionColorYellowButton, ContextColorYellowItem, AnnotColorYellowButton, ResourceKeys.ColorYellow, PdfAnnotationColor.Yellow);
-        ConfigureColorButton(TouchSelectionColorGreenButton, ContextColorGreenItem, AnnotColorGreenButton, ResourceKeys.ColorGreen, PdfAnnotationColor.Green);
-        ConfigureColorButton(TouchSelectionColorBlueButton, ContextColorBlueItem, AnnotColorBlueButton, ResourceKeys.ColorBlue, PdfAnnotationColor.Blue);
-        ConfigureColorButton(TouchSelectionColorPinkButton, ContextColorPinkItem, AnnotColorPinkButton, ResourceKeys.ColorPink, PdfAnnotationColor.Pink);
-        ConfigureColorButton(TouchSelectionColorOrangeButton, ContextColorOrangeItem, AnnotColorOrangeButton, ResourceKeys.ColorOrange, PdfAnnotationColor.Orange);
-
-        if (TouchEmptyAddCommentButton is not null)
-        {
-            string addComment = ResourceStrings.Get(ResourceKeys.TouchEmptyAddCommentLabel);
-            TouchEmptyAddCommentButton.Label = addComment;
-            ToolTipService.SetToolTip(TouchEmptyAddCommentButton, addComment);
-        }
+        ConfigureColorButton(TouchSelectionColorYellowButton, ContextColorYellowItem, AnnotColorYellowButton, QuickColorYellowButton, MouseSelColorYellowButton, ToolbarColorYellowButton, ResourceKeys.ColorYellow, PdfAnnotationColor.Yellow);
+        ConfigureColorButton(TouchSelectionColorGreenButton, ContextColorGreenItem, AnnotColorGreenButton, QuickColorGreenButton, MouseSelColorGreenButton, ToolbarColorGreenButton, ResourceKeys.ColorGreen, PdfAnnotationColor.Green);
+        ConfigureColorButton(TouchSelectionColorBlueButton, ContextColorBlueItem, AnnotColorBlueButton, QuickColorBlueButton, MouseSelColorBlueButton, ToolbarColorBlueButton, ResourceKeys.ColorBlue, PdfAnnotationColor.Blue);
+        ConfigureColorButton(TouchSelectionColorPinkButton, ContextColorPinkItem, AnnotColorPinkButton, QuickColorPinkButton, MouseSelColorPinkButton, ToolbarColorPinkButton, ResourceKeys.ColorPink, PdfAnnotationColor.Pink);
+        ConfigureColorButton(TouchSelectionColorOrangeButton, ContextColorOrangeItem, AnnotColorOrangeButton, QuickColorOrangeButton, MouseSelColorOrangeButton, ToolbarColorOrangeButton, ResourceKeys.ColorOrange, PdfAnnotationColor.Orange);
+        ConfigureColorButton(TouchSelectionColorRedButton, ContextColorRedItem, AnnotColorRedButton, QuickColorRedButton, MouseSelColorRedButton, ToolbarColorRedButton, ResourceKeys.ColorRed, PdfAnnotationColor.Red);
 
         if (TouchEmptyAddTextBoxButton is not null)
         {
@@ -5655,19 +5975,39 @@ public sealed partial class DocumentView : Page
             ToolTipService.SetToolTip(TouchEmptyAddTextBoxButton, addTextBox);
         }
 
-        if (SignatureBannerViewButton is not null)
+        if (TouchEmptyPasteButton is not null)
         {
-            SignatureBannerViewButton.Content = ResourceStrings.Get(ResourceKeys.SigBannerViewButton);
+            string paste = ResourceStrings.Get(ResourceKeys.TouchEmptyPasteLabel);
+            TouchEmptyPasteButton.Label = paste;
+            ToolTipService.SetToolTip(TouchEmptyPasteButton, paste);
         }
+
+        if (StatusBarSignedLabelText is not null)
+        {
+            StatusBarSignedLabelText.Text = ResourceStrings.Get(ResourceKeys.StatusBarSignedLabel);
+        }
+
+        SetToolTip(ToolbarColorPickerButton, ResourceKeys.ToolbarColorToolTip);
+        SetToolTip(ToolbarUndoButton, ResourceKeys.AnnotUndoToolTip);
+        SetToolTip(MouseSelCopyButton, ResourceKeys.TouchSelectionCopyToolTip);
+        SetToolTip(MouseSelHighlightButton, ResourceKeys.TouchSelectionHighlightToolTip);
+        SetToolTip(MouseSelCommentButton, ResourceKeys.TouchSelectionCommentToolTip);
+        SetToolTip(MouseSelUnderlineButton, ResourceKeys.AnnotSubtypeUnderline);
+        SetToolTip(MouseSelStrikeOutButton, ResourceKeys.AnnotSubtypeStrikeOut);
+        SetToolTip(MouseSelSquigglyButton, ResourceKeys.AnnotSubtypeSquiggly);
+        SetToolTip(QuickBarAddCommentButton, ResourceKeys.AnnotAddCommentToolTip);
+        SetToolTip(QuickBarColorButton, ResourceKeys.AnnotColorToolTip);
+        SetToolTip(QuickBarCopyButton, ResourceKeys.AnnotCopyToolTip);
+        SetToolTip(QuickBarCutButton, ResourceKeys.AnnotCutToolTip);
+        SetToolTip(QuickBarDeleteButton, ResourceKeys.AnnotDelete);
+        SetToolTip(QuickBarCloseButton, ResourceKeys.AnnotClose);
+        SetToolTip(AnnotationEditorCopyButton, ResourceKeys.AnnotCopyToolTip);
+        SetToolTip(AnnotationEditorCutButton, ResourceKeys.AnnotCutToolTip);
+        SetToolTip(AnnotationEditorCloseButton, ResourceKeys.AnnotClose);
 
         if (AnnotationEditorDeleteButton is not null)
         {
             AnnotationEditorDeleteButton.Content = ResourceStrings.Get(ResourceKeys.AnnotDelete);
-        }
-
-        if (AnnotationEditorCancelButton is not null)
-        {
-            AnnotationEditorCancelButton.Content = ResourceStrings.Get(ResourceKeys.AnnotClose);
         }
 
         if (AnnotationEditorSaveButton is not null)
@@ -5679,12 +6019,25 @@ public sealed partial class DocumentView : Page
         {
             AnnotationEditorTextBox.TextChanged += OnAnnotationEditorTextBoxTextChanged;
         }
+
+        SyncDefaultColorIndicator();
+    }
+
+    private static void SetToolTip(DependencyObject? element, string resourceKey)
+    {
+        if (element is not null)
+        {
+            ToolTipService.SetToolTip(element, ResourceStrings.Get(resourceKey));
+        }
     }
 
     private static void ConfigureColorButton(
         AppBarButton? touchBtn,
         MenuFlyoutItem? menuItem,
         Button? swatchBtn,
+        Button? quickSwatchBtn,
+        Button? mouseSelSwatchBtn,
+        Button? toolbarSwatchBtn,
         string colorNameKey,
         PdfAnnotationColor color)
     {
@@ -5703,9 +6056,17 @@ public sealed partial class DocumentView : Page
             menuItem.Icon = CreateColorDotIcon(uiColor);
         }
 
-        if (swatchBtn is not null)
+        SetDirectToolTip(swatchBtn, label);
+        SetDirectToolTip(quickSwatchBtn, label);
+        SetDirectToolTip(mouseSelSwatchBtn, label);
+        SetDirectToolTip(toolbarSwatchBtn, label);
+    }
+
+    private static void SetDirectToolTip(DependencyObject? element, string text)
+    {
+        if (element is not null)
         {
-            ToolTipService.SetToolTip(swatchBtn, label);
+            ToolTipService.SetToolTip(element, text);
         }
     }
 
@@ -5724,6 +6085,7 @@ public sealed partial class DocumentView : Page
         "Blue" => PdfAnnotationColor.Blue,
         "Pink" => PdfAnnotationColor.Pink,
         "Orange" => PdfAnnotationColor.Orange,
+        "Red" => PdfAnnotationColor.Red,
         _ => fallback,
     };
 
@@ -5778,76 +6140,57 @@ public sealed partial class DocumentView : Page
         return false;
     }
 
-    private void UpdateSignatureBanner()
+    /// <summary>
+    /// Shows or hides the "| Digitally signed [status]" badge next to the file size in the status bar.
+    /// Unsigned documents keep the status bar unchanged.
+    /// </summary>
+    private void UpdateStatusBarSignatureIndicator()
     {
-        if (SignatureInfoBar is null)
+        if (StatusBarSignaturePanel is null || StatusBarSignatureIcon is null)
         {
             return;
         }
 
         DocumentViewModel? doc = _observedDocument;
-        if (doc is null || !doc.IsSignatureBannerVisible)
+        if (doc is not { HasSignatures: true })
         {
-            SignatureInfoBar.IsOpen = false;
+            StatusBarSignaturePanel.Visibility = Visibility.Collapsed;
+            if (StatusBarPropertiesButton is not null)
+            {
+                ToolTipService.SetToolTip(StatusBarPropertiesButton, PropertiesToolTipText);
+            }
+
             return;
         }
 
-        InfoBarSeverity severity = InfoBarSeverity.Informational;
-        bool hasInvalid = false;
-        bool hasModified = false;
-        bool allValid = doc.Signatures.Count > 0;
-
-        for (int i = 0; i < doc.Signatures.Count; i++)
+        if (StatusBarSignedLabelText is not null)
         {
-            PdfSignatureVerificationStatus status = doc.Signatures[i].Status;
-            if (status == PdfSignatureVerificationStatus.Invalid)
-            {
-                hasInvalid = true;
-                allValid = false;
-                break;
-            }
-
-            if (status == PdfSignatureVerificationStatus.ModifiedAfterSigning)
-            {
-                hasModified = true;
-                allValid = false;
-            }
-            else if (status != PdfSignatureVerificationStatus.Valid)
-            {
-                allValid = false;
-            }
+            StatusBarSignedLabelText.Text = ResourceStrings.Get(ResourceKeys.StatusBarSignedLabel);
         }
 
-        if (hasInvalid)
+        StatusBarSignatureIcon.Glyph = doc.SignatureStatusGlyph;
+        string brushKey = doc.OverallSignatureStatus switch
         {
-            severity = InfoBarSeverity.Error;
-        }
-        else if (hasModified)
+            PdfSignatureVerificationStatus.Valid or PdfSignatureVerificationStatus.ValidUntrustedRoot => "SystemFillColorSuccessBrush",
+            PdfSignatureVerificationStatus.ModifiedAfterSigning => "SystemFillColorCautionBrush",
+            PdfSignatureVerificationStatus.Invalid => "SystemFillColorCriticalBrush",
+            _ => "TextFillColorSecondaryBrush",
+        };
+
+        if (Application.Current.Resources.TryGetValue(brushKey, out object? brushObj) && brushObj is Brush brush)
         {
-            severity = InfoBarSeverity.Warning;
-        }
-        else if (allValid)
-        {
-            severity = InfoBarSeverity.Success;
+            StatusBarSignatureIcon.Foreground = brush;
         }
 
-        SignatureInfoBar.Severity = severity;
-        SignatureInfoBar.Title = ResourceStrings.Get(ResourceKeys.AnnotSubtypeSignature);
-        SignatureInfoBar.Message = doc.SignatureBannerMessage;
-        SignatureInfoBar.IsOpen = true;
-    }
+        StatusBarSignaturePanel.Visibility = Visibility.Visible;
 
-    private void OnSignatureBannerCloseButtonClick(InfoBar sender, object args)
-    {
-        if (_observedDocument is not null)
+        if (StatusBarPropertiesButton is not null)
         {
-            _observedDocument.IsSignatureBannerDismissed = true;
+            string tip = string.IsNullOrWhiteSpace(doc.SignatureStatusTooltip)
+                ? PropertiesToolTipText
+                : $"{PropertiesToolTipText}\n{doc.SignatureStatusTooltip}";
+            ToolTipService.SetToolTip(StatusBarPropertiesButton, tip);
         }
-    }
-
-    private void OnSignatureBannerViewClick(object sender, RoutedEventArgs e)
-    {
-        _ = ViewModel.ShowSignatureDetailsAsync();
     }
 
     private void ScrollToAnnotation(PdfAnnotationInfo annot)
@@ -5874,9 +6217,24 @@ public sealed partial class DocumentView : Page
                 PageCoordinateTransform transform = PageCoordinateTransform.FromPage(pageInfo, canvas.RotationAngle);
                 Rect pageDip = transform.ToPageRect(annot.Bounds);
                 Point centerDip = new(pageDip.Left + (pageDip.Width * 0.5), pageDip.Bottom);
-                OpenExistingAnnotationEditor(annot, canvas, centerDip);
+                OpenAnnotationUi(annot, canvas, centerDip);
             }
         });
+    }
+
+    /// <summary>
+    /// Opens the full editor when the annotation already carries text; otherwise opens the compact quick-bar.
+    /// </summary>
+    private void OpenAnnotationUi(PdfAnnotationInfo annot, PdfPageCanvas? canvas, Point canvasDipPt)
+    {
+        if (annot.HasComment)
+        {
+            OpenExistingAnnotationEditor(annot, canvas, canvasDipPt);
+        }
+        else
+        {
+            OpenAnnotationQuickBar(annot, canvas, canvasDipPt);
+        }
     }
 
     private void OnSignatureInspectRequested(PdfSignatureInfo sig)
@@ -5887,7 +6245,16 @@ public sealed partial class DocumentView : Page
     private void OnCanvasAnnotationClicked(PdfPageCanvas canvas, PdfAnnotationInfo annot, Point canvasDipPt)
     {
         HideAnnotationPopupsImmediate();
-        OpenExistingAnnotationEditor(annot, canvas, canvasDipPt);
+        OpenAnnotationUi(annot, canvas, canvasDipPt);
+    }
+
+    private void OnCanvasAnnotationMoved(PdfPageCanvas canvas, PdfAnnotationInfo annot, Vector2 deltaPdf)
+    {
+        HideAnnotationPopupsImmediate();
+        if (ViewModel.CurrentDocument is { } doc)
+        {
+            _ = doc.MoveAnnotationAsync(annot.PageIndex, annot.AnnotIndex, deltaPdf.X, deltaPdf.Y);
+        }
     }
 
     private void OnCanvasSignatureClicked(PdfPageCanvas canvas, PdfSignatureInfo sig, Point canvasDipPt)
@@ -5923,6 +6290,12 @@ public sealed partial class DocumentView : Page
             AnnotationEditorFlyout.Hide();
         }
 
+        if (AnnotationQuickBarFlyout?.IsOpen == true)
+        {
+            _pendingAfterQuickBarClosed = null;
+            AnnotationQuickBarFlyout.Hide();
+        }
+
         ViewModel.CurrentDocument?.ClearSelection();
         if (ViewModel.CurrentDocument is not null)
         {
@@ -5932,6 +6305,7 @@ public sealed partial class DocumentView : Page
         _touchEmptyHoldCanvas = canvas;
         _touchEmptyHoldPdfPt = pdfPt;
         _touchEmptyHoldDipPt = canvasDipPt;
+        SetVisible(TouchEmptyPasteButton, _copiedAnnotation is not null);
 
         try
         {
@@ -5968,7 +6342,7 @@ public sealed partial class DocumentView : Page
         _isTouchEmptyHoldFlyoutOpen = false;
     }
 
-    private void OnTouchEmptyAddCommentClick(object sender, RoutedEventArgs e)
+    private void OnTouchEmptyAddTextBoxClick(object sender, RoutedEventArgs e)
     {
         PdfPageCanvas? canvas = _touchEmptyHoldCanvas;
         Vector2 pdfPt = _touchEmptyHoldPdfPt;
@@ -5980,15 +6354,14 @@ public sealed partial class DocumentView : Page
         }
     }
 
-    private void OnTouchEmptyAddTextBoxClick(object sender, RoutedEventArgs e)
+    private void OnTouchEmptyPasteClick(object sender, RoutedEventArgs e)
     {
         PdfPageCanvas? canvas = _touchEmptyHoldCanvas;
         Vector2 pdfPt = _touchEmptyHoldPdfPt;
-        Point dipPt = _touchEmptyHoldDipPt;
         HideAnnotationPopupsImmediate();
-        if (canvas?.PageInfo is { } pageInfo)
+        if (canvas?.PageInfo is { } pageInfo && ViewModel.CurrentDocument is { } doc)
         {
-            OpenCreateAnnotationEditor(AnnotationEditorMode.CreateFreeText, pageInfo.Index, pdfPt, canvas, dipPt, pendingSelection: null);
+            _ = PasteCopiedAnnotationAtAsync(doc, pageInfo.Index, pdfPt.X, pdfPt.Y);
         }
     }
 
@@ -6038,17 +6411,12 @@ public sealed partial class DocumentView : Page
 
     private void OnTouchSelectionColorClick(object sender, RoutedEventArgs e)
     {
-        DocumentViewModel? doc = ViewModel.CurrentDocument;
-        if (doc is not null && sender is FrameworkElement fe)
+        if (sender is FrameworkElement fe)
         {
-            doc.ActiveAnnotationColor = ParseAnnotationColorTag(fe.Tag as string, doc.ActiveAnnotationColor);
-            if (doc.ActiveSelection is { HasContent: true } sel)
-            {
-                _ = doc.AddMarkupForSelectionAsync(sel, PdfAnnotationSubtype.Highlight, doc.ActiveAnnotationColor);
-            }
+            PdfAnnotationColor current = ViewModel.CurrentDocument?.ActiveAnnotationColor ?? ViewModel.DefaultAnnotationColor;
+            PdfAnnotationColor color = ParseAnnotationColorTag(fe.Tag as string, current);
+            SetDefaultAnnotationColor(color);
         }
-
-        HideTouchSelectionFlyout();
     }
 
     private void OnContextHighlightClick(object sender, RoutedEventArgs e)
@@ -6068,15 +6436,17 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        PdfPageCanvas? anchorCanvas = _contextTargetCanvas ?? FindRealizedCanvasForPage(sel.StartPageIndex);
+        PdfPageCanvas? anchorCanvas = _contextTargetCanvas?.PageInfo?.Index == sel.StartPageIndex
+            ? _contextTargetCanvas
+            : FindRealizedCanvasForPage(sel.StartPageIndex);
         Point anchorDip = ComputeSelectionAnchorCanvasDip(sel, anchorCanvas);
-        OpenCreateAnnotationEditor(
+        RunAfterContextMenuClosed(() => OpenCreateAnnotationEditor(
             AnnotationEditorMode.CreateMarkupWithComment,
             sel.StartPageIndex,
             default,
             anchorCanvas,
             anchorDip,
-            sel);
+            sel));
     }
 
     private void OnContextMarkupSubtypeClick(object sender, RoutedEventArgs e)
@@ -6091,14 +6461,11 @@ public sealed partial class DocumentView : Page
 
     private void OnContextColorHighlightClick(object sender, RoutedEventArgs e)
     {
-        DocumentViewModel? doc = ViewModel.CurrentDocument;
-        if (doc is not null && sender is FrameworkElement fe)
+        if (sender is FrameworkElement fe)
         {
-            doc.ActiveAnnotationColor = ParseAnnotationColorTag(fe.Tag as string, doc.ActiveAnnotationColor);
-            if (doc.ActiveSelection is { HasContent: true } sel)
-            {
-                _ = doc.AddMarkupForSelectionAsync(sel, PdfAnnotationSubtype.Highlight, doc.ActiveAnnotationColor);
-            }
+            PdfAnnotationColor current = ViewModel.CurrentDocument?.ActiveAnnotationColor ?? ViewModel.DefaultAnnotationColor;
+            PdfAnnotationColor color = ParseAnnotationColorTag(fe.Tag as string, current);
+            SetDefaultAnnotationColor(color);
         }
     }
 
@@ -6106,7 +6473,7 @@ public sealed partial class DocumentView : Page
     {
         if (_contextTargetSignature is { } sig)
         {
-            _ = ViewModel.ShowSignatureDetailsAsync(sig);
+            RunAfterContextMenuClosed(() => _ = ViewModel.ShowSignatureDetailsAsync(sig));
         }
     }
 
@@ -6114,12 +6481,40 @@ public sealed partial class DocumentView : Page
     {
         if (_contextTargetAnnotation is { } annot && _contextTargetCanvas is { } canvas)
         {
-            if (ViewModel.CurrentDocument is not null)
+            Point dipPt = _contextTargetDipPt;
+            RunAfterContextMenuClosed(() =>
             {
-                ViewModel.CurrentDocument.SelectedAnnotation = annot;
-            }
+                if (ViewModel.CurrentDocument is not null)
+                {
+                    ViewModel.CurrentDocument.SelectedAnnotation = annot;
+                }
 
-            OpenExistingAnnotationEditor(annot, canvas, _contextTargetDipPt);
+                OpenExistingAnnotationEditor(annot, canvas, dipPt);
+            });
+        }
+    }
+
+    private void OnContextCopyAnnotationClick(object sender, RoutedEventArgs e)
+    {
+        if (_contextTargetAnnotation is { } annot)
+        {
+            CopyAnnotationToClipboard(annot);
+        }
+    }
+
+    private void OnContextCutAnnotationClick(object sender, RoutedEventArgs e)
+    {
+        if (_contextTargetAnnotation is { } annot && ViewModel.CurrentDocument is { } doc)
+        {
+            _ = CutAnnotationToClipboardAsync(doc, annot);
+        }
+    }
+
+    private void OnContextPasteAnnotationClick(object sender, RoutedEventArgs e)
+    {
+        if (_contextTargetCanvas?.PageInfo is { } pageInfo && ViewModel.CurrentDocument is { } doc)
+        {
+            _ = PasteCopiedAnnotationAtAsync(doc, pageInfo.Index, _contextTargetPdfPt.X, _contextTargetPdfPt.Y);
         }
     }
 
@@ -6131,32 +6526,392 @@ public sealed partial class DocumentView : Page
         }
     }
 
-    private void OnContextAddCommentClick(object sender, RoutedEventArgs e)
+    private void OnContextAddTextBoxClick(object sender, RoutedEventArgs e)
     {
-        if (_contextTargetCanvas?.PageInfo is { } pageInfo)
+        if (_contextTargetCanvas is { PageInfo: { } pageInfo } canvas)
         {
-            OpenCreateAnnotationEditor(
+            int pageIndex = pageInfo.Index;
+            Vector2 pdfPt = _contextTargetPdfPt;
+            Point dipPt = _contextTargetDipPt;
+            RunAfterContextMenuClosed(() => OpenCreateAnnotationEditor(
                 AnnotationEditorMode.CreateNote,
-                pageInfo.Index,
-                _contextTargetPdfPt,
-                _contextTargetCanvas,
-                _contextTargetDipPt,
-                pendingSelection: null);
+                pageIndex,
+                pdfPt,
+                canvas,
+                dipPt,
+                pendingSelection: null));
         }
     }
 
-    private void OnContextAddTextBoxClick(object sender, RoutedEventArgs e)
+    private void OnCanvasMouseClickedOnPage(PdfPageCanvas canvas, Vector2 pdfPt)
     {
-        if (_contextTargetCanvas?.PageInfo is { } pageInfo)
+        if (canvas.PageInfo is { } pageInfo)
         {
-            OpenCreateAnnotationEditor(
-                AnnotationEditorMode.CreateFreeText,
-                pageInfo.Index,
-                _contextTargetPdfPt,
-                _contextTargetCanvas,
-                _contextTargetDipPt,
-                pendingSelection: null);
+            _lastMouseClickPageIndex = pageInfo.Index;
+            _lastMouseClickPdfPt = pdfPt;
+            _hasLastMouseClickPdfPt = true;
         }
+    }
+
+    private void TryRecordLastMouseClickFromCursor()
+    {
+        if (ScrollViewerContentRoot is null || XamlRoot?.Content is null)
+        {
+            return;
+        }
+
+        try
+        {
+            nint hwnd = Microsoft.UI.Win32Interop.GetWindowFromWindowId(XamlRoot.ContentIslandEnvironment.AppWindowId);
+            if (hwnd == nint.Zero || GetCursorPos(out NativePoint screenPt) == 0 || ScreenToClient(hwnd, ref screenPt) == 0)
+            {
+                return;
+            }
+
+            double scale = XamlRoot.RasterizationScale > 0.01 ? XamlRoot.RasterizationScale : 1.0;
+            Point clientDip = new(screenPt.X / scale, screenPt.Y / scale);
+            Point rootPt = XamlRoot.Content.TransformToVisual(ScrollViewerContentRoot).TransformPoint(clientDip);
+            if (TryFindCanvasAtRootPoint(rootPt, out PdfPageCanvas? hitCanvas, out Point canvasDip) &&
+                hitCanvas?.PageInfo is { } pageInfo)
+            {
+                _lastMouseClickPageIndex = pageInfo.Index;
+                _lastMouseClickPdfPt = hitCanvas.ToPdfPoint(canvasDip);
+                _hasLastMouseClickPdfPt = true;
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [LibraryImport("user32.dll")]
+    private static partial int GetCursorPos(out NativePoint lpPoint);
+
+    [LibraryImport("user32.dll")]
+    private static partial int ScreenToClient(nint hWnd, ref NativePoint lpPoint);
+
+    // =========================================================================
+    // Compact annotation quick-bar (icon-only Acrylic bar)
+    // =========================================================================
+
+    private void OpenAnnotationQuickBar(PdfAnnotationInfo annot, PdfPageCanvas? canvas, Point anchorCanvasDipPt)
+    {
+        if (AnnotationQuickBarFlyout is null || ScrollViewerContentRoot is null || annot.IsSignatureWidget)
+        {
+            return;
+        }
+
+        _quickBarAnnotation = annot;
+        _quickBarCanvas = canvas;
+        _quickBarAnchorDipPt = anchorCanvasDipPt;
+        _pendingAfterQuickBarClosed = null;
+
+        SetVisible(QuickBarColorButton, annot.SupportsColorChange);
+        SetVisible(QuickBarCopyButton, annot.CanCopyOrCut);
+        SetVisible(QuickBarCutButton, annot.CanCopyOrCut);
+        SetVisible(QuickBarColorRow, false);
+        ApplySwatchSelectedState(QuickColorYellowButton, IsSameColor(annot.Color, PdfAnnotationColor.Yellow));
+        ApplySwatchSelectedState(QuickColorGreenButton, IsSameColor(annot.Color, PdfAnnotationColor.Green));
+        ApplySwatchSelectedState(QuickColorBlueButton, IsSameColor(annot.Color, PdfAnnotationColor.Blue));
+        ApplySwatchSelectedState(QuickColorPinkButton, IsSameColor(annot.Color, PdfAnnotationColor.Pink));
+        ApplySwatchSelectedState(QuickColorOrangeButton, IsSameColor(annot.Color, PdfAnnotationColor.Orange));
+        ApplySwatchSelectedState(QuickColorRedButton, IsSameColor(annot.Color, PdfAnnotationColor.Red));
+
+        try
+        {
+            double rootW = Math.Max(64.0, ScrollViewerContentRoot.ActualWidth);
+            double rootH = Math.Max(64.0, ScrollViewerContentRoot.ActualHeight);
+            Point rootPt = new(rootW * 0.5, rootH * 0.35);
+            double annotTopY = rootPt.Y;
+            double annotBottomY = rootPt.Y;
+            if (canvas is not null)
+            {
+                try
+                {
+                    rootPt = canvas.TransformToVisual(ScrollViewerContentRoot).TransformPoint(anchorCanvasDipPt);
+                    annotTopY = rootPt.Y;
+                    annotBottomY = rootPt.Y;
+                    if (canvas.PageInfo is { } pageInfo && !annot.Bounds.IsEmpty)
+                    {
+                        PageCoordinateTransform transform = PageCoordinateTransform.FromPage(pageInfo, canvas.RotationAngle);
+                        Rect pageDip = transform.ToPageRect(annot.Bounds);
+                        Point topPt = canvas.TransformToVisual(ScrollViewerContentRoot).TransformPoint(new Point(pageDip.Left + (pageDip.Width * 0.5), pageDip.Top));
+                        Point botPt = canvas.TransformToVisual(ScrollViewerContentRoot).TransformPoint(new Point(pageDip.Left + (pageDip.Width * 0.5), pageDip.Bottom));
+                        annotTopY = Math.Min(topPt.Y, botPt.Y);
+                        annotBottomY = Math.Max(topPt.Y, botPt.Y);
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            double clampedX = Math.Clamp(rootPt.X, 24.0, rootW - 24.0);
+            bool placeBelow = Math.Min(rootPt.Y, annotTopY) < 92.0;
+            double offsetY = placeBelow
+                ? Math.Clamp(Math.Max(rootPt.Y, annotBottomY) + 20.0, 24.0, rootH - 24.0)
+                : Math.Clamp(Math.Min(rootPt.Y, annotTopY) - 20.0, 24.0, rootH - 24.0);
+
+            if (AnnotationQuickBarFlyout.IsOpen)
+            {
+                _quickBarClosedProgrammatically = true;
+                AnnotationQuickBarFlyout.Hide();
+            }
+
+            _quickBarClosedProgrammatically = false;
+            _quickBarOpenedTick = Environment.TickCount64;
+            var options = new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions
+            {
+                Position = new Point(clampedX, offsetY),
+                Placement = placeBelow
+                    ? Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Bottom
+                    : Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Top,
+                ShowMode = Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowMode.Standard,
+            };
+            AnnotationQuickBarFlyout.ShowAt(ScrollViewerContentRoot, options);
+        }
+        catch
+        {
+        }
+    }
+
+    private void OnAnnotationQuickBarFlyoutClosed(object? sender, object e)
+    {
+        bool wasProgrammatic = _quickBarClosedProgrammatically;
+        _quickBarClosedProgrammatically = false;
+        SetVisible(QuickBarColorRow, false);
+        Action? pending = _pendingAfterQuickBarClosed;
+        _pendingAfterQuickBarClosed = null;
+        if (!wasProgrammatic && pending is null)
+        {
+            TryRecordLastMouseClickFromCursor();
+        }
+
+        if (pending is not null)
+        {
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Normal, () => pending());
+        }
+    }
+
+    private void CloseQuickBarThen(Action? action)
+    {
+        if (AnnotationQuickBarFlyout?.IsOpen == true)
+        {
+            _quickBarClosedProgrammatically = true;
+            _pendingAfterQuickBarClosed = action;
+            AnnotationQuickBarFlyout.Hide();
+            return;
+        }
+
+        _pendingAfterQuickBarClosed = null;
+        if (action is not null)
+        {
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Normal, () => action());
+        }
+    }
+
+    private void OnQuickBarAddCommentClick(object sender, RoutedEventArgs e)
+    {
+        if (_quickBarAnnotation is not { } annot)
+        {
+            CloseQuickBarThen(null);
+            return;
+        }
+
+        PdfPageCanvas? canvas = _quickBarCanvas;
+        Point dipPt = _quickBarAnchorDipPt;
+        CloseQuickBarThen(() => OpenExistingAnnotationEditor(annot, canvas, dipPt));
+    }
+
+    private void OnQuickBarColorToggleClick(object sender, RoutedEventArgs e)
+    {
+        if (QuickBarColorRow is not null)
+        {
+            QuickBarColorRow.Visibility = QuickBarColorRow.Visibility == Visibility.Visible
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+        }
+    }
+
+    private void OnQuickBarColorSelectClick(object sender, RoutedEventArgs e)
+    {
+        PdfAnnotationInfo? annot = _quickBarAnnotation;
+        DocumentViewModel? doc = ViewModel.CurrentDocument;
+        CloseQuickBarThen(null);
+
+        if (annot is null || doc is null || sender is not FrameworkElement fe || !annot.SupportsColorChange)
+        {
+            return;
+        }
+
+        PdfAnnotationColor color = ParseAnnotationColorTag(fe.Tag as string, annot.Color);
+        SetDefaultAnnotationColor(color);
+        _ = doc.UpdateAnnotationAsync(annot.PageIndex, annot.AnnotIndex, annot.Contents ?? string.Empty, color);
+    }
+
+    private void OnQuickBarCopyClick(object sender, RoutedEventArgs e)
+    {
+        if (_quickBarAnnotation is { } annot)
+        {
+            CopyAnnotationToClipboard(annot);
+        }
+
+        CloseQuickBarThen(null);
+    }
+
+    private void OnQuickBarCutClick(object sender, RoutedEventArgs e)
+    {
+        // Guard against accidental second click of a double-click / double-tap landing on Cut right after open.
+        if (Environment.TickCount64 - _quickBarOpenedTick < 280)
+        {
+            return;
+        }
+
+        PdfAnnotationInfo? annot = _quickBarAnnotation;
+        CloseQuickBarThen(null);
+        if (annot is not null && ViewModel.CurrentDocument is { } doc)
+        {
+            _ = CutAnnotationToClipboardAsync(doc, annot);
+        }
+    }
+
+    private void OnQuickBarDeleteClick(object sender, RoutedEventArgs e)
+    {
+        // Guard against accidental second click of a double-click / double-tap landing on Delete right after open.
+        if (Environment.TickCount64 - _quickBarOpenedTick < 280)
+        {
+            return;
+        }
+
+        PdfAnnotationInfo? annot = _quickBarAnnotation;
+        CloseQuickBarThen(null);
+        if (annot is not null && ViewModel.CurrentDocument is { } doc)
+        {
+            _ = doc.DeleteAnnotationAsync(annot.PageIndex, annot.AnnotIndex);
+        }
+
+        ReturnFocusToViewer();
+    }
+
+    private void OnQuickBarCloseClick(object sender, RoutedEventArgs e)
+    {
+        CloseQuickBarThen(null);
+        ReturnFocusToViewer();
+    }
+
+    private static bool IsSameColor(PdfAnnotationColor a, PdfAnnotationColor b) =>
+        Math.Abs(a.R - b.R) < 12 && Math.Abs(a.G - b.G) < 12 && Math.Abs(a.B - b.B) < 12;
+
+    private static void ApplySwatchSelectedState(Button? btn, bool isSelected)
+    {
+        if (btn is null)
+        {
+            return;
+        }
+
+        if (isSelected)
+        {
+            btn.BorderThickness = new Thickness(2.5);
+            btn.BorderBrush = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"];
+        }
+        else
+        {
+            btn.BorderThickness = new Thickness(1);
+            btn.BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
+        }
+    }
+
+    // =========================================================================
+    // Annotation clipboard (copy / cut / paste)
+    // =========================================================================
+
+    private void CopyAnnotationToClipboard(PdfAnnotationInfo annot)
+    {
+        if (!annot.CanCopyOrCut)
+        {
+            return;
+        }
+
+        _copiedAnnotation = annot;
+        _isCutClipboard = false;
+    }
+
+    private async Task CutAnnotationToClipboardAsync(DocumentViewModel doc, PdfAnnotationInfo annot)
+    {
+        if (!annot.CanCopyOrCut)
+        {
+            return;
+        }
+
+        _copiedAnnotation = annot;
+        _isCutClipboard = true;
+        await doc.DeleteAnnotationAsync(annot.PageIndex, annot.AnnotIndex);
+    }
+
+    private async Task PasteCopiedAnnotationAtAsync(DocumentViewModel doc, int pageIndex, double pdfX, double pdfY)
+    {
+        PdfAnnotationInfo? source = _copiedAnnotation;
+        if (source is null)
+        {
+            return;
+        }
+
+        bool wasCut = _isCutClipboard;
+        PdfAnnotationInfo? pasted = await doc.PasteAnnotationAsync(source, pageIndex, pdfX, pdfY);
+        if (pasted is not null && wasCut && ReferenceEquals(_copiedAnnotation, source))
+        {
+            _copiedAnnotation = null;
+            _isCutClipboard = false;
+        }
+    }
+
+    private Task PasteCopiedAnnotationFromKeyboardAsync(DocumentViewModel doc)
+    {
+        if (_copiedAnnotation is not { } source || doc.Pages.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (_hasLastMouseClickPdfPt &&
+            _lastMouseClickPageIndex >= 0 &&
+            _lastMouseClickPageIndex < doc.Pages.Count)
+        {
+            return PasteCopiedAnnotationAtAsync(doc, _lastMouseClickPageIndex, _lastMouseClickPdfPt.X, _lastMouseClickPdfPt.Y);
+        }
+
+        int pageIndex = Math.Clamp(doc.CurrentPageIndex, 0, doc.Pages.Count - 1);
+        PdfPageInfo page = doc.Pages[pageIndex];
+        double minX = page.OriginXPt;
+        double minY = page.OriginYPt;
+        double maxX = minX + page.WidthPt;
+        double maxY = minY + page.HeightPt;
+        double w = source.Bounds.Width;
+        double h = source.Bounds.Height;
+
+        double x;
+        double y;
+        if (source.PageIndex == pageIndex && !source.Bounds.IsEmpty)
+        {
+            double offset = _isCutClipboard ? 0.0 : 18.0;
+            x = source.Bounds.Left + offset;
+            y = source.Bounds.Top - offset;
+        }
+        else
+        {
+            x = minX + (page.WidthPt * 0.5) - (w * 0.5);
+            y = minY + (page.HeightPt * 0.5) + (h * 0.5);
+        }
+
+        x = Math.Clamp(x, minX, Math.Max(minX, maxX - w));
+        y = Math.Clamp(y, Math.Min(maxY, minY + h), maxY);
+        return PasteCopiedAnnotationAtAsync(doc, pageIndex, x, y);
     }
 
     private Point ComputeSelectionAnchorCanvasDip(PdfTextSelection selection, PdfPageCanvas? canvas)
@@ -6171,6 +6926,8 @@ public sealed partial class DocumentView : Page
 
         return _contextTargetDipPt;
     }
+
+    private PdfAnnotationInfo? _annotEditorAnnotation;
 
     private void OpenCreateAnnotationEditor(
         AnnotationEditorMode mode,
@@ -6188,6 +6945,7 @@ public sealed partial class DocumentView : Page
         _annotEditorMode = mode;
         _annotEditorPageIndex = pageIndex;
         _annotEditorAnnotIndex = -1;
+        _annotEditorAnnotation = null;
         _annotEditorPdfPt = pdfPt;
         _annotEditorPendingSelection = pendingSelection;
         _annotEditorPendingMarkupSubtype = PdfAnnotationSubtype.Highlight;
@@ -6225,15 +6983,10 @@ public sealed partial class DocumentView : Page
             }
         }
 
-        if (AnnotationEditorColorRow is not null)
-        {
-            AnnotationEditorColorRow.Visibility = Visibility.Visible;
-        }
-
-        if (AnnotationEditorDeleteButton is not null)
-        {
-            AnnotationEditorDeleteButton.Visibility = Visibility.Collapsed;
-        }
+        SetVisible(AnnotationEditorColorRow, true);
+        SetVisible(AnnotationEditorDeleteButton, false);
+        SetVisible(AnnotationEditorCopyButton, false);
+        SetVisible(AnnotationEditorCutButton, false);
 
         if (AnnotationEditorTextBox is not null)
         {
@@ -6257,6 +7010,7 @@ public sealed partial class DocumentView : Page
         _annotEditorMode = AnnotationEditorMode.EditExisting;
         _annotEditorPageIndex = annot.PageIndex;
         _annotEditorAnnotIndex = annot.AnnotIndex;
+        _annotEditorAnnotation = annot;
         _annotEditorPdfPt = default;
         _annotEditorPendingSelection = null;
         _annotEditorSelectedColor = annot.Color;
@@ -6289,15 +7043,10 @@ public sealed partial class DocumentView : Page
             }
         }
 
-        if (AnnotationEditorColorRow is not null)
-        {
-            AnnotationEditorColorRow.Visibility = _annotEditorCanEditColor ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        if (AnnotationEditorDeleteButton is not null)
-        {
-            AnnotationEditorDeleteButton.Visibility = Visibility.Visible;
-        }
+        SetVisible(AnnotationEditorColorRow, _annotEditorCanEditColor);
+        SetVisible(AnnotationEditorDeleteButton, true);
+        SetVisible(AnnotationEditorCopyButton, annot.CanCopyOrCut);
+        SetVisible(AnnotationEditorCutButton, annot.CanCopyOrCut);
 
         if (AnnotationEditorTextBox is not null)
         {
@@ -6380,6 +7129,7 @@ public sealed partial class DocumentView : Page
         UpdateSwatchSelection(AnnotColorBlueButton, PdfAnnotationColor.Blue);
         UpdateSwatchSelection(AnnotColorPinkButton, PdfAnnotationColor.Pink);
         UpdateSwatchSelection(AnnotColorOrangeButton, PdfAnnotationColor.Orange);
+        UpdateSwatchSelection(AnnotColorRedButton, PdfAnnotationColor.Red);
 
         if (AnnotationEditorTextBox is not null)
         {
@@ -6388,7 +7138,7 @@ public sealed partial class DocumentView : Page
 
         if (AnnotationEditorSaveButton is not null)
         {
-            bool requiresNonEmptyText = _annotEditorMode == AnnotationEditorMode.CreateFreeText;
+            bool requiresNonEmptyText = _annotEditorMode is AnnotationEditorMode.CreateNote or AnnotationEditorMode.CreateFreeText;
             string currentText = AnnotationEditorTextBox?.Text ?? string.Empty;
             AnnotationEditorSaveButton.IsEnabled = !requiresNonEmptyText || !string.IsNullOrWhiteSpace(currentText);
         }
@@ -6396,25 +7146,7 @@ public sealed partial class DocumentView : Page
 
     private void UpdateSwatchSelection(Button? btn, PdfAnnotationColor preset)
     {
-        if (btn is null)
-        {
-            return;
-        }
-
-        bool isSelected = Math.Abs(btn.Background is SolidColorBrush ? _annotEditorSelectedColor.R - preset.R : 255) < 12 &&
-                          Math.Abs(_annotEditorSelectedColor.G - preset.G) < 12 &&
-                          Math.Abs(_annotEditorSelectedColor.B - preset.B) < 12;
-
-        if (isSelected)
-        {
-            btn.BorderThickness = new Thickness(2.5);
-            btn.BorderBrush = (Brush)Application.Current.Resources["TextFillColorPrimaryBrush"];
-        }
-        else
-        {
-            btn.BorderThickness = new Thickness(1);
-            btn.BorderBrush = (Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"];
-        }
+        ApplySwatchSelectedState(btn, IsSameColor(_annotEditorSelectedColor, preset));
     }
 
     private void OnAnnotationEditorTextBoxTextChanged(object sender, TextChangedEventArgs e)
@@ -6427,11 +7159,7 @@ public sealed partial class DocumentView : Page
         if (sender is FrameworkElement fe)
         {
             _annotEditorSelectedColor = ParseAnnotationColorTag(fe.Tag as string, _annotEditorSelectedColor);
-            if (ViewModel.CurrentDocument is not null)
-            {
-                ViewModel.CurrentDocument.ActiveAnnotationColor = _annotEditorSelectedColor;
-            }
-
+            SetDefaultAnnotationColor(_annotEditorSelectedColor);
             UpdateAnnotationEditorUiState();
         }
     }
@@ -6446,7 +7174,7 @@ public sealed partial class DocumentView : Page
         }
 
         string contents = (AnnotationEditorTextBox?.Text ?? string.Empty).Trim();
-        doc.ActiveAnnotationColor = _annotEditorSelectedColor;
+        SetDefaultAnnotationColor(_annotEditorSelectedColor);
 
         AnnotationEditorMode mode = _annotEditorMode;
         int pageIndex = _annotEditorPageIndex;
@@ -6508,6 +7236,29 @@ public sealed partial class DocumentView : Page
         ReturnFocusToViewer();
     }
 
+    private void OnAnnotationEditorCopyClick(object sender, RoutedEventArgs e)
+    {
+        if (_annotEditorAnnotation is { } annot)
+        {
+            CopyAnnotationToClipboard(annot);
+        }
+
+        AnnotationEditorFlyout?.Hide();
+        ReturnFocusToViewer();
+    }
+
+    private void OnAnnotationEditorCutClick(object sender, RoutedEventArgs e)
+    {
+        PdfAnnotationInfo? annot = _annotEditorAnnotation;
+        AnnotationEditorFlyout?.Hide();
+        if (annot is not null && ViewModel.CurrentDocument is { } doc)
+        {
+            _ = CutAnnotationToClipboardAsync(doc, annot);
+        }
+
+        ReturnFocusToViewer();
+    }
+
     private void OnAnnotationEditorCloseClick(object sender, RoutedEventArgs e)
     {
         AnnotationEditorFlyout?.Hide();
@@ -6517,11 +7268,35 @@ public sealed partial class DocumentView : Page
     private void OnAnnotationEditorFlyoutClosed(object? sender, object e)
     {
         _annotEditorPendingSelection = null;
+        _annotEditorAnnotation = null;
     }
 
     private void HideAnnotationPopupsImmediate()
     {
         HideTouchSelectionFlyout();
+
+        try
+        {
+            _pendingAfterMouseSelectionClosed = null;
+            if (MouseSelectionFlyout?.IsOpen == true)
+            {
+                MouseSelectionFlyout.Hide();
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            if (ToolbarColorFlyout?.IsOpen == true)
+            {
+                ToolbarColorFlyout.Hide();
+            }
+        }
+        catch
+        {
+        }
 
         try
         {
@@ -6536,6 +7311,18 @@ public sealed partial class DocumentView : Page
         finally
         {
             _isTouchEmptyHoldFlyoutOpen = false;
+        }
+
+        try
+        {
+            _pendingAfterQuickBarClosed = null;
+            if (AnnotationQuickBarFlyout?.IsOpen == true)
+            {
+                AnnotationQuickBarFlyout.Hide();
+            }
+        }
+        catch
+        {
         }
 
         try
@@ -10352,7 +11139,7 @@ public sealed partial class DocumentView : Page
                 StatusBarMetadataClipContainer.Width = double.NaN;
                 StatusBarMetadataClipContainer.Opacity = 1.0;
                 StatusBarMetadataTransform.TranslateX = 0.0;
-                StatusBarMetadataClip.Rect = new Rect(0, 0, 400, 32);
+                StatusBarMetadataClip.Rect = new Rect(0, 0, 700, 32);
             }
         }
 
@@ -10426,7 +11213,7 @@ public sealed partial class DocumentView : Page
             _statusBarPresentationExpandedWidth = StatusBarPresentationInnerPanel.ActualWidth;
         }
 
-        StatusBarMetadataClip.Rect = new Rect(0, 0, Math.Max(400.0, _statusBarMetadataExpandedWidth + 32.0), 32);
+        StatusBarMetadataClip.Rect = new Rect(0, 0, Math.Max(700.0, _statusBarMetadataExpandedWidth + 32.0), 32);
         StatusBarPresentationClip.Rect = new Rect(0, 0, Math.Max(200.0, _statusBarPresentationExpandedWidth + 32.0), 32);
 
         double fromMetaW = collapse

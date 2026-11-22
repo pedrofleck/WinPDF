@@ -285,13 +285,13 @@
   <data name="Menu_Save.Text" xml:space="preserve"><value>Salvar</value></data>
   <data name="Context_Save.Text" xml:space="preserve"><value>Salvar</value></data>
   <data name="Context_Highlight.Text" xml:space="preserve"><value>Realçar</value></data>
-  <data name="Context_HighlightWithComment.Text" xml:space="preserve"><value>Realçar com comentário…</value></data>
+  <data name="Context_HighlightWithComment.Text" xml:space="preserve"><value>Adicionar comentário ao trecho…</value></data>
   <data name="Context_MarkupSubMenu.Text" xml:space="preserve"><value>Marcação de texto</value></data>
   <data name="Context_Underline.Text" xml:space="preserve"><value>Sublinhar</value></data>
   <data name="Context_StrikeOut.Text" xml:space="preserve"><value>Tachado</value></data>
   <data name="Context_Squiggly.Text" xml:space="preserve"><value>Sublinhado ondulado</value></data>
   <data name="Context_AddComment.Text" xml:space="preserve"><value>Adicionar nota de comentário…</value></data>
-  <data name="Context_AddTextBox.Text" xml:space="preserve"><value>Adicionar caixa de texto…</value></data>
+  <data name="Context_AddTextBox.Text" xml:space="preserve"><value>Adicionar comentário…</value></data>
   <data name="Context_EditAnnotation.Text" xml:space="preserve"><value>Editar comentário…</value></data>
   <data name="Context_DeleteAnnotation.Text" xml:space="preserve"><value>Excluir anotação</value></data>
   <data name="Context_InspectSignature.Text" xml:space="preserve"><value>Ver detalhes da assinatura digital</value></data>
@@ -302,7 +302,7 @@
   <data name="TouchSelection_StrikeOut.Text" xml:space="preserve"><value>Tachado</value></data>
   <data name="TouchSelection_Squiggly.Text" xml:space="preserve"><value>Sublinhado ondulado</value></data>
   <data name="TouchEmpty_AddComment_Label" xml:space="preserve"><value>Comentário</value></data>
-  <data name="TouchEmpty_AddTextBox_Label" xml:space="preserve"><value>Caixa de texto</value></data>
+  <data name="TouchEmpty_AddTextBox_Label" xml:space="preserve"><value>Comentário</value></data>
   <data name="Annot_Save" xml:space="preserve"><value>Salvar</value></data>
   <data name="Annot_Delete" xml:space="preserve"><value>Excluir</value></data>
   <data name="Annot_Close" xml:space="preserve"><value>Fechar</value></data>
@@ -313,6 +313,7 @@
   <data name="Color_Blue" xml:space="preserve"><value>Azul</value></data>
   <data name="Color_Pink" xml:space="preserve"><value>Rosa</value></data>
   <data name="Color_Orange" xml:space="preserve"><value>Laranja</value></data>
+  <data name="Color_Red" xml:space="preserve"><value>Vermelho</value></data>
   <data name="Annot_Subtype_Highlight" xml:space="preserve"><value>Realce</value></data>
   <data name="Annot_Subtype_Underline" xml:space="preserve"><value>Sublinhado</value></data>
   <data name="Annot_Subtype_Squiggly" xml:space="preserve"><value>Ondulado</value></data>
@@ -351,7 +352,7 @@
   <data name="Sig_Dialog_CertValidity" xml:space="preserve"><value>Validade do certificado</value></data>
   <data name="Sig_Dialog_Thumbprint" xml:space="preserve"><value>Impressão digital (SHA-256)</value></data>
   <data name="Sig_Status_Valid" xml:space="preserve"><value>Assinatura digital válida</value></data>
-  <data name="Sig_Status_ValidUntrustedRoot" xml:space="preserve"><value>Integridade intacta (AC raiz fora do repositório Windows)</value></data>
+  <data name="Sig_Status_ValidUntrustedRoot" xml:space="preserve"><value>Assinatura válida (integridade verificada)</value></data>
   <data name="Sig_Status_ModifiedAfterSigning" xml:space="preserve"><value>Documento modificado após a assinatura</value></data>
   <data name="Sig_Status_Invalid" xml:space="preserve"><value>Assinatura inválida (conteúdo alterado)</value></data>
   <data name="Sig_Status_Unknown" xml:space="preserve"><value>Assinatura desconhecida / não suportada</value></data>
@@ -359,4 +360,21 @@
   <data name="Sig_DocMdp_FormFillAndSign" xml:space="preserve"><value>Preenchimento de formulários e assinaturas</value></data>
   <data name="Sig_DocMdp_AnnotationsAllowed" xml:space="preserve"><value>Anotações, formulários e assinaturas</value></data>
   <data name="Sig_DocMdp_Unspecified" xml:space="preserve"><value>Padrão</value></data>
+  <data name="StatusBar_SignedLabel" xml:space="preserve"><value>Assinado digitalmente</value></data>
+  <data name="Annot_AddComment_ToolTip" xml:space="preserve"><value>Adicionar comentário</value></data>
+  <data name="Annot_Color_ToolTip" xml:space="preserve"><value>Alterar cor</value></data>
+  <data name="Annot_Copy_ToolTip" xml:space="preserve"><value>Copiar anotação</value></data>
+  <data name="Annot_Cut_ToolTip" xml:space="preserve"><value>Recortar anotação</value></data>
+  <data name="Context_CopyAnnotation.Text" xml:space="preserve"><value>Copiar anotação</value></data>
+  <data name="Context_CutAnnotation.Text" xml:space="preserve"><value>Recortar anotação</value></data>
+  <data name="Context_PasteAnnotation.Text" xml:space="preserve"><value>Colar anotação</value></data>
+  <data name="TouchEmpty_Paste_Label" xml:space="preserve"><value>Colar</value></data>
+  <data name="Sig_Detail_Valid" xml:space="preserve"><value>A assinatura criptográfica é válida, o documento não foi alterado e a cadeia de certificação é confiável pelo Windows.</value></data>
+  <data name="Sig_Detail_ValidUntrustedRoot" xml:space="preserve"><value>A assinatura criptográfica e a integridade do documento são válidas. Observação: a AC raiz do emissor não está instalada no repositório padrão do Windows.</value></data>
+  <data name="Sig_Detail_ModifiedAfterSigning" xml:space="preserve"><value>A assinatura está íntegra na revisão assinada, mas dados ou anotações foram adicionados posteriormente.</value></data>
+  <data name="Sig_Detail_Invalid" xml:space="preserve"><value>A verificação criptográfica falhou ou o conteúdo assinado foi alterado.</value></data>
+  <data name="Sig_Detail_Unknown" xml:space="preserve"><value>O formato da assinatura incorporada não pôde ser verificado localmente.</value></data>
+  <data name="Annot_Undo_ToolTip" xml:space="preserve"><value>Desfazer (Ctrl+Z)</value></data>
+  <data name="Context_UndoAnnotation.Text" xml:space="preserve"><value>Desfazer</value></data>
+  <data name="Toolbar_Color_ToolTip" xml:space="preserve"><value>Cor padrão das anotações</value></data>
 </root>

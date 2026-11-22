@@ -992,26 +992,34 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     /// Gets or sets a value indicating whether the document contains one or more digital signatures.
     /// </summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsSignatureBannerVisible))]
+    [NotifyPropertyChangedFor(nameof(OverallSignatureStatus))]
+    [NotifyPropertyChangedFor(nameof(SignatureStatusGlyph))]
+    [NotifyPropertyChangedFor(nameof(SignatureStatusTooltip))]
     public partial bool HasSignatures { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the user dismissed the floating digital signature banner for this document.
+    /// Gets the overall verification status across all digital signatures in the document.
     /// </summary>
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsSignatureBannerVisible))]
-    public partial bool IsSignatureBannerDismissed { get; set; }
+    [NotifyPropertyChangedFor(nameof(SignatureStatusGlyph))]
+    public partial PdfSignatureVerificationStatus OverallSignatureStatus { get; set; } = PdfSignatureVerificationStatus.Unknown;
 
     /// <summary>
-    /// Gets or sets the concise status summary shown in the floating digital signature banner.
+    /// Gets or sets the tooltip text summarizing signature verification for the status bar indicator.
     /// </summary>
     [ObservableProperty]
-    public partial string SignatureBannerMessage { get; set; } = string.Empty;
+    public partial string SignatureStatusTooltip { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets a value indicating whether the floating digital signature banner should currently be displayed.
+    /// Gets the Segoe Fluent Icons glyph representing <see cref="OverallSignatureStatus"/>.
     /// </summary>
-    public bool IsSignatureBannerVisible => HasSignatures && !IsSignatureBannerDismissed;
+    public string SignatureStatusGlyph => OverallSignatureStatus switch
+    {
+        PdfSignatureVerificationStatus.Valid or PdfSignatureVerificationStatus.ValidUntrustedRoot => "\uE73E",
+        PdfSignatureVerificationStatus.ModifiedAfterSigning => "\uE7BA",
+        PdfSignatureVerificationStatus.Invalid => "\uEA39",
+        _ => "\uE946",
+    };
 
     /// <summary>
     /// Gets a value indicating whether the document currently has at least one annotation or digital signature.
@@ -1038,9 +1046,19 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Gets or sets a value indicating whether at least one annotation edit, move, creation, or deletion can be undone.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool CanUndoAnnotation { get; set; }
+
+    private readonly List<AnnotationUndoEntry> _annotationUndoStack = new();
+    private const int MaxAnnotationUndoDepth = 40;
+
+    /// <summary>
     /// Gets or sets the preferred RGBA color used when creating new highlights, comments, or text boxes.
     /// </summary>
-    public PdfAnnotationColor ActiveAnnotationColor { get; set; } = PdfAnnotationColor.Yellow;
+    [ObservableProperty]
+    public partial PdfAnnotationColor ActiveAnnotationColor { get; set; } = PdfAnnotationColor.Yellow;
 
     /// <summary>
     /// Returns the cached annotations for <paramref name="pageIndex"/> in O(1) time.
@@ -1174,18 +1192,71 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             HasSignatures = Signatures.Count > 0;
             if (HasSignatures)
             {
+                PdfSignatureVerificationStatus overall = PdfSignatureVerificationStatus.Unknown;
+                bool anyValid = false;
+                bool anyUntrusted = false;
+                bool anyModified = false;
+                bool anyInvalid = false;
+
+                for (int i = 0; i < Signatures.Count; i++)
+                {
+                    switch (Signatures[i].Status)
+                    {
+                        case PdfSignatureVerificationStatus.Invalid:
+                            anyInvalid = true;
+                            break;
+                        case PdfSignatureVerificationStatus.ModifiedAfterSigning:
+                            anyModified = true;
+                            break;
+                        case PdfSignatureVerificationStatus.ValidUntrustedRoot:
+                            anyUntrusted = true;
+                            break;
+                        case PdfSignatureVerificationStatus.Valid:
+                            anyValid = true;
+                            break;
+                    }
+                }
+
+                if (anyInvalid)
+                {
+                    overall = PdfSignatureVerificationStatus.Invalid;
+                }
+                else if (anyModified)
+                {
+                    overall = PdfSignatureVerificationStatus.ModifiedAfterSigning;
+                }
+                else if (anyUntrusted)
+                {
+                    overall = PdfSignatureVerificationStatus.ValidUntrustedRoot;
+                }
+                else if (anyValid)
+                {
+                    overall = PdfSignatureVerificationStatus.Valid;
+                }
+
+                OverallSignatureStatus = overall;
                 string primarySigner = Signatures[0].SignerName;
-                SignatureBannerMessage = Signatures.Count == 1
+                string summary = Signatures.Count == 1
                     ? ResourceStrings.Format(ResourceKeys.SigBannerSingleFormat, primarySigner)
                     : ResourceStrings.Format(ResourceKeys.SigBannerMultiFormat, Signatures.Count, primarySigner);
+                string statusText = ResourceStrings.Get(overall switch
+                {
+                    PdfSignatureVerificationStatus.Valid => ResourceKeys.SigStatusValid,
+                    PdfSignatureVerificationStatus.ValidUntrustedRoot => ResourceKeys.SigStatusValidUntrustedRoot,
+                    PdfSignatureVerificationStatus.ModifiedAfterSigning => ResourceKeys.SigStatusModifiedAfterSigning,
+                    PdfSignatureVerificationStatus.Invalid => ResourceKeys.SigStatusInvalid,
+                    _ => ResourceKeys.SigStatusUnknown,
+                });
+                SignatureStatusTooltip = $"{statusText}\n{summary}";
             }
             else
             {
-                SignatureBannerMessage = string.Empty;
+                OverallSignatureStatus = PdfSignatureVerificationStatus.Unknown;
+                SignatureStatusTooltip = string.Empty;
             }
 
             OnPropertyChanged(nameof(HasAnnotationsOrSignatures));
-            OnPropertyChanged(nameof(IsSignatureBannerVisible));
+            OnPropertyChanged(nameof(SignatureStatusGlyph));
 
             IReadOnlyList<PdfAnnotationInfo> annots = await _pdfService.GetDocumentAnnotationsAsync(
                 DocumentId,
@@ -1229,13 +1300,15 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     /// <param name="color">Annotation RGBA color.</param>
     /// <param name="comment">Optional comment body attached to the first selected page's markup.</param>
     /// <param name="author">Optional author name.</param>
+    /// <param name="recordUndo">Whether to push an entry onto the annotation undo stack.</param>
     /// <returns>The primary created <see cref="PdfAnnotationInfo"/>, or <see langword="null"/> if invalid.</returns>
     public async Task<PdfAnnotationInfo?> AddMarkupForSelectionAsync(
         PdfTextSelection selection,
         PdfAnnotationSubtype subtype,
         PdfAnnotationColor color,
         string comment = "",
-        string author = "")
+        string author = "",
+        bool recordUndo = true)
     {
         if (_isDisposed || !selection.HasContent)
         {
@@ -1244,6 +1317,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
         string effectiveAuthor = string.IsNullOrWhiteSpace(author) ? Environment.UserName : author;
         PdfAnnotationInfo? firstCreated = null;
+        List<AnnotationLocation>? createdLocations = recordUndo ? new() : null;
 
         IReadOnlyList<PdfPageTextSelection> pageSlices = selection.Pages is { Count: > 0 }
             ? selection.Pages
@@ -1272,10 +1346,16 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             }
 
             ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
+            createdLocations?.Add(new AnnotationLocation(result.PageIndex, result.TargetAnnotIndex));
             if (firstCreated is null)
             {
                 firstCreated = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
             }
+        }
+
+        if (createdLocations is { Count: > 0 })
+        {
+            PushUndoEntry(new UndoCreatedAnnotationsEntry(createdLocations));
         }
 
         if (firstCreated is not null)
@@ -1297,7 +1377,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         double pdfY,
         PdfAnnotationColor color,
         string contents,
-        string author = "")
+        string author = "",
+        bool recordUndo = true)
     {
         if (_isDisposed)
         {
@@ -1320,6 +1401,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
         ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
         PdfAnnotationInfo? created = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
+        if (recordUndo && created is not null)
+        {
+            PushUndoEntry(new UndoCreatedAnnotationsEntry([new AnnotationLocation(created.PageIndex, created.AnnotIndex)]));
+        }
+
         HasUnsavedChanges = true;
         SelectedAnnotation = created;
         return created;
@@ -1334,7 +1420,9 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         double pdfY,
         PdfAnnotationColor color,
         string contents,
-        string author = "")
+        string author = "",
+        double maxWidthPt = 240.0,
+        bool recordUndo = true)
     {
         if (_isDisposed)
         {
@@ -1347,7 +1435,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             PdfY: pdfY,
             Color: color,
             Contents: contents ?? string.Empty,
-            Author: string.IsNullOrWhiteSpace(author) ? Environment.UserName : author);
+            Author: string.IsNullOrWhiteSpace(author) ? Environment.UserName : author,
+            MaxWidthPt: maxWidthPt);
 
         PdfPageAnnotationMutationResult result = await _pdfService.AddFreeTextAnnotationAsync(DocumentId, req, _lifetime.Token);
         if (_isDisposed)
@@ -1357,6 +1446,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
         ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
         PdfAnnotationInfo? created = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
+        if (recordUndo && created is not null)
+        {
+            PushUndoEntry(new UndoCreatedAnnotationsEntry([new AnnotationLocation(created.PageIndex, created.AnnotIndex)]));
+        }
+
         HasUnsavedChanges = true;
         SelectedAnnotation = created;
         return created;
@@ -1369,12 +1463,15 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         int pageIndex,
         int annotIndex,
         string contents,
-        PdfAnnotationColor? newColor = null)
+        PdfAnnotationColor? newColor = null,
+        bool recordUndo = true)
     {
         if (_isDisposed)
         {
             return null;
         }
+
+        PdfAnnotationInfo? before = recordUndo ? FindExactAnnotation(pageIndex, annotIndex) : null;
 
         PdfUpdateAnnotationRequest req = new(pageIndex, annotIndex, contents ?? string.Empty, newColor);
         PdfPageAnnotationMutationResult result = await _pdfService.UpdateAnnotationAsync(DocumentId, req, _lifetime.Token);
@@ -1385,6 +1482,12 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
         ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
         PdfAnnotationInfo? updated = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
+        if (recordUndo && before is not null && updated is not null &&
+            (!string.Equals(before.Contents, updated.Contents, StringComparison.Ordinal) || !before.Color.Equals(updated.Color)))
+        {
+            PushUndoEntry(new UndoUpdatedAnnotationEntry(updated.PageIndex, updated.AnnotIndex, before.Contents, before.Color));
+        }
+
         HasUnsavedChanges = true;
         SelectedAnnotation = updated;
         return updated;
@@ -1393,12 +1496,14 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     /// <summary>
     /// Deletes an existing annotation from <paramref name="pageIndex"/> and refreshes caches and views.
     /// </summary>
-    public async Task DeleteAnnotationAsync(int pageIndex, int annotIndex)
+    public async Task DeleteAnnotationAsync(int pageIndex, int annotIndex, bool recordUndo = true)
     {
         if (_isDisposed)
         {
             return;
         }
+
+        PdfAnnotationInfo? before = recordUndo ? FindExactAnnotation(pageIndex, annotIndex) : null;
 
         IReadOnlyList<PdfAnnotationInfo> refreshed = await _pdfService.DeleteAnnotationAsync(DocumentId, pageIndex, annotIndex, _lifetime.Token);
         if (_isDisposed)
@@ -1411,8 +1516,382 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             SelectedAnnotation = null;
         }
 
-        ApplyPageAnnotationMutation(pageIndex, refreshed);
+        ApplyPageAnnotationMutation(pageIndex, refreshed, deletedAnnotIndex: annotIndex);
+        if (recordUndo && before is not null)
+        {
+            AdjustUndoEntriesForDeletion(pageIndex, annotIndex);
+            PushUndoEntry(new UndoDeletedAnnotationEntry(before));
+        }
+
         HasUnsavedChanges = true;
+    }
+
+    /// <summary>
+    /// Moves an existing movable annotation on <paramref name="pageIndex"/> by a PDF-space delta.
+    /// </summary>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="annotIndex">Zero-based index in the page's annotation list.</param>
+    /// <param name="deltaPdfX">Horizontal translation in PDF points.</param>
+    /// <param name="deltaPdfY">Vertical translation in PDF points.</param>
+    /// <param name="recordUndo">Whether to push an entry onto the annotation undo stack.</param>
+    /// <returns>The updated <see cref="PdfAnnotationInfo"/>, or <see langword="null"/> if unsuccessful.</returns>
+    public async Task<PdfAnnotationInfo?> MoveAnnotationAsync(
+        int pageIndex,
+        int annotIndex,
+        double deltaPdfX,
+        double deltaPdfY,
+        bool recordUndo = true)
+    {
+        if (_isDisposed)
+        {
+            return null;
+        }
+
+        PdfAnnotationInfo? before = recordUndo ? FindExactAnnotation(pageIndex, annotIndex) : null;
+
+        PdfMoveAnnotationRequest req = new(pageIndex, annotIndex, deltaPdfX, deltaPdfY);
+        PdfPageAnnotationMutationResult result = await _pdfService.MoveAnnotationAsync(DocumentId, req, _lifetime.Token);
+        if (_isDisposed)
+        {
+            return null;
+        }
+
+        ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
+        PdfAnnotationInfo? updated = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
+        if (recordUndo && before is not null && updated is not null)
+        {
+            double actualDx = updated.Bounds.Left - before.Bounds.Left;
+            double actualDy = updated.Bounds.Bottom - before.Bounds.Bottom;
+            if (Math.Abs(actualDx) > 0.05 || Math.Abs(actualDy) > 0.05)
+            {
+                PushUndoEntry(new UndoMovedAnnotationEntry(updated.PageIndex, updated.AnnotIndex, actualDx, actualDy));
+            }
+        }
+
+        HasUnsavedChanges = true;
+        SelectedAnnotation = updated;
+        return updated;
+    }
+
+    /// <summary>
+    /// Pastes a copied or cut annotation onto <paramref name="targetPageIndex"/> near <c>(targetPdfX, targetPdfY)</c>.
+    /// </summary>
+    /// <param name="source">Source annotation snapshot.</param>
+    /// <param name="targetPageIndex">Destination zero-based page index.</param>
+    /// <param name="targetPdfX">Target X coordinate in PDF user space (points).</param>
+    /// <param name="targetPdfY">Target Y coordinate in PDF user space (points).</param>
+    /// <param name="recordUndo">Whether to push an entry onto the annotation undo stack.</param>
+    /// <returns>The newly created <see cref="PdfAnnotationInfo"/>, or <see langword="null"/> if not supported.</returns>
+    public async Task<PdfAnnotationInfo?> PasteAnnotationAsync(
+        PdfAnnotationInfo source,
+        int targetPageIndex,
+        double targetPdfX,
+        double targetPdfY,
+        bool recordUndo = true)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        if (_isDisposed || !source.CanCopyOrCut || targetPageIndex < 0 || targetPageIndex >= Pages.Count)
+        {
+            return null;
+        }
+
+        if (source.Subtype == PdfAnnotationSubtype.FreeText)
+        {
+            string body = string.IsNullOrWhiteSpace(source.Contents) ? "Text" : source.Contents;
+            double maxW = source.Bounds.Width >= 110f ? source.Bounds.Width : 240.0;
+            PdfAnnotationInfo? ft = await AddFreeTextAsync(targetPageIndex, targetPdfX, targetPdfY, source.Color, body, source.Author, maxW, recordUndo: false);
+            if (recordUndo && ft is not null)
+            {
+                PushUndoEntry(new UndoCreatedAnnotationsEntry([new AnnotationLocation(ft.PageIndex, ft.AnnotIndex)]));
+            }
+
+            return ft;
+        }
+
+        if (source.Subtype == PdfAnnotationSubtype.Text)
+        {
+            PdfAnnotationInfo? note = await AddTextNoteAsync(targetPageIndex, targetPdfX, targetPdfY, source.Color, source.Contents, source.Author, recordUndo: false);
+            if (recordUndo && note is not null)
+            {
+                PushUndoEntry(new UndoCreatedAnnotationsEntry([new AnnotationLocation(note.PageIndex, note.AnnotIndex)]));
+            }
+
+            return note;
+        }
+
+        PdfPasteAnnotationRequest req = new(source, targetPageIndex, targetPdfX, targetPdfY);
+        PdfPageAnnotationMutationResult result = await _pdfService.PasteAnnotationAsync(DocumentId, req, _lifetime.Token);
+        if (_isDisposed)
+        {
+            return null;
+        }
+
+        ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
+        PdfAnnotationInfo? created = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
+        if (recordUndo && created is not null)
+        {
+            PushUndoEntry(new UndoCreatedAnnotationsEntry([new AnnotationLocation(created.PageIndex, created.AnnotIndex)]));
+        }
+
+        HasUnsavedChanges = true;
+        SelectedAnnotation = created;
+        return created;
+    }
+
+    /// <summary>
+    /// Undoes the most recent annotation creation, edit, move, or deletion performed during this session.
+    /// </summary>
+    /// <returns><see langword="true"/> if an action was undone; otherwise <see langword="false"/>.</returns>
+    public async Task<bool> UndoAnnotationAsync()
+    {
+        if (_isDisposed || _annotationUndoStack.Count == 0)
+        {
+            return false;
+        }
+
+        AnnotationUndoEntry entry = _annotationUndoStack[^1];
+        _annotationUndoStack.RemoveAt(_annotationUndoStack.Count - 1);
+        CanUndoAnnotation = _annotationUndoStack.Count > 0;
+
+        switch (entry)
+        {
+            case UndoCreatedAnnotationsEntry created:
+                for (int i = created.Locations.Count - 1; i >= 0; i--)
+                {
+                    AnnotationLocation loc = created.Locations[i];
+                    if (loc.IsValid)
+                    {
+                        await DeleteAnnotationAsync(loc.PageIndex, loc.AnnotIndex, recordUndo: false);
+                    }
+                }
+
+                return true;
+
+            case UndoUpdatedAnnotationEntry updated:
+                if (updated.Location.IsValid)
+                {
+                    _ = await UpdateAnnotationAsync(
+                        updated.Location.PageIndex,
+                        updated.Location.AnnotIndex,
+                        updated.PreviousContents,
+                        updated.PreviousColor,
+                        recordUndo: false);
+                }
+
+                return true;
+
+            case UndoMovedAnnotationEntry moved:
+                if (moved.Location.IsValid)
+                {
+                    _ = await MoveAnnotationAsync(
+                        moved.Location.PageIndex,
+                        moved.Location.AnnotIndex,
+                        -moved.ActualDeltaPdfX,
+                        -moved.ActualDeltaPdfY,
+                        recordUndo: false);
+                }
+
+                return true;
+
+            case UndoDeletedAnnotationEntry deleted:
+                PdfAnnotationInfo snapshot = deleted.Snapshot;
+                PdfAnnotationInfo? restored = null;
+                if (snapshot.IsTextMarkup)
+                {
+                    IReadOnlyList<PdfRect> rects = snapshot.QuadRects.Count > 0 ? snapshot.QuadRects : [snapshot.Bounds];
+                    PdfCreateMarkupRequest req = new(
+                        PageIndex: snapshot.PageIndex,
+                        Subtype: snapshot.Subtype,
+                        Rects: rects,
+                        Color: snapshot.Color,
+                        Contents: snapshot.Contents,
+                        Author: snapshot.Author,
+                        Subject: snapshot.Subject,
+                        SkipPadding: true);
+                    PdfPageAnnotationMutationResult res = await _pdfService.AddMarkupAnnotationAsync(DocumentId, req, _lifetime.Token);
+                    if (!_isDisposed)
+                    {
+                        ApplyPageAnnotationMutation(res.PageIndex, res.Annotations);
+                        restored = FindAnnotationByIndex(res.PageIndex, res.TargetAnnotIndex);
+                        HasUnsavedChanges = true;
+                        SelectedAnnotation = restored;
+                    }
+                }
+                else if (snapshot.Subtype == PdfAnnotationSubtype.Text)
+                {
+                    double cx = (snapshot.Bounds.Left + snapshot.Bounds.Right) * 0.5;
+                    double cy = (snapshot.Bounds.Bottom + snapshot.Bounds.Top) * 0.5;
+                    restored = await AddTextNoteAsync(snapshot.PageIndex, cx, cy, snapshot.Color, snapshot.Contents, snapshot.Author, recordUndo: false);
+                }
+                else
+                {
+                    PdfPasteAnnotationRequest req = new(snapshot, snapshot.PageIndex, snapshot.Bounds.Left, snapshot.Bounds.Top);
+                    PdfPageAnnotationMutationResult res = await _pdfService.PasteAnnotationAsync(DocumentId, req, _lifetime.Token);
+                    if (!_isDisposed)
+                    {
+                        ApplyPageAnnotationMutation(res.PageIndex, res.Annotations);
+                        restored = FindAnnotationByIndex(res.PageIndex, res.TargetAnnotIndex);
+                        HasUnsavedChanges = true;
+                        SelectedAnnotation = restored;
+                    }
+                }
+
+                if (restored is not null)
+                {
+                    RemapRestoredAnnotationIndex(snapshot.PageIndex, snapshot.AnnotIndex, restored.AnnotIndex);
+                }
+
+                return restored is not null;
+
+            default:
+                return false;
+        }
+    }
+
+    private void PushUndoEntry(AnnotationUndoEntry entry)
+    {
+        _annotationUndoStack.Add(entry);
+        if (_annotationUndoStack.Count > MaxAnnotationUndoDepth)
+        {
+            _annotationUndoStack.RemoveAt(0);
+        }
+
+        CanUndoAnnotation = _annotationUndoStack.Count > 0;
+    }
+
+    private void AdjustUndoEntriesForDeletion(int pageIndex, int removedAnnotIndex)
+    {
+        for (int i = 0; i < _annotationUndoStack.Count; i++)
+        {
+            _annotationUndoStack[i].OnAnnotationDeleted(pageIndex, removedAnnotIndex);
+        }
+    }
+
+    private void RemapRestoredAnnotationIndex(int pageIndex, int originalAnnotIndex, int restoredAnnotIndex)
+    {
+        for (int i = 0; i < _annotationUndoStack.Count; i++)
+        {
+            _annotationUndoStack[i].OnAnnotationRestored(pageIndex, originalAnnotIndex, restoredAnnotIndex);
+        }
+    }
+
+    private PdfAnnotationInfo? FindExactAnnotation(int pageIndex, int annotIndex)
+    {
+        if (!_annotationsByPage.TryGetValue(pageIndex, out List<PdfAnnotationInfo>? list))
+        {
+            return null;
+        }
+
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (list[i].AnnotIndex == annotIndex)
+            {
+                return list[i];
+            }
+        }
+
+        return null;
+    }
+
+    private sealed class AnnotationLocation(int pageIndex, int annotIndex)
+    {
+        public int PageIndex { get; } = pageIndex;
+        public int AnnotIndex { get; private set; } = annotIndex;
+        public bool IsValid => PageIndex >= 0 && AnnotIndex >= 0;
+
+        public void OnDeleted(int deletedPage, int deletedIndex)
+        {
+            if (PageIndex != deletedPage || AnnotIndex < 0)
+            {
+                return;
+            }
+
+            if (AnnotIndex == deletedIndex)
+            {
+                // Encode orphaned prior index negatively so a subsequent Undo of the delete can relink it.
+                AnnotIndex = -(deletedIndex + 1);
+            }
+            else if (AnnotIndex > deletedIndex)
+            {
+                AnnotIndex--;
+            }
+        }
+
+        public void OnRestored(int restoredPage, int originalIndex, int newIndex)
+        {
+            if (PageIndex == restoredPage && AnnotIndex == -(originalIndex + 1))
+            {
+                AnnotIndex = newIndex;
+            }
+        }
+    }
+
+    private abstract class AnnotationUndoEntry
+    {
+        public abstract void OnAnnotationDeleted(int pageIndex, int removedAnnotIndex);
+        public abstract void OnAnnotationRestored(int pageIndex, int originalAnnotIndex, int restoredAnnotIndex);
+    }
+
+    private sealed class UndoCreatedAnnotationsEntry(List<AnnotationLocation> locations) : AnnotationUndoEntry
+    {
+        public List<AnnotationLocation> Locations { get; } = locations;
+
+        public override void OnAnnotationDeleted(int pageIndex, int removedAnnotIndex)
+        {
+            for (int i = 0; i < Locations.Count; i++)
+            {
+                Locations[i].OnDeleted(pageIndex, removedAnnotIndex);
+            }
+        }
+
+        public override void OnAnnotationRestored(int pageIndex, int originalAnnotIndex, int restoredAnnotIndex)
+        {
+            for (int i = 0; i < Locations.Count; i++)
+            {
+                Locations[i].OnRestored(pageIndex, originalAnnotIndex, restoredAnnotIndex);
+            }
+        }
+    }
+
+    private sealed class UndoUpdatedAnnotationEntry(
+        int pageIndex,
+        int annotIndex,
+        string previousContents,
+        PdfAnnotationColor previousColor) : AnnotationUndoEntry
+    {
+        public AnnotationLocation Location { get; } = new(pageIndex, annotIndex);
+        public string PreviousContents { get; } = previousContents;
+        public PdfAnnotationColor PreviousColor { get; } = previousColor;
+
+        public override void OnAnnotationDeleted(int pageIndex, int removedAnnotIndex) => Location.OnDeleted(pageIndex, removedAnnotIndex);
+        public override void OnAnnotationRestored(int pageIndex, int originalAnnotIndex, int restoredAnnotIndex) => Location.OnRestored(pageIndex, originalAnnotIndex, restoredAnnotIndex);
+    }
+
+    private sealed class UndoMovedAnnotationEntry(
+        int pageIndex,
+        int annotIndex,
+        double actualDeltaPdfX,
+        double actualDeltaPdfY) : AnnotationUndoEntry
+    {
+        public AnnotationLocation Location { get; } = new(pageIndex, annotIndex);
+        public double ActualDeltaPdfX { get; } = actualDeltaPdfX;
+        public double ActualDeltaPdfY { get; } = actualDeltaPdfY;
+
+        public override void OnAnnotationDeleted(int pageIndex, int removedAnnotIndex) => Location.OnDeleted(pageIndex, removedAnnotIndex);
+        public override void OnAnnotationRestored(int pageIndex, int originalAnnotIndex, int restoredAnnotIndex) => Location.OnRestored(pageIndex, originalAnnotIndex, restoredAnnotIndex);
+    }
+
+    private sealed class UndoDeletedAnnotationEntry(PdfAnnotationInfo snapshot) : AnnotationUndoEntry
+    {
+        public PdfAnnotationInfo Snapshot { get; } = snapshot;
+
+        public override void OnAnnotationDeleted(int pageIndex, int removedAnnotIndex)
+        {
+        }
+
+        public override void OnAnnotationRestored(int pageIndex, int originalAnnotIndex, int restoredAnnotIndex)
+        {
+        }
     }
 
     private PdfAnnotationInfo? FindAnnotationByIndex(int pageIndex, int annotIndex)
@@ -1433,7 +1912,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         return list.Count > 0 ? list[^1] : null;
     }
 
-    private void ApplyPageAnnotationMutation(int pageIndex, IReadOnlyList<PdfAnnotationInfo> pageAnnotations)
+    private void ApplyPageAnnotationMutation(int pageIndex, IReadOnlyList<PdfAnnotationInfo> pageAnnotations, int deletedAnnotIndex = -1)
     {
         if (pageAnnotations.Count == 0)
         {
@@ -1444,10 +1923,114 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             _annotationsByPage[pageIndex] = new List<PdfAnnotationInfo>(pageAnnotations);
         }
 
-        RebuildAnnotationsSummary();
+        SyncPageAnnotationsSummary(pageIndex, pageAnnotations, deletedAnnotIndex);
         _tileCache.RemovePage(DocumentId, pageIndex);
         RefreshThumbnailForPage(pageIndex);
         PageContentInvalidated?.Invoke(pageIndex);
+    }
+
+    private void SyncPageAnnotationsSummary(int pageIndex, IReadOnlyList<PdfAnnotationInfo> pageAnnotations, int deletedAnnotIndex)
+    {
+        bool hadAny = HasAnnotationsOrSignatures;
+
+        List<PdfAnnotationInfo> visibleNew = new(pageAnnotations.Count);
+        for (int i = 0; i < pageAnnotations.Count; i++)
+        {
+            if (!pageAnnotations[i].IsSignatureWidget)
+            {
+                visibleNew.Add(pageAnnotations[i]);
+            }
+        }
+
+        int sliceStart = 0;
+        while (sliceStart < AnnotationsSummary.Count && AnnotationsSummary[sliceStart].PageIndex < pageIndex)
+        {
+            sliceStart++;
+        }
+
+        int sliceCount = 0;
+        while (sliceStart + sliceCount < AnnotationsSummary.Count && AnnotationsSummary[sliceStart + sliceCount].PageIndex == pageIndex)
+        {
+            sliceCount++;
+        }
+
+        if (visibleNew.Count == sliceCount)
+        {
+            for (int i = 0; i < sliceCount; i++)
+            {
+                AnnotationsSummary[sliceStart + i].UpdateFrom(visibleNew[i]);
+            }
+        }
+        else if (visibleNew.Count < sliceCount)
+        {
+            if (deletedAnnotIndex >= 0)
+            {
+                for (int k = 0; k < sliceCount; k++)
+                {
+                    if (AnnotationsSummary[sliceStart + k].AnnotIndex == deletedAnnotIndex)
+                    {
+                        AnnotationsSummary.RemoveAt(sliceStart + k);
+                        sliceCount--;
+                        break;
+                    }
+                }
+            }
+
+            while (sliceCount > visibleNew.Count)
+            {
+                int removeOffset = sliceCount - 1;
+                for (int k = 0; k < visibleNew.Count; k++)
+                {
+                    PdfAnnotationInfo existing = AnnotationsSummary[sliceStart + k].Info;
+                    PdfAnnotationInfo target = visibleNew[k];
+                    if (existing.Subtype != target.Subtype ||
+                        !string.Equals(existing.Contents, target.Contents, StringComparison.Ordinal))
+                    {
+                        removeOffset = k;
+                        break;
+                    }
+                }
+
+                AnnotationsSummary.RemoveAt(sliceStart + removeOffset);
+                sliceCount--;
+            }
+
+            for (int i = 0; i < visibleNew.Count; i++)
+            {
+                AnnotationsSummary[sliceStart + i].UpdateFrom(visibleNew[i]);
+            }
+        }
+        else
+        {
+            for (int i = 0; i < visibleNew.Count; i++)
+            {
+                if (i < sliceCount)
+                {
+                    PdfAnnotationInfo existing = AnnotationsSummary[sliceStart + i].Info;
+                    PdfAnnotationInfo target = visibleNew[i];
+                    if (existing.AnnotIndex == target.AnnotIndex ||
+                        (existing.Subtype == target.Subtype && string.Equals(existing.Contents, target.Contents, StringComparison.Ordinal)))
+                    {
+                        AnnotationsSummary[sliceStart + i].UpdateFrom(target);
+                        continue;
+                    }
+                }
+
+                AnnotationsSummary.Insert(sliceStart + i, new AnnotationItemViewModel(visibleNew[i]));
+                sliceCount++;
+            }
+
+            while (sliceCount > visibleNew.Count)
+            {
+                AnnotationsSummary.RemoveAt(sliceStart + sliceCount - 1);
+                sliceCount--;
+            }
+        }
+
+        if (hadAny != HasAnnotationsOrSignatures)
+        {
+            OnPropertyChanged(nameof(HasAnnotationsOrSignatures));
+        }
     }
 
     private void RefreshThumbnailForPage(int pageIndex)

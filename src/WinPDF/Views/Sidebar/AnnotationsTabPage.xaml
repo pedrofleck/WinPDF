@@ -140,6 +140,12 @@
                         ItemClick="OnAnnotationItemClick"
                         SelectionMode="None"
                         ItemsSource="{x:Bind ViewModel.CurrentDocument.AnnotationsSummary, Mode=OneWay}">
+                        <ListView.ItemContainerTransitions>
+                            <TransitionCollection>
+                                <AddDeleteThemeTransition />
+                                <RepositionThemeTransition />
+                            </TransitionCollection>
+                        </ListView.ItemContainerTransitions>
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -161,19 +167,19 @@
                                             <FontIcon
                                                 FontSize="14"
                                                 Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                                                Glyph="{x:Bind IconGlyph}" />
+                                                Glyph="{x:Bind IconGlyph, Mode=OneWay}" />
                                         </Grid>
 
                                         <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                                             <Ellipse Width="8" Height="8" VerticalAlignment="Center">
                                                 <Ellipse.Fill>
-                                                    <SolidColorBrush Color="{x:Bind SwatchColor}" />
+                                                    <SolidColorBrush Color="{x:Bind SwatchColor, Mode=OneWay}" />
                                                 </Ellipse.Fill>
                                             </Ellipse>
                                             <TextBlock
                                                 FontWeight="SemiBold"
                                                 FontSize="12.5"
-                                                Text="{x:Bind TitleText}"
+                                                Text="{x:Bind TitleText, Mode=OneWay}"
                                                 VerticalAlignment="Center" />
                                             <TextBlock
                                                 FontSize="11.5"
@@ -209,11 +215,11 @@
                                             Grid.Column="1"
                                             Grid.ColumnSpan="2"
                                             FontSize="12.5"
-                                            Text="{x:Bind Text}"
+                                            Text="{x:Bind Text, Mode=OneWay}"
                                             MaxLines="3"
                                             TextTrimming="CharacterEllipsis"
                                             TextWrapping="Wrap"
-                                            Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasBodyText)}" />
+                                            Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasBodyText), Mode=OneWay}" />
 
                                         <StackPanel
                                             Grid.Row="2"
@@ -224,13 +230,13 @@
                                             <TextBlock
                                                 FontSize="11"
                                                 Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                Text="{x:Bind Author}"
-                                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasAuthor)}" />
+                                                Text="{x:Bind Author, Mode=OneWay}"
+                                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasAuthor), Mode=OneWay}" />
                                             <TextBlock
                                                 FontSize="11"
                                                 Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                Text="{x:Bind FormattedDate}"
-                                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasDate)}" />
+                                                Text="{x:Bind FormattedDate, Mode=OneWay}"
+                                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(HasDate), Mode=OneWay}" />
                                         </StackPanel>
                                     </Grid>
                                 </Border>

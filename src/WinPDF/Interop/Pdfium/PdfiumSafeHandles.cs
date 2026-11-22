@@ -1,18 +1,17 @@
+using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 
 namespace WinPDF.Interop.Pdfium;
 
 /// <summary>
-/// Owns an <c>FPDF_DOCUMENT</c> together with the <see cref="PdfiumStreamAccess"/> that feeds it.
-/// The stream access (file handle, <see cref="System.Runtime.InteropServices.GCHandle"/>, native
-/// <c>FPDF_FILEACCESS</c> block) must outlive the document, so it is released only after
-/// <c>FPDF_CloseDocument</c> returns.
+/// Owns an <c>FPDF_DOCUMENT</c> together with its optional FormFill environment and the
+/// <see cref="PdfiumStreamAccess"/> that feeds it. All native handles are released in strict order.
 /// </summary>
 /// <remarks>
 /// Like every PDFium call, the release must happen on the PDFium thread. The finalizer path exists only as a
 /// last-resort leak guard.
 /// </remarks>
-internal sealed class PdfiumDocumentHandle : SafeHandleZeroOrMinusOneIsInvalid
+internal sealed unsafe class PdfiumDocumentHandle : SafeHandleZeroOrMinusOneIsInvalid
 {
     /// <summary>Initializes a new, invalid handle (required by the LibraryImport marshaller).</summary>
     public PdfiumDocumentHandle()
@@ -23,10 +22,29 @@ internal sealed class PdfiumDocumentHandle : SafeHandleZeroOrMinusOneIsInvalid
     /// <summary>Gets or sets the stream access that must stay alive while the document is open.</summary>
     internal PdfiumStreamAccess? StreamAccess { get; set; }
 
+    /// <summary>Gets or sets the optional <c>FPDF_FORMHANDLE</c> created by <c>FPDFDOC_InitFormFillEnvironment</c>.</summary>
+    internal nint FormHandle { get; set; }
+
+    /// <summary>Gets or sets the native <c>FPDF_FORMFILLINFO</c> allocation owned for <see cref="FormHandle"/>.</summary>
+    internal void* FormFillInfoPtr { get; set; }
+
     /// <inheritdoc/>
     protected override bool ReleaseHandle()
     {
+        if (FormHandle != nint.Zero)
+        {
+            PdfiumNative.FPDFDOC_ExitFormFillEnvironment(FormHandle);
+            FormHandle = nint.Zero;
+        }
+
         PdfiumNative.FPDF_CloseDocument(handle);
+
+        if (FormFillInfoPtr is not null)
+        {
+            NativeMemory.Free(FormFillInfoPtr);
+            FormFillInfoPtr = null;
+        }
+
         StreamAccess?.Dispose();
         StreamAccess = null;
         return true;

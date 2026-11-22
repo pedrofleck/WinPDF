@@ -210,6 +210,12 @@ internal sealed class PdfiumPageCache : IDisposable
             return null;
         }
 
+        nint formHandle = document.FormHandle;
+        if (formHandle != nint.Zero)
+        {
+            PdfiumNative.FORM_OnAfterLoadPage(page, formHandle);
+        }
+
         LinkedListNode<Entry> node;
         if (_map.Count >= Capacity && _lru.Last is { } victim)
         {
@@ -221,12 +227,13 @@ internal sealed class PdfiumPageCache : IDisposable
             victim.Value.DocumentId = documentId;
             victim.Value.PageIndex = pageIndex;
             victim.Value.Page = page;
+            victim.Value.FormHandle = formHandle;
             node = victim;
             _lru.AddFirst(node);
         }
         else
         {
-            node = _lru.AddFirst(new Entry(documentId, pageIndex, page));
+            node = _lru.AddFirst(new Entry(documentId, pageIndex, page, formHandle));
         }
 
         _map[key] = node;
@@ -294,16 +301,18 @@ internal sealed class PdfiumPageCache : IDisposable
 
     private sealed class Entry
     {
-        internal Entry(long documentId, int pageIndex, PdfiumPageHandle page)
+        internal Entry(long documentId, int pageIndex, PdfiumPageHandle page, nint formHandle)
         {
             DocumentId = documentId;
             PageIndex = pageIndex;
             Page = page;
+            FormHandle = formHandle;
         }
 
         internal long DocumentId;
         internal int PageIndex;
         internal PdfiumPageHandle Page;
+        internal nint FormHandle;
         internal PdfiumTextPageHandle? TextPage;
         internal PdfiumPageLinkHandle? WebLinks;
         internal bool WebLinksLoaded;
@@ -316,6 +325,12 @@ internal sealed class PdfiumPageCache : IDisposable
 
             TextPage?.Dispose();
             TextPage = null;
+
+            if (FormHandle != nint.Zero && !Page.IsInvalid)
+            {
+                PdfiumNative.FORM_OnBeforeClosePage(Page, FormHandle);
+                FormHandle = nint.Zero;
+            }
 
             Page.Dispose();
         }
