@@ -2071,7 +2071,7 @@ public sealed partial class ShellViewModel : ObservableObject
             .InformationalVersion
             .Split('+')[0]
             ?? typeof(ShellViewModel).Assembly.GetName().Version?.ToString(3)
-            ?? "0.6.0-alpha.6";
+            ?? "0.6.1-alpha.6";
         string close = ResourceStrings.Get(ResourceKeys.DialogClose);
 
         await _dialogService.ShowMessageAsync(name, $"{description}\n\nv{version}", close);
