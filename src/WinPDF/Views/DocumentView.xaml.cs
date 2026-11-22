@@ -311,6 +311,11 @@ public sealed partial class DocumentView : Page
     private double _smoothZoomTargetOffsetY;
     private Point _smoothZoomPivotPoint;
     private long _lastSmoothZoomRenderTicks;
+    private bool _hasInteractiveViewportState;
+    private double _interactiveZoomFactor = 1.0;
+    private double _interactiveOffsetX;
+    private double _interactiveOffsetY;
+    private bool _isInteractiveViewportFlushSubscribed;
     private bool _isMouseButtonDown;
     private uint _touchSwipePointerId;
     private Point _touchSwipeStartPoint;
@@ -1511,6 +1516,19 @@ public sealed partial class DocumentView : Page
 
         if (!e.IsIntermediate)
         {
+            if (!_isManipulatingSlideSwipe &&
+                !_isSmoothZoomRenderingSubscribed &&
+                !_isInteractiveViewportFlushSubscribed &&
+                !_isApplyingZoom &&
+                !_isApplyingFitZoom &&
+                ContinuousScrollViewer.ZoomFactor > 0.05)
+            {
+                SetInteractiveViewportState(
+                    ContinuousScrollViewer.ZoomFactor,
+                    ContinuousScrollViewer.HorizontalOffset,
+                    ContinuousScrollViewer.VerticalOffset);
+            }
+
             if (!_isDraggingTouchScrollScrubber)
             {
                 SyncPagedScrollViewerModes();
@@ -1779,6 +1797,7 @@ public sealed partial class DocumentView : Page
                 ? rawOffset
                 : Math.Clamp(rawOffset, 0.0, ContinuousScrollViewer.ScrollableHeight);
             ContinuousScrollViewer.ChangeView(null, verticalOffset, null, disableAnimation: true);
+            SetInteractiveViewportState(zoom, ContinuousScrollViewer.HorizontalOffset, verticalOffset);
             doc.LastVerticalOffset = verticalOffset;
             doc.FractionalPageIndex = pageIndex;
         }
@@ -1786,6 +1805,10 @@ public sealed partial class DocumentView : Page
         {
             EnsureScrollModesEnabledForViewChange();
             ContinuousScrollViewer.ChangeView(0, 0, null, disableAnimation: true);
+            SetInteractiveViewportState(
+                ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor,
+                0.0,
+                0.0);
             doc.LastVerticalOffset = 0;
             doc.FractionalPageIndex = pageIndex;
             if (_isFittedVertically || ViewModel.IsPresentationMode)
@@ -1847,6 +1870,7 @@ public sealed partial class DocumentView : Page
 
             EnsureScrollModesEnabledForViewChange();
             ContinuousScrollViewer.ChangeView(newOffsetX, newOffsetY, newZoom, disableAnimation: true);
+            SetInteractiveViewportState(newZoom, newOffsetX, newOffsetY);
 
             ViewModel.SetZoom(newZoom);
             SyncPagedScrollViewerModes();
@@ -1951,6 +1975,8 @@ public sealed partial class DocumentView : Page
             {
                 ContinuousScrollViewer.ChangeView(0, 0, (float)targetZoom, disableAnimation: true);
             }
+
+            SetInteractiveViewportState(targetZoom, isContinuous ? hOffset : 0.0, isContinuous ? vOffset : 0.0);
 
             if (!_isHorizontalPushAnimating && !_isSlideSwipeActive && !_isSlideSwipeAnimating && PagesRepeaterPushTransform is not null && targetZoom > 0.05)
             {
@@ -2083,6 +2109,7 @@ public sealed partial class DocumentView : Page
 
             _isFittedVertically = false;
             ContinuousScrollViewer.ChangeView(0, targetVOffset, (float)targetZoom, disableAnimation: true);
+            SetInteractiveViewportState(targetZoom, 0.0, targetVOffset ?? 0.0);
             doc.ZoomFactor = targetZoom;
             SyncPagedScrollViewerModes();
             UpdateViewportPages(targetZoom);
@@ -2186,7 +2213,11 @@ public sealed partial class DocumentView : Page
 
         if (isCtrlPressed)
         {
-            CancelInteractiveSlideSwipeImmediate();
+            if (_isSlideSwipeActive || _isSlideSwipeAnimating || _isTouchpadWheelSwipeActive)
+            {
+                CancelInteractiveSlideSwipeImmediate(stopSmoothZoom: false);
+            }
+
             EnsureScrollModesEnabledForViewChange();
             _isFittedVertically = false;
             if (!doc.IsContinuous || ViewModel.IsPresentationMode)
@@ -2230,25 +2261,13 @@ public sealed partial class DocumentView : Page
             {
                 CancelInteractiveSlideSwipeImmediate();
                 _isFittedVertically = false;
-                double lockedVerticalOffset = ContinuousScrollViewer.VerticalOffset;
 
-                if (ContinuousScrollViewer.VerticalScrollMode != ScrollMode.Disabled)
+                if (CanPanHorizontallyInPagedMode() || ContinuousScrollViewer.ScrollableWidth > 1.0)
                 {
-                    ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Disabled;
-                }
-
-                if (ContinuousScrollViewer.ScrollableWidth > 1.0)
-                {
-                    EnsureScrollModesEnabledForViewChange();
                     double scrollDelta = props.IsHorizontalMouseWheel
                         ? (delta * 0.9)
                         : (delta > 0 ? -120.0 : 120.0);
-                    double newOffset = Math.Clamp(
-                        ContinuousScrollViewer.HorizontalOffset + scrollDelta,
-                        0,
-                        ContinuousScrollViewer.ScrollableWidth);
-
-                    ContinuousScrollViewer.ChangeView(newOffset, lockedVerticalOffset, null, disableAnimation: true);
+                    PanPagedScrollViewerBy(-scrollDelta, 0.0);
                 }
                 else if (!doc.IsContinuous || ViewModel.IsPresentationMode)
                 {
@@ -2260,10 +2279,6 @@ public sealed partial class DocumentView : Page
                     {
                         doc.NextPage();
                     }
-                }
-                else
-                {
-                    ContinuousScrollViewer.ChangeView(null, lockedVerticalOffset, null, disableAnimation: true);
                 }
 
                 DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
@@ -2286,9 +2301,15 @@ public sealed partial class DocumentView : Page
             int delta = props.MouseWheelDelta;
             if (delta != 0)
             {
-                bool canScrollVertically = ContinuousScrollViewer.ScrollableHeight > 4.0 && !_isFittedVertically && !ViewModel.IsPresentationMode;
-                bool atTop = ContinuousScrollViewer.VerticalOffset <= 4.0;
-                bool atBottom = ContinuousScrollViewer.VerticalOffset >= ContinuousScrollViewer.ScrollableHeight - 4.0;
+                EnsureInteractiveViewportStateInitialized(doc);
+                double vh = ContinuousScrollViewer.ViewportHeight > 0 ? ContinuousScrollViewer.ViewportHeight : ContinuousScrollViewer.ActualHeight;
+                double maxScrollY = Math.Max(
+                    ContinuousScrollViewer.ScrollableHeight,
+                    (GetUnzoomedScrollContentHeightDip(doc, _interactiveZoomFactor, vh) * _interactiveZoomFactor) - vh);
+                double curV = _hasInteractiveViewportState ? _interactiveOffsetY : ContinuousScrollViewer.VerticalOffset;
+                bool canScrollVertically = maxScrollY > 4.0 && !_isFittedVertically && !ViewModel.IsPresentationMode;
+                bool atTop = curV <= 4.0;
+                bool atBottom = curV >= maxScrollY - 4.0;
 
                 if (!canScrollVertically || (delta > 0 && atTop) || (delta < 0 && atBottom))
                 {
@@ -2342,12 +2363,7 @@ public sealed partial class DocumentView : Page
                 else
                 {
                     e.Handled = true;
-                    EnsureScrollModesEnabledForViewChange();
-                    double stepV = -delta * 0.85;
-                    double targetV = Math.Clamp(ContinuousScrollViewer.VerticalOffset + stepV, 0.0, ContinuousScrollViewer.ScrollableHeight);
-                    ContinuousScrollViewer.ChangeView(null, targetV, null, disableAnimation: true);
-                    doc.LastVerticalOffset = targetV;
-                    ScheduleViewportUpdate();
+                    PanPagedScrollViewerBy(0.0, delta * 0.85);
                     DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, SyncPagedScrollViewerModes);
                 }
             }
@@ -4540,7 +4556,9 @@ public sealed partial class DocumentView : Page
             return true;
         }
 
-        double zoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor;
+        double zoom = _hasInteractiveViewportState && _interactiveZoomFactor > 0.05
+            ? _interactiveZoomFactor
+            : (ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor);
         double rowWidthDip = GetDisplayedRowContentWidthDip(doc, doc.CurrentPageIndex);
         double rawViewerW = ContinuousScrollViewer.ActualWidth > 0 ? ContinuousScrollViewer.ActualWidth : ContinuousScrollViewer.ViewportWidth;
         double availW = GetAvailableDocumentWidthDip(rawViewerW);
@@ -4569,7 +4587,9 @@ public sealed partial class DocumentView : Page
             return true;
         }
 
-        double zoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor;
+        double zoom = _hasInteractiveViewportState && _interactiveZoomFactor > 0.05
+            ? _interactiveZoomFactor
+            : (ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor);
         double rowHeightDip = GetDisplayedRowContentHeightDip(doc, doc.CurrentPageIndex);
         double rawViewerH = ContinuousScrollViewer.ActualHeight > 0 ? ContinuousScrollViewer.ActualHeight : ContinuousScrollViewer.ViewportHeight;
         return (rowHeightDip * zoom) > (rawViewerH + 4.0);
@@ -4587,13 +4607,23 @@ public sealed partial class DocumentView : Page
             return true;
         }
 
+        double curH = _hasInteractiveViewportState ? _interactiveOffsetX : ContinuousScrollViewer.HorizontalOffset;
+
         // When zoomed horizontally in Paged / Presentation mode, allow starting a slide swipe only when already at the horizontal scroll edge
         if (swipingRight)
         {
-            return ContinuousScrollViewer.HorizontalOffset <= 4.0;
+            return curH <= 4.0;
         }
 
-        return ContinuousScrollViewer.HorizontalOffset >= ContinuousScrollViewer.ScrollableWidth - 4.0;
+        double maxScrollX = ContinuousScrollViewer.ScrollableWidth;
+        if (_hasInteractiveViewportState && ViewModel?.CurrentDocument is { Pages.Count: > 0 } doc)
+        {
+            double vw = ContinuousScrollViewer.ViewportWidth > 0 ? ContinuousScrollViewer.ViewportWidth : ContinuousScrollViewer.ActualWidth;
+            double unzoomedW = GetUnzoomedScrollContentWidthDip(doc, _interactiveZoomFactor, vw);
+            maxScrollX = Math.Max(maxScrollX, (unzoomedW * _interactiveZoomFactor) - vw);
+        }
+
+        return curH >= maxScrollX - 4.0;
     }
 
     private void EnsureScrollModesEnabledForViewChange()
@@ -4715,6 +4745,111 @@ public sealed partial class DocumentView : Page
         }
     }
 
+    private void EnsureInteractiveViewportStateInitialized(DocumentViewModel doc)
+    {
+        if (!_hasInteractiveViewportState || _interactiveZoomFactor <= 0.05)
+        {
+            _interactiveZoomFactor = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor);
+            _interactiveOffsetX = ContinuousScrollViewer.HorizontalOffset;
+            _interactiveOffsetY = ContinuousScrollViewer.VerticalOffset;
+            _hasInteractiveViewportState = true;
+        }
+    }
+
+    private void SetInteractiveViewportState(double zoom, double offsetX, double offsetY)
+    {
+        _interactiveZoomFactor = Math.Clamp(zoom, DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
+        _interactiveOffsetX = Math.Max(0.0, offsetX);
+        _interactiveOffsetY = Math.Max(0.0, offsetY);
+        _hasInteractiveViewportState = true;
+    }
+
+    private double GetUnzoomedScrollContentWidthDip(DocumentViewModel doc, double referenceZoom, double viewportWidth)
+    {
+        bool isPagedOrPres = !doc.IsContinuous || ViewModel.IsPresentationMode;
+        if (isPagedOrPres)
+        {
+            double marginW = ViewModel.IsPresentationMode ? 0.0 : 32.0;
+            return GetDisplayedRowContentWidthDip(doc, doc.CurrentPageIndex) + marginW;
+        }
+
+        if (ContinuousPagesRepeater is not null && ContinuousPagesRepeater.ActualWidth > 1.0)
+        {
+            return ContinuousPagesRepeater.ActualWidth + ContinuousPagesRepeater.Margin.Left + ContinuousPagesRepeater.Margin.Right;
+        }
+
+        double safeZoom = Math.Max(0.1, referenceZoom);
+        return Math.Max(viewportWidth / safeZoom, ContinuousScrollViewer.ExtentWidth / safeZoom);
+    }
+
+    private double GetUnzoomedScrollContentHeightDip(DocumentViewModel doc, double referenceZoom, double viewportHeight)
+    {
+        bool isPagedOrPres = !doc.IsContinuous || ViewModel.IsPresentationMode;
+        if (isPagedOrPres)
+        {
+            double marginH = ViewModel.IsPresentationMode ? 0.0 : 32.0;
+            return GetDisplayedRowContentHeightDip(doc, doc.CurrentPageIndex) + marginH;
+        }
+
+        if (ContinuousPagesRepeater is not null && ContinuousPagesRepeater.ActualHeight > 1.0)
+        {
+            return ContinuousPagesRepeater.ActualHeight + ContinuousPagesRepeater.Margin.Top + ContinuousPagesRepeater.Margin.Bottom;
+        }
+
+        double safeZoom = Math.Max(0.1, referenceZoom);
+        return Math.Max(viewportHeight / safeZoom, ContinuousScrollViewer.ExtentHeight / safeZoom);
+    }
+
+    private void RequestInteractiveViewportFlush()
+    {
+        if (!_isInteractiveViewportFlushSubscribed)
+        {
+            CompositionTarget.Rendering += OnInteractiveViewportFlushRendering;
+            _isInteractiveViewportFlushSubscribed = true;
+        }
+    }
+
+    private void StopInteractiveViewportFlush()
+    {
+        if (_isInteractiveViewportFlushSubscribed)
+        {
+            CompositionTarget.Rendering -= OnInteractiveViewportFlushRendering;
+            _isInteractiveViewportFlushSubscribed = false;
+        }
+    }
+
+    private void OnInteractiveViewportFlushRendering(object? sender, object e)
+    {
+        StopInteractiveViewportFlush();
+        FlushInteractiveViewportNow();
+    }
+
+    private void FlushInteractiveViewportNow()
+    {
+        StopInteractiveViewportFlush();
+        if (!_hasInteractiveViewportState || _interactiveZoomFactor <= 0.05 || ContinuousScrollViewer is null)
+        {
+            return;
+        }
+
+        _isApplyingZoom = true;
+        try
+        {
+            EnsureScrollModesEnabledForViewChange();
+            if (!_isHorizontalPushAnimating && !_isSlideSwipeActive && !_isSlideSwipeAnimating && PagesRepeaterPushTransform is not null)
+            {
+                PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip(_interactiveZoomFactor) / _interactiveZoomFactor;
+            }
+
+            ContinuousScrollViewer.ChangeView(_interactiveOffsetX, _interactiveOffsetY, (float)_interactiveZoomFactor, disableAnimation: true);
+            ScheduleViewportUpdate();
+        }
+        finally
+        {
+            _isApplyingZoom = false;
+        }
+    }
+
     private void StartOrUpdateSmoothWheelZoom(Point pivotInViewport, int wheelDelta)
     {
         if (ViewModel?.CurrentDocument is not { Pages.Count: > 0 } doc)
@@ -4724,13 +4859,16 @@ public sealed partial class DocumentView : Page
 
         _isTouchToggleZoomAnimation = false;
         _restoreFitAfterSmoothZoom = false;
-        double currentZoom = ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor;
+        EnsureInteractiveViewportStateInitialized(doc);
+        double currentZoom = _interactiveZoomFactor;
         if (!_isSmoothZoomRenderingSubscribed || _smoothZoomTargetFactor <= 0.05)
         {
             _smoothZoomTargetFactor = currentZoom;
+            _smoothZoomCurrentFactor = currentZoom;
         }
 
-        double factorStep = Math.Pow(1.13, wheelDelta / 120.0);
+        bool isTouchpadPinch = Math.Abs(wheelDelta) < 120;
+        double factorStep = Math.Pow(isTouchpadPinch ? 1.24 : 1.15, wheelDelta / 120.0);
         _smoothZoomTargetFactor = Math.Clamp(_smoothZoomTargetFactor * factorStep, DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
         _smoothZoomPivotPoint = pivotInViewport;
         _lastSmoothZoomRenderTicks = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -4775,7 +4913,8 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        double currentZoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor);
+        EnsureInteractiveViewportStateInitialized(doc);
+        double currentZoom = _interactiveZoomFactor;
         double targetZoom;
 
         if (_isTouchDoubleTapZoomedIn)
@@ -4820,30 +4959,30 @@ public sealed partial class DocumentView : Page
         _smoothZoomStartFactor = currentZoom;
         _smoothZoomCurrentFactor = currentZoom;
         _smoothZoomTargetFactor = targetZoom;
-        _smoothZoomStartOffsetX = ContinuousScrollViewer.HorizontalOffset;
-        _smoothZoomStartOffsetY = ContinuousScrollViewer.VerticalOffset;
+        _smoothZoomStartOffsetX = _interactiveOffsetX;
+        _smoothZoomStartOffsetY = _interactiveOffsetY;
 
-        double contentX = (_smoothZoomStartOffsetX + pivotX) / currentZoom;
-        double contentY = (_smoothZoomStartOffsetY + pivotY) / currentZoom;
+        double unzoomedW = GetUnzoomedScrollContentWidthDip(doc, currentZoom, vw);
+        double unzoomedH = GetUnzoomedScrollContentHeightDip(doc, currentZoom, vh);
+        double oldPadX = Math.Max(0.0, (vw - (unzoomedW * currentZoom)) * 0.5);
+        double oldPadY = Math.Max(0.0, (vh - (unzoomedH * currentZoom)) * 0.5);
+        double newPadX = Math.Max(0.0, (vw - (unzoomedW * targetZoom)) * 0.5);
+        double newPadY = Math.Max(0.0, (vh - (unzoomedH * targetZoom)) * 0.5);
+
+        double contentX = (_smoothZoomStartOffsetX + pivotX - oldPadX) / currentZoom;
+        double contentY = (_smoothZoomStartOffsetY + pivotY - oldPadY) / currentZoom;
 
         if (_restoreFitAfterSmoothZoom && !doc.IsContinuous)
         {
             _smoothZoomTargetOffsetX = 0.0;
             _smoothZoomTargetOffsetY = 0.0;
         }
-        else if (targetZoom < currentZoom)
-        {
-            double unzoomedW = Math.Max(vw / currentZoom, ContinuousScrollViewer.ExtentWidth / currentZoom);
-            double unzoomedH = Math.Max(vh / currentZoom, ContinuousScrollViewer.ExtentHeight / currentZoom);
-            double maxTargetScrollX = Math.Max(0.0, (unzoomedW * targetZoom) - vw);
-            double maxTargetScrollY = Math.Max(0.0, (unzoomedH * targetZoom) - vh);
-            _smoothZoomTargetOffsetX = Math.Clamp((contentX * targetZoom) - pivotX, 0.0, maxTargetScrollX);
-            _smoothZoomTargetOffsetY = Math.Clamp((contentY * targetZoom) - pivotY, 0.0, maxTargetScrollY);
-        }
         else
         {
-            _smoothZoomTargetOffsetX = Math.Max(0.0, (contentX * targetZoom) - pivotX);
-            _smoothZoomTargetOffsetY = Math.Max(0.0, (contentY * targetZoom) - pivotY);
+            double maxTargetScrollX = Math.Max(0.0, (unzoomedW * targetZoom) - vw);
+            double maxTargetScrollY = Math.Max(0.0, (unzoomedH * targetZoom) - vh);
+            _smoothZoomTargetOffsetX = Math.Clamp((contentX * targetZoom) + newPadX - pivotX, 0.0, maxTargetScrollX);
+            _smoothZoomTargetOffsetY = Math.Clamp((contentY * targetZoom) + newPadY - pivotY, 0.0, maxTargetScrollY);
         }
 
         _isTouchToggleZoomAnimation = true;
@@ -4916,6 +5055,7 @@ public sealed partial class DocumentView : Page
                         PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip(_smoothZoomTargetFactor) / _smoothZoomTargetFactor;
                     }
 
+                    SetInteractiveViewportState(_smoothZoomTargetFactor, _smoothZoomTargetOffsetX, _smoothZoomTargetOffsetY);
                     ContinuousScrollViewer.ChangeView(_smoothZoomTargetOffsetX, _smoothZoomTargetOffsetY, (float)_smoothZoomTargetFactor, disableAnimation: true);
                     doc.LastHorizontalOffset = _smoothZoomTargetOffsetX;
                     doc.LastVerticalOffset = _smoothZoomTargetOffsetY;
@@ -4952,6 +5092,7 @@ public sealed partial class DocumentView : Page
                     PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip(_smoothZoomCurrentFactor) / _smoothZoomCurrentFactor;
                 }
 
+                SetInteractiveViewportState(_smoothZoomCurrentFactor, nextOffsetX, nextOffsetY);
                 ContinuousScrollViewer.ChangeView(nextOffsetX, nextOffsetY, (float)_smoothZoomCurrentFactor, disableAnimation: true);
                 ScheduleViewportUpdate();
             }
@@ -4963,64 +5104,79 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        double currentZoom = Math.Max(0.05, ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor);
+        EnsureInteractiveViewportStateInitialized(doc);
+        double currentZoom = _interactiveZoomFactor;
         double wheelDiff = _smoothZoomTargetFactor - currentZoom;
         if (Math.Abs(wheelDiff) < 0.002)
         {
             StopSmoothWheelZoom();
-            ApplyInteractiveZoomAroundPoint(_smoothZoomPivotPoint, _smoothZoomTargetFactor / currentZoom, 0.0, 0.0);
+            ApplyInteractiveZoomAroundPoint(_smoothZoomPivotPoint, _smoothZoomTargetFactor / currentZoom, 0.0, 0.0, commitZoomProperty: true, flushImmediate: true);
             SyncPagedScrollViewerModes();
             return;
         }
 
-        double wheelAlpha = 1.0 - Math.Exp(-26.0 * dt);
+        double wheelAlpha = 1.0 - Math.Exp(-38.0 * dt);
         double nextWheelZoom = currentZoom + (wheelDiff * wheelAlpha);
-        ApplyInteractiveZoomAroundPoint(_smoothZoomPivotPoint, nextWheelZoom / currentZoom, 0.0, 0.0);
+        ApplyInteractiveZoomAroundPoint(_smoothZoomPivotPoint, nextWheelZoom / currentZoom, 0.0, 0.0, commitZoomProperty: false, flushImmediate: true);
     }
 
-    private void ApplyInteractiveZoomAroundPoint(Point viewportPoint, double zoomMultiplier, double panDx, double panDy, bool commitZoomProperty = true)
+    private void ApplyInteractiveZoomAroundPoint(
+        Point viewportPoint,
+        double zoomMultiplier,
+        double panDx,
+        double panDy,
+        bool commitZoomProperty = true,
+        bool flushImmediate = false)
     {
         if (_isApplyingZoom || ViewModel?.CurrentDocument is not { Pages.Count: > 0 } doc)
         {
             return;
         }
 
-        _isApplyingZoom = true;
-        try
+        _isFittedVertically = false;
+        EnsureInteractiveViewportStateInitialized(doc);
+
+        double oldZoom = _interactiveZoomFactor;
+        double newZoom = Math.Clamp(oldZoom * zoomMultiplier, DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
+
+        double vw = ContinuousScrollViewer.ViewportWidth > 0 ? ContinuousScrollViewer.ViewportWidth : ContinuousScrollViewer.ActualWidth;
+        double vh = ContinuousScrollViewer.ViewportHeight > 0 ? ContinuousScrollViewer.ViewportHeight : ContinuousScrollViewer.ActualHeight;
+        double pivotX = vw > 0 ? Math.Clamp(viewportPoint.X, 0.0, vw) : 0.0;
+        double pivotY = vh > 0 ? Math.Clamp(viewportPoint.Y, 0.0, vh) : 0.0;
+
+        double unzoomedW = GetUnzoomedScrollContentWidthDip(doc, oldZoom, vw);
+        double unzoomedH = GetUnzoomedScrollContentHeightDip(doc, oldZoom, vh);
+
+        double oldPadX = Math.Max(0.0, (vw - (unzoomedW * oldZoom)) * 0.5);
+        double oldPadY = Math.Max(0.0, (vh - (unzoomedH * oldZoom)) * 0.5);
+        double newPadX = Math.Max(0.0, (vw - (unzoomedW * newZoom)) * 0.5);
+        double newPadY = Math.Max(0.0, (vh - (unzoomedH * newZoom)) * 0.5);
+
+        double contentX = (_interactiveOffsetX + pivotX - oldPadX) / oldZoom;
+        double contentY = (_interactiveOffsetY + pivotY - oldPadY) / oldZoom;
+
+        double maxScrollX = Math.Max(0.0, (unzoomedW * newZoom) - vw);
+        double maxScrollY = Math.Max(0.0, (unzoomedH * newZoom) - vh);
+
+        double newOffsetX = Math.Clamp((contentX * newZoom) + newPadX - pivotX - panDx, 0.0, maxScrollX);
+        double newOffsetY = Math.Clamp((contentY * newZoom) + newPadY - pivotY - panDy, 0.0, maxScrollY);
+
+        SetInteractiveViewportState(newZoom, newOffsetX, newOffsetY);
+        doc.LastHorizontalOffset = newOffsetX;
+        doc.LastVerticalOffset = newOffsetY;
+
+        if (flushImmediate || commitZoomProperty)
         {
-            _isFittedVertically = false;
-            EnsureScrollModesEnabledForViewChange();
-
-            double oldZoom = Math.Max(0.1, ContinuousScrollViewer.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : doc.ZoomFactor);
-            double newZoom = Math.Clamp(oldZoom * zoomMultiplier, DocumentViewModel.MinZoom, DocumentViewModel.MaxZoom);
-
-            double vw = ContinuousScrollViewer.ViewportWidth > 0 ? ContinuousScrollViewer.ViewportWidth : ContinuousScrollViewer.ActualWidth;
-            double vh = ContinuousScrollViewer.ViewportHeight > 0 ? ContinuousScrollViewer.ViewportHeight : ContinuousScrollViewer.ActualHeight;
-            double pivotX = vw > 0 ? Math.Clamp(viewportPoint.X, 0.0, vw) : 0.0;
-            double pivotY = vh > 0 ? Math.Clamp(viewportPoint.Y, 0.0, vh) : 0.0;
-
-            double contentX = (ContinuousScrollViewer.HorizontalOffset + pivotX) / oldZoom;
-            double contentY = (ContinuousScrollViewer.VerticalOffset + pivotY) / oldZoom;
-
-            double newOffsetX = Math.Max(0.0, (contentX * newZoom) - pivotX - panDx);
-            double newOffsetY = Math.Max(0.0, (contentY * newZoom) - pivotY - panDy);
-
-            if (!_isHorizontalPushAnimating && !_isSlideSwipeActive && !_isSlideSwipeAnimating && PagesRepeaterPushTransform is not null && newZoom > 0.05)
-            {
-                PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip(newZoom) / newZoom;
-            }
-
-            ContinuousScrollViewer.ChangeView(newOffsetX, newOffsetY, (float)newZoom, disableAnimation: true);
+            FlushInteractiveViewportNow();
             if (commitZoomProperty)
             {
                 ViewModel.SetZoom((float)newZoom);
                 UpdateViewportPages(newZoom);
             }
-            ScheduleViewportUpdate();
         }
-        finally
+        else
         {
-            _isApplyingZoom = false;
+            RequestInteractiveViewportFlush();
         }
     }
 
@@ -5031,43 +5187,45 @@ public sealed partial class DocumentView : Page
             return;
         }
 
+        EnsureInteractiveViewportStateInitialized(doc);
+
+        double vw = ContinuousScrollViewer.ViewportWidth > 0 ? ContinuousScrollViewer.ViewportWidth : ContinuousScrollViewer.ActualWidth;
+        double vh = ContinuousScrollViewer.ViewportHeight > 0 ? ContinuousScrollViewer.ViewportHeight : ContinuousScrollViewer.ActualHeight;
+        double unzoomedW = GetUnzoomedScrollContentWidthDip(doc, _interactiveZoomFactor, vw);
+        double unzoomedH = GetUnzoomedScrollContentHeightDip(doc, _interactiveZoomFactor, vh);
+        double maxScrollX = Math.Max(ContinuousScrollViewer.ScrollableWidth, (unzoomedW * _interactiveZoomFactor) - vw);
+        double maxScrollY = Math.Max(ContinuousScrollViewer.ScrollableHeight, (unzoomedH * _interactiveZoomFactor) - vh);
+
         bool isContinuousMode = doc.IsContinuous && !ViewModel.IsPresentationMode;
-        bool canH = isContinuousMode
-            ? ContinuousScrollViewer.ScrollableWidth > 1.0
-            : CanPanHorizontallyInPagedMode();
-        bool canV = isContinuousMode
-            ? ContinuousScrollViewer.ScrollableHeight > 1.0
-            : CanPanVerticallyInPagedMode();
+        bool canH = isContinuousMode ? maxScrollX > 1.0 : CanPanHorizontallyInPagedMode();
+        bool canV = isContinuousMode ? maxScrollY > 1.0 : CanPanVerticallyInPagedMode();
         if (!canH && !canV)
         {
             return;
         }
 
-        EnsureScrollModesEnabledForViewChange();
-        double? targetH = null;
-        double? targetV = null;
-
-        if (canH && Math.Abs(deltaX) > 0.01 && ContinuousScrollViewer.ScrollableWidth > 0.5)
+        bool changed = false;
+        if (canH && Math.Abs(deltaX) > 0.01 && maxScrollX > 0.5)
         {
-            targetH = Math.Clamp(ContinuousScrollViewer.HorizontalOffset - deltaX, 0.0, ContinuousScrollViewer.ScrollableWidth);
-            doc.LastHorizontalOffset = targetH.Value;
+            _interactiveOffsetX = Math.Clamp(_interactiveOffsetX - deltaX, 0.0, maxScrollX);
+            doc.LastHorizontalOffset = _interactiveOffsetX;
+            changed = true;
         }
 
-        if (canV && Math.Abs(deltaY) > 0.01 && ContinuousScrollViewer.ScrollableHeight > 0.5)
+        if (canV && Math.Abs(deltaY) > 0.01 && maxScrollY > 0.5)
         {
-            targetV = Math.Clamp(ContinuousScrollViewer.VerticalOffset - deltaY, 0.0, ContinuousScrollViewer.ScrollableHeight);
-            doc.LastVerticalOffset = targetV.Value;
+            _interactiveOffsetY = Math.Clamp(_interactiveOffsetY - deltaY, 0.0, maxScrollY);
+            doc.LastVerticalOffset = _interactiveOffsetY;
+            changed = true;
         }
 
-        if (targetH.HasValue || targetV.HasValue)
+        if (changed)
         {
-            ContinuousScrollViewer.ChangeView(targetH, targetV, null, disableAnimation: true);
-            if (isContinuousMode && targetV.HasValue)
+            RequestInteractiveViewportFlush();
+            if (isContinuousMode)
             {
-                SyncScrollMetricsFromVerticalOffset(targetV.Value);
+                SyncScrollMetricsFromVerticalOffset(_interactiveOffsetY);
             }
-
-            ScheduleViewportUpdate();
         }
     }
 
@@ -6021,8 +6179,7 @@ public sealed partial class DocumentView : Page
             bool stillDown = GetPointerInfo(kvp.Key, out POINTER_INFO pi) &&
                              (pi.pointerFlags & POINTER_FLAG_INCONTACT) != 0 &&
                              (pi.pointerFlags & 0x00040000u) == 0;
-            if (!stillDown || (nowTick - kvp.Value.PressTick > 800 &&
-                (_activeTouchSelectingCanvas is null || !_activeTouchSelectingCanvas.IsTouchSelecting)))
+            if (!stillDown)
             {
                 (stale ??= new List<uint>()).Add(kvp.Key);
             }
@@ -6144,7 +6301,7 @@ public sealed partial class DocumentView : Page
             _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
             if (_isSlideSwipeActive || _isSlideSwipeAnimating)
             {
-                CancelInteractiveSlideSwipeImmediate();
+                CancelInteractiveSlideSwipeImmediate(stopSmoothZoom: true, resetManipulationSession: false);
             }
 
             StopTwoFingerTapPolling();
@@ -6485,6 +6642,14 @@ public sealed partial class DocumentView : Page
             CompleteSlideSwipeAnimationImmediate();
         }
 
+        if (ViewModel?.CurrentDocument is { Pages.Count: > 0 } doc &&
+            !_isSmoothZoomRenderingSubscribed &&
+            !_isInteractiveViewportFlushSubscribed &&
+            ContinuousScrollViewer.ZoomFactor > 0.05)
+        {
+            EnsureInteractiveViewportStateInitialized(doc);
+        }
+
         _isManipulatingSlideSwipe = true;
         _isTouchSwipeTracking = false;
         _isTouchSwipeEngaged = false;
@@ -6496,7 +6661,7 @@ public sealed partial class DocumentView : Page
             _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
             if (_isSlideSwipeActive)
             {
-                CancelInteractiveSlideSwipeImmediate();
+                CancelInteractiveSlideSwipeImmediate(stopSmoothZoom: true, resetManipulationSession: false);
             }
         }
         else if (_isSlideSwipeActive)
@@ -6542,24 +6707,16 @@ public sealed partial class DocumentView : Page
         double scaleDelta = e.Delta.Scale;
 
         // 2-finger pinch-to-zoom or 2-finger pan
-        if (_activeTouchPointers.Count > 1 || Math.Abs(scaleDelta - 1.0) > 0.002)
+        if (_activeTouchPointers.Count > 1 || Math.Abs(scaleDelta - 1.0) > 0.0001)
         {
             CancelTouchHoldOnAllCanvases();
             _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
             if (_isSlideSwipeActive)
             {
-                CancelInteractiveSlideSwipeImmediate();
+                CancelInteractiveSlideSwipeImmediate(stopSmoothZoom: true, resetManipulationSession: false);
             }
 
-            if (Math.Abs(scaleDelta - 1.0) > 0.001)
-            {
-                ApplyInteractiveZoomAroundPoint(e.Position, scaleDelta, deltaX, deltaY, commitZoomProperty: false);
-            }
-            else
-            {
-                PanPagedScrollViewerBy(deltaX, deltaY);
-            }
-
+            ApplyInteractiveZoomAroundPoint(e.Position, scaleDelta, deltaX, deltaY, commitZoomProperty: false);
             return;
         }
 
@@ -6712,11 +6869,19 @@ public sealed partial class DocumentView : Page
         {
             if (_touchGestureAxis == PagedTouchGestureAxis.PanOrZoom && ViewModel?.CurrentDocument is { } doc)
             {
-                double finalZoom = ContinuousScrollViewer.ZoomFactor;
-                if (finalZoom > 0.05 && Math.Abs(doc.ZoomFactor - finalZoom) > 0.005)
+                FlushInteractiveViewportNow();
+                double finalZoom = _hasInteractiveViewportState && _interactiveZoomFactor > 0.05
+                    ? _interactiveZoomFactor
+                    : ContinuousScrollViewer.ZoomFactor;
+                if (finalZoom > 0.05)
                 {
-                    ViewModel.SetZoom((float)finalZoom);
+                    if (Math.Abs(doc.ZoomFactor - finalZoom) > 0.002)
+                    {
+                        ViewModel.SetZoom((float)finalZoom);
+                    }
+
                     UpdateViewportPages(finalZoom);
+                    ScheduleViewportUpdate();
                 }
             }
 
@@ -7774,6 +7939,10 @@ public sealed partial class DocumentView : Page
                 {
                     EnsureScrollModesEnabledForViewChange();
                     ContinuousScrollViewer.ChangeView(0, 0, null, disableAnimation: true);
+                    SetInteractiveViewportState(
+                        _hasInteractiveViewportState && _interactiveZoomFactor > 0.05 ? _interactiveZoomFactor : doc.ZoomFactor,
+                        0.0,
+                        0.0);
                 }
             }
             finally
@@ -7823,9 +7992,14 @@ public sealed partial class DocumentView : Page
         }
     }
 
-    private void CancelInteractiveSlideSwipeImmediate()
+    private void CancelInteractiveSlideSwipeImmediate(bool stopSmoothZoom = true, bool resetManipulationSession = true)
     {
-        StopSmoothWheelZoom();
+        if (stopSmoothZoom)
+        {
+            StopSmoothWheelZoom();
+            StopInteractiveViewportFlush();
+        }
+
         StopTouchpadSwipeSmoothingLoop();
         _touchpadSwipeEndTimer.Stop();
         _slideSwipeStoryboard?.Stop();
@@ -7834,11 +8008,15 @@ public sealed partial class DocumentView : Page
         _isSlideSwipeAnimatingCommit = false;
         _isSlideSwipeActive = false;
         _touchpadTargetDeltaX = 0.0;
-        _isManipulatingSlideSwipe = false;
+        if (resetManipulationSession)
+        {
+            _isManipulatingSlideSwipe = false;
+            _touchGestureAxis = PagedTouchGestureAxis.Undecided;
+        }
+
         _isTouchSwipeTracking = false;
         _isTouchSwipeEngaged = false;
         _isTouchpadWheelSwipeActive = false;
-        _touchGestureAxis = PagedTouchGestureAxis.Undecided;
         _manipCumulativeDx = 0.0;
         _manipCumulativeDy = 0.0;
         _swipeRawDeltaX = 0.0;
@@ -7846,7 +8024,9 @@ public sealed partial class DocumentView : Page
         _swipeVelocityX = 0.0;
         _swipeTargetPageIndex = -1;
 
-        double curZoom = Math.Max(0.05, ContinuousScrollViewer?.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel?.CurrentDocument?.ZoomFactor ?? 1.0));
+        double curZoom = _hasInteractiveViewportState && _interactiveZoomFactor > 0.05
+            ? _interactiveZoomFactor
+            : Math.Max(0.05, ContinuousScrollViewer?.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : (ViewModel?.CurrentDocument?.ZoomFactor ?? 1.0));
         if (!_isHorizontalPushAnimating && PagesRepeaterPushTransform is not null)
         {
             PagesRepeaterPushTransform.TranslateX = GetTargetDocumentOffsetDip(curZoom) / curZoom;
