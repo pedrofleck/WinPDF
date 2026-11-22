@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Reflection;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using WinPDF.Helpers;
@@ -1952,8 +1953,14 @@ public sealed partial class ShellViewModel : ObservableObject
     {
         string name = ResourceStrings.Get(ResourceKeys.AppDisplayName);
         string description = ResourceStrings.Get(ResourceKeys.AppDescription);
+        string version = typeof(ShellViewModel).Assembly
+            .GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion
+            .Split('+')[0]
+            ?? typeof(ShellViewModel).Assembly.GetName().Version?.ToString(3)
+            ?? "0.6.0-alpha.6";
         string close = ResourceStrings.Get(ResourceKeys.DialogClose);
 
-        await _dialogService.ShowMessageAsync(name, description, close);
+        await _dialogService.ShowMessageAsync(name, $"{description}\n\nv{version}", close);
     }
 }

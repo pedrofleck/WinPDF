@@ -19,7 +19,7 @@ WinUI 3 (Windows App SDK) + C# / .NET 10 (LTS).
 | 3A | `IPdfService` (PDFium, dedicated thread, Zero-LOH/Zero-Copy), coordinate math, LRU caches, lazy sidebar thumbnails | ✅ Done |
 | 3B | `PdfPageCanvas` (Win2D), DirectManipulation zoom/pan, hybrid full-page / detail patch, continuous & paged views | ✅ Done |
 | 3C | Interactive text selection (`FPDFText_*`), full-document search (`Ctrl+F`), clickable links (`FPDFLink_*`), GPU highlights | ✅ Done (v0.5.0-alpha.5) |
-| 4 | Vector annotation layer (ink, highlight, note, eraser), Touch vs. Pen separation, save to PDF | ⏳ Next |
+| 4 | Vector annotation layer (ink, highlight, note, eraser), Touch vs. Pen separation, save to PDF | 🚧 In Progress (v0.6.0-alpha.6 — Text annotations, comments & digital signatures) |
 
 Sections marked **(design)** describe the agreed target design not yet implemented. Turn them into
 **(implemented)** with file links when the code lands.
