@@ -613,14 +613,51 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
     partial void OnActiveSelectionChanged(PdfTextSelection? oldValue, PdfTextSelection? newValue)
     {
-        if (oldValue is not null)
+        if (oldValue is null && newValue is null)
         {
-            PageOverlaysInvalidated?.Invoke(oldValue.PageIndex);
+            return;
         }
 
-        if (newValue is not null && newValue.PageIndex != oldValue?.PageIndex)
+        if (oldValue is not null &&
+            newValue is not null &&
+            !oldValue.IsMultiPage &&
+            !newValue.IsMultiPage &&
+            oldValue.StartPageIndex == newValue.StartPageIndex)
         {
-            PageOverlaysInvalidated?.Invoke(newValue.PageIndex);
+            PageOverlaysInvalidated?.Invoke(newValue.StartPageIndex);
+            return;
+        }
+
+        int oldStart = oldValue?.StartPageIndex ?? -1;
+        int oldEnd = oldValue?.LastPageIndex ?? -1;
+        int newStart = newValue?.StartPageIndex ?? -1;
+        int newEnd = newValue?.LastPageIndex ?? -1;
+
+        int minPage = (oldStart >= 0 && newStart >= 0) ? Math.Min(oldStart, newStart) : Math.Max(oldStart, newStart);
+        int maxPage = Math.Max(oldEnd, newEnd);
+        if (minPage >= 0 && maxPage >= minPage && (maxPage - minPage + 1) > 12)
+        {
+            PageOverlaysInvalidated?.Invoke(-1);
+            return;
+        }
+
+        if (oldStart >= 0 && oldEnd >= oldStart)
+        {
+            for (int p = oldStart; p <= oldEnd; p++)
+            {
+                PageOverlaysInvalidated?.Invoke(p);
+            }
+        }
+
+        if (newStart >= 0 && newEnd >= newStart)
+        {
+            for (int p = newStart; p <= newEnd; p++)
+            {
+                if (oldStart < 0 || p < oldStart || p > oldEnd)
+                {
+                    PageOverlaysInvalidated?.Invoke(p);
+                }
+            }
         }
     }
 

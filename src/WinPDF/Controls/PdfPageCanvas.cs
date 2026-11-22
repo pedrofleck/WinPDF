@@ -288,6 +288,11 @@ public sealed partial class PdfPageCanvas : Grid
     private PdfPointerHitResult _touchHoldHitResult;
     private bool _hasTouchHoldHitResult;
     private PdfTextSelection? _pendingTouchReleaseSelection;
+    private int _touchPollingMissingInfoCount;
+    private WIN32_POINT _lastPolledTouchScreenPx;
+    private bool _hasLastPolledTouchScreenPx;
+    private bool _isAwaitingInitialTouchWord;
+    private bool _touchHoldReleasedBeforeWordResolved;
 
     /// <summary>
     /// Gets a value indicating whether this canvas is currently waiting for a 300ms touch hold threshold.
@@ -323,6 +328,21 @@ public sealed partial class PdfPageCanvas : Grid
     /// Event raised when a touch interaction starts or taps outside, requesting that the touch selection flyout be hidden.
     /// </summary>
     public static event Action? TouchSelectionDismissRequested;
+
+    /// <summary>
+    /// Event raised during an active mouse or touch text selection drag so the parent viewer can coordinate cross-page selection and edge auto-scroll.
+    /// </summary>
+    public static event Action<PdfPageCanvas, long, int, Vector2, Point, bool, int, int, int>? SelectionDragUpdated;
+
+    /// <summary>
+    /// Event raised when an active mouse or touch text selection drag completes.
+    /// </summary>
+    public static event Action<PdfPageCanvas, long, int, Vector2, Point, bool, int, int, int>? SelectionDragCompleted;
+
+    /// <summary>
+    /// Event raised when an active mouse or touch text selection drag is canceled or reset.
+    /// </summary>
+    public static event Action<PdfPageCanvas>? SelectionDragCanceled;
 
     /// <summary>
     /// Optional callback queried to check whether the parent viewer is currently tracking a single-finger XAML manipulation.
@@ -908,7 +928,12 @@ public sealed partial class PdfPageCanvas : Grid
         };
     }
 
-    private Vector2 ToPdfPoint(Point pageDipPoint)
+    /// <summary>
+    /// Converts a point in local page DIPs to PDF user-space coordinates (points).
+    /// </summary>
+    /// <param name="pageDipPoint">Point in local canvas DIPs.</param>
+    /// <returns>The corresponding point in PDF user space.</returns>
+    internal Vector2 ToPdfPoint(Point pageDipPoint)
     {
         if (PageInfo is null)
         {
@@ -960,6 +985,7 @@ public sealed partial class PdfPageCanvas : Grid
 
     private void ResetPointerSelectionState()
     {
+        bool wasSelecting = _hasDraggedSelection || _isTouchSelecting;
         _selectionSessionId++;
         _isPointerDown = false;
         _hasDraggedSelection = false;
@@ -969,13 +995,21 @@ public sealed partial class PdfPageCanvas : Grid
         _pressedLink = PdfLinkTarget.None;
         _hasPendingHoverPoint = false;
         _hasPendingDragPoint = false;
+        _isAwaitingInitialTouchWord = false;
+        _touchHoldReleasedBeforeWordResolved = false;
         CancelTouchSelectionAndHold();
         _activeCanvasTouchPointerTicks.Clear();
         SetCursorShape(InputSystemCursorShape.Arrow);
+        if (wasSelecting)
+        {
+            SelectionDragCanceled?.Invoke(this);
+        }
     }
 
     private void StartTouchSelectionPolling()
     {
+        _touchPollingMissingInfoCount = 0;
+        _hasLastPolledTouchScreenPx = false;
         if (!_isTouchSelectionPollingSubscribed)
         {
             CompositionTarget.Rendering += OnTouchSelectionPollingRendering;
@@ -985,6 +1019,8 @@ public sealed partial class PdfPageCanvas : Grid
 
     private void StopTouchSelectionPolling()
     {
+        _touchPollingMissingInfoCount = 0;
+        _hasLastPolledTouchScreenPx = false;
         if (_isTouchSelectionPollingSubscribed)
         {
             CompositionTarget.Rendering -= OnTouchSelectionPollingRendering;
@@ -1004,8 +1040,17 @@ public sealed partial class PdfPageCanvas : Grid
         // while the finger remains physically in contact (POINTER_FLAG_INCONTACT != 0) and continues streaming coordinates.
         if (!GetPointerInfo(_touchPointerId, out POINTER_INFO pi))
         {
+            _touchPollingMissingInfoCount++;
+            if (_touchPollingMissingInfoCount >= 2)
+            {
+                StopTouchSelectionPolling();
+                CompleteTouchSelectionSession(_touchCurrentDipPoint);
+            }
+
             return;
         }
+
+        _touchPollingMissingInfoCount = 0;
 
         if ((pi.pointerFlags & POINTER_FLAG_INCONTACT) == 0 ||
             (pi.pointerFlags & POINTER_FLAG_UP) != 0)
@@ -1020,6 +1065,16 @@ public sealed partial class PdfPageCanvas : Grid
             _touchStartScreenPx = pi.ptPixelLocation;
             _hasTouchStartScreenPx = true;
         }
+
+        if (_hasLastPolledTouchScreenPx &&
+            pi.ptPixelLocation.X == _lastPolledTouchScreenPx.X &&
+            pi.ptPixelLocation.Y == _lastPolledTouchScreenPx.Y)
+        {
+            return;
+        }
+
+        _lastPolledTouchScreenPx = pi.ptPixelLocation;
+        _hasLastPolledTouchScreenPx = true;
 
         if (XamlRoot?.Content is { } rootContent)
         {
@@ -1065,12 +1120,15 @@ public sealed partial class PdfPageCanvas : Grid
         _touchHoldHitResult = default;
         _hasTouchHoldHitResult = false;
         _pendingTouchReleaseSelection = null;
+        _isAwaitingInitialTouchWord = false;
+        _touchHoldReleasedBeforeWordResolved = false;
         _touchInitialWordStartCharIndex = -1;
         _touchInitialWordEndCharIndex = -1;
         _lastTouchTapTick = 0;
 
         if (_isTouchSelecting)
         {
+            _selectionSessionId++;
             _isTouchSelecting = false;
             _hasTouchDraggedAfterHold = false;
             _hasDraggedSelection = false;
@@ -1091,6 +1149,7 @@ public sealed partial class PdfPageCanvas : Grid
                 }
             }
 
+            SelectionDragCanceled?.Invoke(this);
             TouchSelectionEnded?.Invoke(this);
         }
         else
@@ -1219,6 +1278,8 @@ public sealed partial class PdfPageCanvas : Grid
             _touchHoldHitResult = default;
             _hasTouchHoldHitResult = false;
             _pendingTouchReleaseSelection = null;
+            _isAwaitingInitialTouchWord = false;
+            _touchHoldReleasedBeforeWordResolved = false;
             _touchHoldTimer.Start();
 
             _ = ResolveTouchHoldCandidateAsync(EffectiveDocumentId, PageInfo.Index, _touchPressPdfPoint, _touchHoldSessionId);
@@ -1396,6 +1457,8 @@ public sealed partial class PdfPageCanvas : Grid
         StartTouchSelectionPolling();
         FocusParentViewerIfNeeded();
 
+        _isAwaitingInitialTouchWord = true;
+        _touchHoldReleasedBeforeWordResolved = false;
         try
         {
             PdfTextSelection? initialWord = await _pdfService.SelectWordAtPointAsync(
@@ -1406,28 +1469,53 @@ public sealed partial class PdfPageCanvas : Grid
                 tolerancePt: 12.0);
 
             if (!_isUnloaded &&
-                _isTouchSelecting &&
                 _selectionSessionId == sessionId &&
                 PageInfo?.Index == pageIndex &&
                 EffectiveDocumentId == docId &&
                 initialWord is { HasContent: true })
             {
-                _touchInitialWordStartCharIndex = initialWord.StartCharIndex;
-                _touchInitialWordEndCharIndex = initialWord.EndCharIndex;
-                _selectionAnchorCharIndex = initialWord.StartCharIndex;
-                if (!_hasTouchDraggedAfterHold)
+                if (_isTouchSelecting)
                 {
-                    _observedDocument?.SetSelection(initialWord);
-                    _pendingTouchReleaseSelection = initialWord;
+                    _touchInitialWordStartCharIndex = initialWord.StartCharIndex;
+                    _touchInitialWordEndCharIndex = initialWord.EndCharIndex;
+                    _selectionAnchorCharIndex = initialWord.StartCharIndex;
+                    if (!_hasTouchDraggedAfterHold)
+                    {
+                        _observedDocument?.SetSelection(initialWord);
+                        _pendingTouchReleaseSelection = initialWord;
+                    }
+                    else if (SelectionDragUpdated is not null)
+                    {
+                        SelectionDragUpdated.Invoke(
+                            this,
+                            sessionId,
+                            _selectionAnchorCharIndex,
+                            _pressPdfPoint,
+                            _touchCurrentDipPoint,
+                            true,
+                            pageIndex,
+                            _touchInitialWordStartCharIndex,
+                            _touchInitialWordEndCharIndex);
+                    }
+                    else
+                    {
+                        RequestDragSelectionUpdate(_touchCurrentDipPoint, force: true, sessionId);
+                    }
                 }
-                else
+                else if (_touchHoldReleasedBeforeWordResolved)
                 {
-                    RequestDragSelectionUpdate(_touchCurrentDipPoint, force: true, sessionId);
+                    _touchHoldReleasedBeforeWordResolved = false;
+                    _observedDocument?.SetSelection(initialWord);
+                    TouchSelectionCompleted?.Invoke(this, initialWord);
                 }
             }
         }
         catch
         {
+        }
+        finally
+        {
+            _isAwaitingInitialTouchWord = false;
         }
     }
 
@@ -1474,7 +1562,23 @@ public sealed partial class PdfPageCanvas : Grid
 
         if (_hasTouchDraggedAfterHold)
         {
-            RequestDragSelectionUpdate(posDip, force: isFirstDragFrame, _selectionSessionId);
+            if (SelectionDragUpdated is not null)
+            {
+                SelectionDragUpdated.Invoke(
+                    this,
+                    _selectionSessionId,
+                    _selectionAnchorCharIndex,
+                    _pressPdfPoint,
+                    posDip,
+                    true,
+                    PageInfo.Index,
+                    _touchInitialWordStartCharIndex,
+                    _touchInitialWordEndCharIndex);
+            }
+            else
+            {
+                RequestDragSelectionUpdate(posDip, force: isFirstDragFrame, _selectionSessionId);
+            }
         }
     }
 
@@ -1497,12 +1601,19 @@ public sealed partial class PdfPageCanvas : Grid
 
         bool hadDragged = _hasTouchDraggedAfterHold;
         long activeSession = _selectionSessionId;
+        int anchorChar = _selectionAnchorCharIndex;
+        Vector2 anchorPdf = _pressPdfPoint;
+        int pageIndex = PageInfo?.Index ?? -1;
+        int initialWordStart = _touchInitialWordStartCharIndex;
+        int initialWordEnd = _touchInitialWordEndCharIndex;
         Point endPointDip = finalDipPoint ?? _touchCurrentDipPoint;
 
         _isTouchSelecting = false;
         _isTouchWaitingForHold = false;
         _hasTouchDraggedAfterHold = false;
         _hasDraggedSelection = false;
+        _touchInitialWordStartCharIndex = -1;
+        _touchInitialWordEndCharIndex = -1;
         _touchHoldTimer.Stop();
         _activeCanvasTouchPointerTicks.Clear();
 
@@ -1528,7 +1639,23 @@ public sealed partial class PdfPageCanvas : Grid
 
         if (hadDragged)
         {
-            _ = FinalizeTouchDragSelectionAsync(endPointDip, activeSession);
+            if (SelectionDragCompleted is not null)
+            {
+                SelectionDragCompleted.Invoke(
+                    this,
+                    activeSession,
+                    anchorChar,
+                    anchorPdf,
+                    endPointDip,
+                    true,
+                    pageIndex,
+                    initialWordStart,
+                    initialWordEnd);
+            }
+            else
+            {
+                _ = FinalizeTouchDragSelectionAsync(endPointDip, activeSession, pageIndex, initialWordStart, initialWordEnd);
+            }
         }
         else
         {
@@ -1537,6 +1664,10 @@ public sealed partial class PdfPageCanvas : Grid
             if (activeSel is { HasContent: true })
             {
                 TouchSelectionCompleted?.Invoke(this, activeSel);
+            }
+            else if (_isAwaitingInitialTouchWord)
+            {
+                _touchHoldReleasedBeforeWordResolved = true;
             }
         }
     }
@@ -1551,6 +1682,8 @@ public sealed partial class PdfPageCanvas : Grid
         _selectionSessionId++;
         _selectionAnchorCharIndex = fixedAnchorCharIndex;
         _pressPdfPoint = fixedAnchorPdfPoint;
+        _touchInitialWordStartCharIndex = -1;
+        _touchInitialWordEndCharIndex = -1;
         _lastDragEndCharIndex = -2;
         _lastDragDipPoint = new Point(-1000, -1000);
         _hasDraggedSelection = true;
@@ -1586,7 +1719,7 @@ public sealed partial class PdfPageCanvas : Grid
 
         long activeSession = _selectionSessionId;
         _hasDraggedSelection = false;
-        _ = FinalizeTouchDragSelectionAsync(finalTargetCharDipPoint, activeSession);
+        _ = FinalizeTouchDragSelectionAsync(finalTargetCharDipPoint, activeSession, -1, -1, -1);
     }
 
     /// <summary>
@@ -1686,7 +1819,12 @@ public sealed partial class PdfPageCanvas : Grid
         TouchSelectionDismissRequested?.Invoke();
     }
 
-    private async Task FinalizeTouchDragSelectionAsync(Point endPointDip, long sessionId)
+    private async Task FinalizeTouchDragSelectionAsync(
+        Point endPointDip,
+        long sessionId,
+        int initialWordPageIndex,
+        int initialWordStart,
+        int initialWordEnd)
     {
         try
         {
@@ -1705,21 +1843,20 @@ public sealed partial class PdfPageCanvas : Grid
             Vector2 anchorPdf = _pressPdfPoint;
             Vector2 pdfPt = ToPdfPoint(clampedDip);
 
-            if (_touchInitialWordStartCharIndex >= 0 && _touchInitialWordEndCharIndex >= _touchInitialWordStartCharIndex)
-            {
-                bool draggingBeforeWord = pdfPt.Y > anchorPdf.Y + 6.0f ||
-                                          (Math.Abs(pdfPt.Y - anchorPdf.Y) <= 6.0f && pdfPt.X < anchorPdf.X);
-                anchor = draggingBeforeWord ? _touchInitialWordEndCharIndex : _touchInitialWordStartCharIndex;
-            }
-
-            PdfTextSelection? updated = await _pdfService.SelectTextByPointAsync(
+            PdfTextSelection? updated = await _pdfService.SelectTextAcrossPagesAsync(
                 docId,
                 pageIndex,
                 anchor,
                 anchorPdf.X,
                 anchorPdf.Y,
+                pageIndex,
                 pdfPt.X,
                 pdfPt.Y,
+                PdfSelectionAnchorClamp.None,
+                initialWordPageIndex,
+                initialWordStart,
+                initialWordEnd,
+                -1,
                 -2);
 
             if (_isUnloaded || _selectionSessionId != sessionId || PageInfo?.Index != pageIndex || EffectiveDocumentId != docId)
@@ -1732,7 +1869,8 @@ public sealed partial class PdfPageCanvas : Grid
                 _observedDocument?.SetSelection(updated);
                 TouchSelectionCompleted?.Invoke(this, updated);
             }
-            else if (_observedDocument?.ActiveSelection is { HasContent: true } existingSel && existingSel.PageIndex == pageIndex)
+            else if (_observedDocument?.ActiveSelection is { HasContent: true } existingSel &&
+                     (existingSel.PageIndex == pageIndex || existingSel.GetRectsForPage(pageIndex).Count > 0))
             {
                 TouchSelectionCompleted?.Invoke(this, existingSel);
             }
@@ -1809,7 +1947,23 @@ public sealed partial class PdfPageCanvas : Grid
             }
             else if (_hasDraggedSelection)
             {
-                RequestDragSelectionUpdate(_lastDragDipPoint, force: true, sessionId);
+                if (SelectionDragUpdated is not null)
+                {
+                    SelectionDragUpdated.Invoke(
+                        this,
+                        sessionId,
+                        _selectionAnchorCharIndex,
+                        _pressPdfPoint,
+                        _lastDragDipPoint,
+                        false,
+                        -1,
+                        -1,
+                        -1);
+                }
+                else
+                {
+                    RequestDragSelectionUpdate(_lastDragDipPoint, force: true, sessionId);
+                }
             }
         }
         catch
@@ -1857,7 +2011,24 @@ public sealed partial class PdfPageCanvas : Grid
             {
                 e.Handled = true;
                 SetCursorShape(InputSystemCursorShape.IBeam);
-                RequestDragSelectionUpdate(posDip, force: false, _selectionSessionId);
+                if (SelectionDragUpdated is not null)
+                {
+                    _lastDragDipPoint = posDip;
+                    SelectionDragUpdated.Invoke(
+                        this,
+                        _selectionSessionId,
+                        _selectionAnchorCharIndex,
+                        _pressPdfPoint,
+                        posDip,
+                        false,
+                        -1,
+                        -1,
+                        -1);
+                }
+                else
+                {
+                    RequestDragSelectionUpdate(posDip, force: false, _selectionSessionId);
+                }
             }
 
             return;
@@ -1899,9 +2070,12 @@ public sealed partial class PdfPageCanvas : Grid
         bool wasDragged = _hasDraggedSelection;
         PdfLinkTarget pressedLink = _pressedLink;
         long activeSession = _selectionSessionId;
+        int anchorChar = _selectionAnchorCharIndex;
+        Vector2 anchorPdf = _pressPdfPoint;
         Point releasePosDip = e.GetCurrentPoint(this).Position;
 
         _isPointerDown = false;
+        _hasDraggedSelection = false;
         _pressedLink = PdfLinkTarget.None;
 
         _isReleasingCapture = true;
@@ -1929,7 +2103,24 @@ public sealed partial class PdfPageCanvas : Grid
             // Ensure the final release coordinate is processed and keep the selection active on screen.
             e.Handled = true;
             FocusParentViewerIfNeeded();
-            RequestDragSelectionUpdate(releasePosDip, force: true, activeSession);
+            if (SelectionDragCompleted is not null)
+            {
+                SelectionDragCompleted.Invoke(
+                    this,
+                    activeSession,
+                    anchorChar,
+                    anchorPdf,
+                    releasePosDip,
+                    false,
+                    -1,
+                    -1,
+                    -1);
+            }
+            else
+            {
+                RequestDragSelectionUpdate(releasePosDip, force: true, activeSession);
+            }
+
             return;
         }
 
@@ -1966,6 +2157,11 @@ public sealed partial class PdfPageCanvas : Grid
 
                 DispatcherQueue.TryEnqueue(() =>
                 {
+                    if (_isUnloaded || _touchPointerId != canceledId)
+                    {
+                        return;
+                    }
+
                     if (IsSingleTouchViewerManipulating?.Invoke() == true)
                     {
                         return;
@@ -2000,8 +2196,14 @@ public sealed partial class PdfPageCanvas : Grid
             return;
         }
 
+        bool hadMouseDrag = _hasDraggedSelection;
         _isPointerDown = false;
+        _hasDraggedSelection = false;
         _pressedLink = PdfLinkTarget.None;
+        if (hadMouseDrag)
+        {
+            SelectionDragCanceled?.Invoke(this);
+        }
     }
 
     private void OnCanvasPointerCaptureLost(object sender, PointerRoutedEventArgs e)
@@ -2224,27 +2426,24 @@ public sealed partial class PdfPageCanvas : Grid
                 Vector2 pdfPt = ToPdfPoint(currentDip);
                 int prevEndChar = _lastDragEndCharIndex;
 
-                if (_isTouchSelecting && _touchInitialWordStartCharIndex >= 0 && _touchInitialWordEndCharIndex >= _touchInitialWordStartCharIndex)
-                {
-                    bool draggingBeforeWord = pdfPt.Y > anchorPdf.Y + 6.0f ||
-                                              (Math.Abs(pdfPt.Y - anchorPdf.Y) <= 6.0f && pdfPt.X < anchorPdf.X);
-                    int desiredAnchor = draggingBeforeWord ? _touchInitialWordEndCharIndex : _touchInitialWordStartCharIndex;
-                    if (anchor != desiredAnchor)
-                    {
-                        anchor = desiredAnchor;
-                        _selectionAnchorCharIndex = desiredAnchor;
-                        prevEndChar = -2;
-                    }
-                }
+                int initWordPage = _isTouchSelecting ? pageIndex : -1;
+                int initWordStart = _isTouchSelecting ? _touchInitialWordStartCharIndex : -1;
+                int initWordEnd = _isTouchSelecting ? _touchInitialWordEndCharIndex : -1;
 
-                PdfTextSelection? updated = await _pdfService.SelectTextByPointAsync(
+                PdfTextSelection? updated = await _pdfService.SelectTextAcrossPagesAsync(
                     docId,
                     pageIndex,
                     anchor,
                     anchorPdf.X,
                     anchorPdf.Y,
+                    pageIndex,
                     pdfPt.X,
                     pdfPt.Y,
+                    PdfSelectionAnchorClamp.None,
+                    initWordPage,
+                    initWordStart,
+                    initWordEnd,
+                    pageIndex,
                     prevEndChar);
 
                 if (_isUnloaded ||
@@ -2591,7 +2790,10 @@ public sealed partial class PdfPageCanvas : Grid
         int pageIndex = pageInfo.Index;
         IReadOnlyList<PdfSearchMatch> pageMatches = doc.GetPageSearchMatches(pageIndex);
         PdfTextSelection? activeSelection = doc.ActiveSelection;
-        bool hasSelectionOnPage = activeSelection is { HasContent: true } && activeSelection.PageIndex == pageIndex;
+        IReadOnlyList<PdfRect> selectionRects = activeSelection is { HasContent: true }
+            ? activeSelection.GetRectsForPage(pageIndex)
+            : Array.Empty<PdfRect>();
+        bool hasSelectionOnPage = selectionRects.Count > 0;
 
         if (pageMatches.Count == 0 && !hasSelectionOnPage)
         {
@@ -2648,16 +2850,15 @@ public sealed partial class PdfPageCanvas : Grid
         }
 
         // 2. Interactive text selection highlight (translucent blue with soft rounded corners)
-        if (hasSelectionOnPage && activeSelection is not null)
+        if (hasSelectionOnPage)
         {
             Windows.UI.Color selectionFill = IsNightMode
                 ? Windows.UI.Color.FromArgb(115, 76, 166, 255)
                 : Windows.UI.Color.FromArgb(92, 0, 120, 215);
 
-            IReadOnlyList<PdfRect> rects = activeSelection.Rects;
-            for (int r = 0; r < rects.Count; r++)
+            for (int r = 0; r < selectionRects.Count; r++)
             {
-                Rect dipRect = transform.ToPageRect(rects[r]);
+                Rect dipRect = transform.ToPageRect(selectionRects[r]);
                 if (dipRect.Width <= 0.1 || dipRect.Height <= 0.1)
                 {
                     continue;

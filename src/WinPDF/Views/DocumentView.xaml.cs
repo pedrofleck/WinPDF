@@ -250,7 +250,6 @@ public sealed partial class DocumentView : Page
 
     private readonly DispatcherTimer _touchpadSwipeEndTimer = new() { Interval = TimeSpan.FromMilliseconds(115) };
     private readonly Dictionary<uint, (long PressTick, Point PressPos)> _activeTouchPointers = new();
-    private bool _isTwoFingerTapPollingSubscribed;
     private bool _isTouchDoubleTapZoomedIn;
     private double _zoomBeforeTouchDoubleTap = 1.0;
     private bool _wasFittedBeforeTouchDoubleTap;
@@ -343,11 +342,33 @@ public sealed partial class DocumentView : Page
     private long _lastTouchSelectionCompletedTick;
     private bool _isTouchSelectionHandlesActive;
     private bool _isDraggingSelectionHandle;
+    private bool _isDraggingStartSelectionHandle;
     private uint _handleDragPointerId;
     private PdfPageCanvas? _handleDragTargetCanvas;
     private UIElement? _handleDragElement;
-    private Point _handleGrabOffsetCanvasDip;
-    private Point _lastHandleTargetCanvasDip;
+    private Point _handleGrabOffsetRootDip;
+    private Point _lastHandleTargetRootDip;
+    private long _crossPageSelectionSessionId;
+    private bool _isCrossPageSelectionInFlight;
+    private bool _hasPendingCrossPageSelection;
+    private Point _pendingCrossPageRootPoint;
+    private Point _selDragLastRootPoint = new(-10000, -10000);
+    private PdfPageCanvas? _selDragSourceCanvas;
+    private long _selDragSourceSessionId;
+    private int _selDragAnchorPageIndex = -1;
+    private int _selDragAnchorCharIndex = -1;
+    private System.Numerics.Vector2 _selDragAnchorPdfPt;
+    private PdfSelectionAnchorClamp _selDragClampMode;
+    private int _selDragInitWordPageIndex = -1;
+    private int _selDragInitWordStart = -1;
+    private int _selDragInitWordEnd = -1;
+    private int _selDragLastActivePageIndex = -1;
+    private int _selDragLastActiveCharIndex = -2;
+    private bool _selDragIsTouchMode;
+    private bool _isMouseCrossPageDragActive;
+    private bool _isSelectionAutoScrollSubscribed;
+    private long _lastSelectionAutoScrollTicks;
+    private Point _selectionAutoScrollPointerRoot;
 
     // Stage 3: Touch-Exclusive Assisted Vertical Scroll Scrubber state
     private const double TouchScrollTrackTopMarginDip = 16.0;
@@ -475,6 +496,9 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.TouchSelectionCompleted += OnCanvasTouchSelectionCompleted;
         PdfPageCanvas.TouchDoubleTapZoomRequested += OnCanvasTouchDoubleTapZoomRequested;
         PdfPageCanvas.TouchSelectionDismissRequested += OnCanvasTouchSelectionDismissRequested;
+        PdfPageCanvas.SelectionDragUpdated += OnCanvasSelectionDragUpdated;
+        PdfPageCanvas.SelectionDragCompleted += OnCanvasSelectionDragCompleted;
+        PdfPageCanvas.SelectionDragCanceled += OnCanvasSelectionDragCanceled;
         PdfPageCanvas.IsSingleTouchViewerManipulating = () => _isManipulatingSlideSwipe && _activeTouchPointers.Count <= 1;
 
         Loaded += OnLoaded;
@@ -514,6 +538,12 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.TouchDoubleTapZoomRequested += OnCanvasTouchDoubleTapZoomRequested;
         PdfPageCanvas.TouchSelectionDismissRequested -= OnCanvasTouchSelectionDismissRequested;
         PdfPageCanvas.TouchSelectionDismissRequested += OnCanvasTouchSelectionDismissRequested;
+        PdfPageCanvas.SelectionDragUpdated -= OnCanvasSelectionDragUpdated;
+        PdfPageCanvas.SelectionDragUpdated += OnCanvasSelectionDragUpdated;
+        PdfPageCanvas.SelectionDragCompleted -= OnCanvasSelectionDragCompleted;
+        PdfPageCanvas.SelectionDragCompleted += OnCanvasSelectionDragCompleted;
+        PdfPageCanvas.SelectionDragCanceled -= OnCanvasSelectionDragCanceled;
+        PdfPageCanvas.SelectionDragCanceled += OnCanvasSelectionDragCanceled;
         PdfPageCanvas.IsSingleTouchViewerManipulating = () => _isManipulatingSlideSwipe && _activeTouchPointers.Count <= 1;
         _presentationHideTimer.Tick -= OnPresentationHideTimerTick;
         _presentationHideTimer.Tick += OnPresentationHideTimerTick;
@@ -599,11 +629,19 @@ public sealed partial class DocumentView : Page
         HideTouchScrollScrubberImmediate();
         HideTouchSelectionFlyout();
         CancelInteractiveSlideSwipeImmediate();
+        CancelTouchSelectionHandleDragImmediate();
+        _activeTouchSelectingCanvas = null;
+        _firstTouchPointer = null;
+        _activeTouchPointers.Clear();
+        PdfPageCanvas.IsSingleTouchViewerManipulating = null;
         PdfPageCanvas.TouchSelectionStarted -= OnCanvasTouchSelectionStarted;
         PdfPageCanvas.TouchSelectionEnded -= OnCanvasTouchSelectionEnded;
         PdfPageCanvas.TouchSelectionCompleted -= OnCanvasTouchSelectionCompleted;
         PdfPageCanvas.TouchDoubleTapZoomRequested -= OnCanvasTouchDoubleTapZoomRequested;
         PdfPageCanvas.TouchSelectionDismissRequested -= OnCanvasTouchSelectionDismissRequested;
+        PdfPageCanvas.SelectionDragUpdated -= OnCanvasSelectionDragUpdated;
+        PdfPageCanvas.SelectionDragCompleted -= OnCanvasSelectionDragCompleted;
+        PdfPageCanvas.SelectionDragCanceled -= OnCanvasSelectionDragCanceled;
 
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.SearchFocusRequested -= OnSearchFocusRequested;
@@ -629,6 +667,16 @@ public sealed partial class DocumentView : Page
         _activeTouchpadFingerCount = 0;
         _tpFrameExpectedContacts = 0;
         _activeHybridTouchpadContacts.Clear();
+        CancelTouchHoldOnAllCanvases();
+        if (_activeTouchSelectingCanvas is { } activeSelCanvas)
+        {
+            activeSelCanvas.CancelTouchSelectionAndHold();
+            _activeTouchSelectingCanvas = null;
+        }
+
+        CancelTouchSelectionHandleDragImmediate();
+        _firstTouchPointer = null;
+        _activeTouchPointers.Clear();
         HideTouchScrollScrubberImmediate();
         CancelInteractiveSlideSwipeImmediate();
         StopAutoScroll();
@@ -703,6 +751,11 @@ public sealed partial class DocumentView : Page
         if (targetZoom > 0.05)
         {
             ApplyViewportToCanvas(canvas, targetZoom);
+        }
+
+        if (_isTouchSelectionHandlesActive)
+        {
+            UpdateTouchSelectionHandlesLayout();
         }
     }
 
@@ -806,6 +859,16 @@ public sealed partial class DocumentView : Page
     {
         if (e.PropertyName == nameof(ShellViewModel.CurrentDocument))
         {
+            CancelTouchHoldOnAllCanvases();
+            if (_activeTouchSelectingCanvas is { } activeSelCanvas)
+            {
+                activeSelCanvas.CancelTouchSelectionAndHold();
+                _activeTouchSelectingCanvas = null;
+            }
+
+            CancelTouchSelectionHandleDragImmediate();
+            _firstTouchPointer = null;
+            _activeTouchPointers.Clear();
             CancelInteractiveSlideSwipeImmediate();
             StopAutoScroll();
             SubscribeToDocument(ViewModel.CurrentDocument);
@@ -1207,6 +1270,14 @@ public sealed partial class DocumentView : Page
     {
         _isTouchDoubleTapZoomedIn = false;
         _restoreFitAfterSmoothZoom = false;
+        CancelTouchHoldOnAllCanvases();
+        if (_activeTouchSelectingCanvas is { } activeSelCanvas)
+        {
+            activeSelCanvas.CancelTouchSelectionAndHold();
+            _activeTouchSelectingCanvas = null;
+        }
+
+        CancelTouchSelectionHandleDragImmediate();
         CancelInteractiveSlideSwipeImmediate();
         PdfPageCanvas.ClearSlideBuffer();
         if (_isRestoringFromPresentation || ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
@@ -4707,12 +4778,15 @@ public sealed partial class DocumentView : Page
         SetElementManipulationMode(PrevPageZone, targetMode);
         SetElementManipulationMode(NextPageZone, targetMode);
 
-        foreach (PdfPageCanvas canvas in _activeCanvases.ToArray())
+        foreach (PdfPageCanvas canvas in _activeCanvases)
         {
             canvas.SyncTouchManipulationMode(useCustomSwipeManip);
         }
 
-        SyncCanvasesManipulationInTree(ContinuousPagesRepeater, useCustomSwipeManip);
+        if (_activeCanvases.Count == 0)
+        {
+            SyncCanvasesManipulationInTree(ContinuousPagesRepeater, useCustomSwipeManip);
+        }
     }
 
     private static void SyncCanvasesManipulationInTree(DependencyObject? parent, bool useCustomSwipeManip, bool includeInertia = false)
@@ -5400,7 +5474,7 @@ public sealed partial class DocumentView : Page
     {
         _isTouchSelectionHandlesActive = true;
         UpdateTouchSelectionHandlesLayout();
-        ShowTouchSelectionCopyFlyout(canvas, selection);
+        ShowTouchSelectionCopyFlyout(selection, canvas);
     }
 
     private PdfPageCanvas? FindRealizedCanvasForPage(int pageIndex)
@@ -5466,8 +5540,7 @@ public sealed partial class DocumentView : Page
 
         if (!_isTouchSelectionHandlesActive ||
             ViewModel?.IsPresentationMode == true ||
-            ViewModel?.CurrentDocument?.ActiveSelection is not { HasContent: true } selection ||
-            FindRealizedCanvasForPage(selection.PageIndex) is not { PageInfo: { } pageInfo } canvas)
+            ViewModel?.CurrentDocument?.ActiveSelection is not { HasContent: true } selection)
         {
             if (TouchSelectionHandlesCanvas.Visibility != Visibility.Collapsed)
             {
@@ -5477,33 +5550,71 @@ public sealed partial class DocumentView : Page
             return;
         }
 
+        PdfRect? firstPdf = selection.GetFirstRect(out int startPageIndex);
+        PdfRect? lastPdf = selection.GetLastRect(out int endPageIndex);
+        if (firstPdf is not { } firstPdfRect || lastPdf is not { } lastPdfRect)
+        {
+            TouchSelectionHandlesCanvas.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        double rootW = ScrollViewerContentRoot.ActualWidth > 0
+            ? ScrollViewerContentRoot.ActualWidth
+            : ContinuousScrollViewer.ActualWidth;
+        double rootH = ScrollViewerContentRoot.ActualHeight > 0
+            ? ScrollViewerContentRoot.ActualHeight
+            : ContinuousScrollViewer.ActualHeight;
+
+        bool startVisible = false;
+        bool endVisible = false;
+
         try
         {
-            PageCoordinateTransform pageTransform = PageCoordinateTransform.FromPage(pageInfo, canvas.RotationAngle);
-            GeneralTransform toRoot = canvas.TransformToVisual(ScrollViewerContentRoot);
-
-            Rect firstPageRect = pageTransform.ToPageRect(selection.Rects[0]);
-            Rect lastPageRect = pageTransform.ToPageRect(selection.Rects[selection.Rects.Count - 1]);
-
-            Rect firstRootRect = toRoot.TransformBounds(firstPageRect);
-            Rect lastRootRect = toRoot.TransformBounds(lastPageRect);
-
-            double startStemH = Math.Clamp(firstRootRect.Height, 10.0, 72.0);
-            double endStemH = Math.Clamp(lastRootRect.Height, 10.0, 72.0);
-
-            TouchSelectionStartStem.Height = startStemH;
-            TouchSelectionEndStem.Height = endStemH;
-
-            Canvas.SetLeft(TouchSelectionStartHandle, firstRootRect.Left - 30.0);
-            Canvas.SetTop(TouchSelectionStartHandle, firstRootRect.Bottom - startStemH);
-
-            Canvas.SetLeft(TouchSelectionEndHandle, lastRootRect.Right - 14.0);
-            Canvas.SetTop(TouchSelectionEndHandle, lastRootRect.Bottom - endStemH);
-
-            if (TouchSelectionHandlesCanvas.Visibility != Visibility.Visible)
+            if (FindRealizedCanvasForPage(startPageIndex) is { PageInfo: { } startPageInfo } startCanvas)
             {
-                TouchSelectionHandlesCanvas.Visibility = Visibility.Visible;
+                PageCoordinateTransform startTransform = PageCoordinateTransform.FromPage(startPageInfo, startCanvas.RotationAngle);
+                GeneralTransform startToRoot = startCanvas.TransformToVisual(ScrollViewerContentRoot);
+                Rect firstPageRect = startTransform.ToPageRect(firstPdfRect);
+                Rect firstRootRect = startToRoot.TransformBounds(firstPageRect);
+
+                bool inBounds = rootW <= 0 || rootH <= 0 ||
+                    (firstRootRect.Right >= -8.0 && firstRootRect.Left <= rootW + 8.0 &&
+                     firstRootRect.Bottom >= -8.0 && firstRootRect.Top <= rootH + 8.0);
+                if (inBounds || (_isDraggingSelectionHandle && _isDraggingStartSelectionHandle))
+                {
+                    double startStemH = Math.Clamp(firstRootRect.Height, 10.0, 72.0);
+                    TouchSelectionStartStem.Height = startStemH;
+                    Canvas.SetLeft(TouchSelectionStartHandle, firstRootRect.Left - 32.0);
+                    Canvas.SetTop(TouchSelectionStartHandle, firstRootRect.Bottom - startStemH);
+                    startVisible = true;
+                }
             }
+
+            if (FindRealizedCanvasForPage(endPageIndex) is { PageInfo: { } endPageInfo } endCanvas)
+            {
+                PageCoordinateTransform endTransform = PageCoordinateTransform.FromPage(endPageInfo, endCanvas.RotationAngle);
+                GeneralTransform endToRoot = endCanvas.TransformToVisual(ScrollViewerContentRoot);
+                Rect lastPageRect = endTransform.ToPageRect(lastPdfRect);
+                Rect lastRootRect = endToRoot.TransformBounds(lastPageRect);
+
+                bool inBounds = rootW <= 0 || rootH <= 0 ||
+                    (lastRootRect.Right >= -8.0 && lastRootRect.Left <= rootW + 8.0 &&
+                     lastRootRect.Bottom >= -8.0 && lastRootRect.Top <= rootH + 8.0);
+                if (inBounds || (_isDraggingSelectionHandle && !_isDraggingStartSelectionHandle))
+                {
+                    double endStemH = Math.Clamp(lastRootRect.Height, 10.0, 72.0);
+                    TouchSelectionEndStem.Height = endStemH;
+                    Canvas.SetLeft(TouchSelectionEndHandle, lastRootRect.Right - 2.0);
+                    Canvas.SetTop(TouchSelectionEndHandle, lastRootRect.Bottom - endStemH);
+                    endVisible = true;
+                }
+            }
+
+            TouchSelectionStartHandle.Visibility = startVisible ? Visibility.Visible : Visibility.Collapsed;
+            TouchSelectionEndHandle.Visibility = endVisible ? Visibility.Visible : Visibility.Collapsed;
+            TouchSelectionHandlesCanvas.Visibility = (startVisible || endVisible)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         }
         catch
         {
@@ -5882,8 +5993,21 @@ public sealed partial class DocumentView : Page
     private void BeginTouchSelectionHandleDrag(UIElement? handleElement, bool isStartHandle, PointerRoutedEventArgs e)
     {
         if (handleElement is null ||
-            ViewModel?.CurrentDocument?.ActiveSelection is not { HasContent: true } selection ||
-            FindRealizedCanvasForPage(selection.PageIndex) is not { PageInfo: { } pageInfo } targetCanvas)
+            ScrollViewerContentRoot is null ||
+            ViewModel?.CurrentDocument?.ActiveSelection is not { HasContent: true } selection)
+        {
+            return;
+        }
+
+        PdfRect? firstPdf = selection.GetFirstRect(out int startPageIndex);
+        PdfRect? lastPdf = selection.GetLastRect(out int endPageIndex);
+        if (firstPdf is not { } firstPdfRect || lastPdf is not { } lastPdfRect)
+        {
+            return;
+        }
+
+        int grabbedPageIndex = isStartHandle ? startPageIndex : endPageIndex;
+        if (FindRealizedCanvasForPage(grabbedPageIndex) is not { PageInfo: { } grabbedPageInfo } grabbedCanvas)
         {
             return;
         }
@@ -5892,8 +6016,9 @@ public sealed partial class DocumentView : Page
         _isLastPointerInputTouch = e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Touch;
         _isTouchSelectionHandlesActive = true;
         _isDraggingSelectionHandle = true;
+        _isDraggingStartSelectionHandle = isStartHandle;
         _handleDragPointerId = e.Pointer.PointerId;
-        _handleDragTargetCanvas = targetCanvas;
+        _handleDragTargetCanvas = grabbedCanvas;
         _handleDragElement = handleElement;
         _isTouchSwipeTracking = false;
         _isTouchSwipeEngaged = false;
@@ -5916,57 +6041,87 @@ public sealed partial class DocumentView : Page
         {
         }
 
-        PageCoordinateTransform pageTransform = PageCoordinateTransform.FromPage(pageInfo, targetCanvas.RotationAngle);
-        PdfRect firstPdfRect = selection.Rects[0];
-        PdfRect lastPdfRect = selection.Rects[selection.Rects.Count - 1];
-
+        int fixedAnchorPageIndex;
         int fixedAnchorCharIndex;
         System.Numerics.Vector2 fixedAnchorPdfPt;
-        Rect grabbedPageDipRect;
+        PdfSelectionAnchorClamp clampMode;
 
         if (isStartHandle)
         {
-            fixedAnchorCharIndex = selection.EndCharIndex;
+            fixedAnchorPageIndex = selection.LastPageIndex;
+            fixedAnchorCharIndex = selection.LastPageEndCharIndex;
             fixedAnchorPdfPt = new System.Numerics.Vector2(
                 (lastPdfRect.Left + lastPdfRect.Right) * 0.5f,
                 (lastPdfRect.Bottom + lastPdfRect.Top) * 0.5f);
-            grabbedPageDipRect = pageTransform.ToPageRect(firstPdfRect);
+            clampMode = PdfSelectionAnchorClamp.AtOrBeforeAnchor;
         }
         else
         {
-            fixedAnchorCharIndex = selection.StartCharIndex;
+            fixedAnchorPageIndex = selection.StartPageIndex;
+            fixedAnchorCharIndex = selection.FirstPageStartCharIndex;
             fixedAnchorPdfPt = new System.Numerics.Vector2(
                 (firstPdfRect.Left + firstPdfRect.Right) * 0.5f,
                 (firstPdfRect.Bottom + firstPdfRect.Top) * 0.5f);
-            grabbedPageDipRect = pageTransform.ToPageRect(lastPdfRect);
+            clampMode = PdfSelectionAnchorClamp.AtOrAfterAnchor;
         }
 
+        PageCoordinateTransform grabbedTransform = PageCoordinateTransform.FromPage(grabbedPageInfo, grabbedCanvas.RotationAngle);
+        Rect grabbedPageDipRect = grabbedTransform.ToPageRect(isStartHandle ? firstPdfRect : lastPdfRect);
         Point grabbedCharCenterDip = new(
-            isStartHandle ? (grabbedPageDipRect.Left + Math.Min(4.0, grabbedPageDipRect.Width * 0.5)) : (grabbedPageDipRect.Right - Math.Min(4.0, grabbedPageDipRect.Width * 0.5)),
+            isStartHandle
+                ? (grabbedPageDipRect.Left + Math.Min(4.0, grabbedPageDipRect.Width * 0.5))
+                : (grabbedPageDipRect.Right - Math.Min(4.0, grabbedPageDipRect.Width * 0.5)),
             (grabbedPageDipRect.Top + grabbedPageDipRect.Bottom) * 0.5);
-        Point pointerCanvasDip = e.GetCurrentPoint(targetCanvas).Position;
-        _handleGrabOffsetCanvasDip = new Point(
-            grabbedCharCenterDip.X - pointerCanvasDip.X,
-            grabbedCharCenterDip.Y - pointerCanvasDip.Y);
-        _lastHandleTargetCanvasDip = grabbedCharCenterDip;
 
-        targetCanvas.BeginHandleSelectionDrag(fixedAnchorCharIndex, fixedAnchorPdfPt);
+        Point grabbedCharCenterRoot;
+        try
+        {
+            grabbedCharCenterRoot = grabbedCanvas.TransformToVisual(ScrollViewerContentRoot).TransformPoint(grabbedCharCenterDip);
+        }
+        catch
+        {
+            grabbedCharCenterRoot = e.GetCurrentPoint(ScrollViewerContentRoot).Position;
+        }
+
+        Point pointerRoot = e.GetCurrentPoint(ScrollViewerContentRoot).Position;
+        _handleGrabOffsetRootDip = new Point(
+            grabbedCharCenterRoot.X - pointerRoot.X,
+            grabbedCharCenterRoot.Y - pointerRoot.Y);
+        _lastHandleTargetRootDip = grabbedCharCenterRoot;
+
+        _crossPageSelectionSessionId++;
+        _isCrossPageSelectionInFlight = false;
+        _hasPendingCrossPageSelection = false;
+        _selDragSourceCanvas = grabbedCanvas;
+        _selDragSourceSessionId = 0;
+        _selDragAnchorPageIndex = fixedAnchorPageIndex;
+        _selDragAnchorCharIndex = fixedAnchorCharIndex;
+        _selDragAnchorPdfPt = fixedAnchorPdfPt;
+        _selDragClampMode = clampMode;
+        _selDragInitWordPageIndex = -1;
+        _selDragInitWordStart = -1;
+        _selDragInitWordEnd = -1;
+        _selDragLastActivePageIndex = grabbedPageIndex;
+        _selDragLastActiveCharIndex = isStartHandle ? selection.FirstPageStartCharIndex : selection.LastPageEndCharIndex;
+        _selDragLastRootPoint = grabbedCharCenterRoot;
+        _selDragIsTouchMode = true;
     }
 
     private void OnTouchSelectionHandlePointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (!_isDraggingSelectionHandle || e.Pointer.PointerId != _handleDragPointerId || _handleDragTargetCanvas is null)
+        if (!_isDraggingSelectionHandle || e.Pointer.PointerId != _handleDragPointerId || ScrollViewerContentRoot is null)
         {
             return;
         }
 
         e.Handled = true;
-        Point pointerCanvasDip = e.GetCurrentPoint(_handleDragTargetCanvas).Position;
-        Point targetCharDip = new(
-            pointerCanvasDip.X + _handleGrabOffsetCanvasDip.X,
-            pointerCanvasDip.Y + _handleGrabOffsetCanvasDip.Y);
-        _lastHandleTargetCanvasDip = targetCharDip;
-        _handleDragTargetCanvas.UpdateHandleSelectionDrag(targetCharDip);
+        Point pointerRoot = e.GetCurrentPoint(ScrollViewerContentRoot).Position;
+        Point targetRoot = new(
+            pointerRoot.X + _handleGrabOffsetRootDip.X,
+            pointerRoot.Y + _handleGrabOffsetRootDip.Y);
+        _lastHandleTargetRootDip = targetRoot;
+        UpdateSelectionEdgeAutoScroll(pointerRoot);
+        RequestCrossPageSelectionUpdate(targetRoot, force: false);
     }
 
     private void OnTouchSelectionHandlePointerReleased(object sender, PointerRoutedEventArgs e)
@@ -5977,12 +6132,12 @@ public sealed partial class DocumentView : Page
         }
 
         e.Handled = true;
-        if (_handleDragTargetCanvas is not null)
+        if (ScrollViewerContentRoot is not null)
         {
-            Point pointerCanvasDip = e.GetCurrentPoint(_handleDragTargetCanvas).Position;
-            _lastHandleTargetCanvasDip = new Point(
-                pointerCanvasDip.X + _handleGrabOffsetCanvasDip.X,
-                pointerCanvasDip.Y + _handleGrabOffsetCanvasDip.Y);
+            Point pointerRoot = e.GetCurrentPoint(ScrollViewerContentRoot).Position;
+            _lastHandleTargetRootDip = new Point(
+                pointerRoot.X + _handleGrabOffsetRootDip.X,
+                pointerRoot.Y + _handleGrabOffsetRootDip.Y);
         }
 
         FinishTouchSelectionHandleDrag(e.Pointer);
@@ -6011,13 +6166,17 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        PdfPageCanvas? targetCanvas = _handleDragTargetCanvas;
+        StopSelectionEdgeAutoScroll();
+
         UIElement? handleElem = _handleDragElement;
-        Point finalTargetDip = _lastHandleTargetCanvasDip;
+        Point finalTargetRoot = _lastHandleTargetRootDip;
+        long activeSession = _crossPageSelectionSessionId;
 
         _isDraggingSelectionHandle = false;
         _handleDragTargetCanvas = null;
         _handleDragElement = null;
+        _selDragSourceCanvas = null;
+        _selDragSourceSessionId = 0;
 
         if (handleElem is not null && pointerToRelease is not null)
         {
@@ -6033,18 +6192,620 @@ public sealed partial class DocumentView : Page
         SyncPagedScrollViewerModes();
         UpdateTouchSelectionHandlesLayout();
 
-        if (targetCanvas is not null)
+        _ = FinalizeCrossPageSelectionAsync(finalTargetRoot, activeSession, showTouchFlyout: true);
+    }
+
+    private void CancelTouchSelectionHandleDragImmediate()
+    {
+        StopSelectionEdgeAutoScroll();
+        _crossPageSelectionSessionId++;
+        _isCrossPageSelectionInFlight = false;
+        _hasPendingCrossPageSelection = false;
+        _isDraggingSelectionHandle = false;
+        _isMouseCrossPageDragActive = false;
+        _handleDragTargetCanvas = null;
+        _handleDragElement = null;
+        _selDragSourceCanvas = null;
+        _selDragSourceSessionId = 0;
+        _isTouchSelectionHandlesActive = false;
+        HideTouchSelectionFlyout();
+        if (TouchSelectionHandlesCanvas is not null)
         {
-            targetCanvas.EndHandleSelectionDrag(finalTargetDip);
+            TouchSelectionHandlesCanvas.Visibility = Visibility.Collapsed;
         }
     }
 
-    private void ShowTouchSelectionCopyFlyout(PdfPageCanvas canvas, PdfTextSelection selection)
+    private void OnCanvasSelectionDragUpdated(
+        PdfPageCanvas sourceCanvas,
+        long sourceSessionId,
+        int anchorCharIndex,
+        System.Numerics.Vector2 anchorPdfPt,
+        Point pointerCanvasDip,
+        bool isTouchHoldDrag,
+        int initialWordPageIndex,
+        int initialWordStart,
+        int initialWordEnd)
+    {
+        if (_isDraggingSelectionHandle || ScrollViewerContentRoot is null || sourceCanvas.PageInfo is not { } srcPageInfo)
+        {
+            return;
+        }
+
+        Point pointerRoot;
+        try
+        {
+            pointerRoot = sourceCanvas.TransformToVisual(ScrollViewerContentRoot).TransformPoint(pointerCanvasDip);
+        }
+        catch
+        {
+            return;
+        }
+
+        bool isNewSession = !ReferenceEquals(_selDragSourceCanvas, sourceCanvas) ||
+                            _selDragSourceSessionId != sourceSessionId ||
+                            _selDragAnchorPageIndex != srcPageInfo.Index;
+
+        if (isNewSession)
+        {
+            _crossPageSelectionSessionId++;
+            _isCrossPageSelectionInFlight = false;
+            _hasPendingCrossPageSelection = false;
+            _selDragSourceCanvas = sourceCanvas;
+            _selDragSourceSessionId = sourceSessionId;
+            _selDragAnchorPageIndex = srcPageInfo.Index;
+            _selDragAnchorCharIndex = anchorCharIndex;
+            _selDragAnchorPdfPt = anchorPdfPt;
+            _selDragClampMode = PdfSelectionAnchorClamp.None;
+            _selDragInitWordPageIndex = isTouchHoldDrag ? initialWordPageIndex : -1;
+            _selDragInitWordStart = isTouchHoldDrag ? initialWordStart : -1;
+            _selDragInitWordEnd = isTouchHoldDrag ? initialWordEnd : -1;
+            _selDragLastActivePageIndex = -1;
+            _selDragLastActiveCharIndex = -2;
+            _selDragIsTouchMode = isTouchHoldDrag;
+            _isMouseCrossPageDragActive = !isTouchHoldDrag;
+
+            UpdateSelectionEdgeAutoScroll(pointerRoot);
+            RequestCrossPageSelectionUpdate(pointerRoot, force: true);
+            return;
+        }
+
+        if (_selDragAnchorCharIndex < 0 && anchorCharIndex >= 0)
+        {
+            _selDragAnchorCharIndex = anchorCharIndex;
+        }
+
+        if (isTouchHoldDrag &&
+            initialWordStart >= 0 &&
+            initialWordEnd >= initialWordStart &&
+            (_selDragInitWordStart != initialWordStart || _selDragInitWordEnd != initialWordEnd))
+        {
+            _selDragInitWordPageIndex = initialWordPageIndex;
+            _selDragInitWordStart = initialWordStart;
+            _selDragInitWordEnd = initialWordEnd;
+        }
+
+        UpdateSelectionEdgeAutoScroll(pointerRoot);
+        RequestCrossPageSelectionUpdate(pointerRoot, force: false);
+    }
+
+    private void OnCanvasSelectionDragCompleted(
+        PdfPageCanvas sourceCanvas,
+        long sourceSessionId,
+        int anchorCharIndex,
+        System.Numerics.Vector2 anchorPdfPt,
+        Point pointerCanvasDip,
+        bool isTouchHoldDrag,
+        int initialWordPageIndex,
+        int initialWordStart,
+        int initialWordEnd)
+    {
+        StopSelectionEdgeAutoScroll();
+        _isMouseCrossPageDragActive = false;
+
+        if (_isDraggingSelectionHandle || ScrollViewerContentRoot is null || sourceCanvas.PageInfo is not { } srcPageInfo)
+        {
+            return;
+        }
+
+        Point pointerRoot;
+        try
+        {
+            pointerRoot = sourceCanvas.TransformToVisual(ScrollViewerContentRoot).TransformPoint(pointerCanvasDip);
+        }
+        catch
+        {
+            return;
+        }
+
+        bool isNewSession = !ReferenceEquals(_selDragSourceCanvas, sourceCanvas) ||
+                            _selDragSourceSessionId != sourceSessionId ||
+                            _selDragAnchorPageIndex != srcPageInfo.Index;
+
+        if (isNewSession)
+        {
+            _crossPageSelectionSessionId++;
+            _isCrossPageSelectionInFlight = false;
+            _hasPendingCrossPageSelection = false;
+            _selDragAnchorPageIndex = srcPageInfo.Index;
+            _selDragAnchorCharIndex = anchorCharIndex;
+            _selDragAnchorPdfPt = anchorPdfPt;
+            _selDragClampMode = PdfSelectionAnchorClamp.None;
+            _selDragInitWordPageIndex = isTouchHoldDrag ? initialWordPageIndex : -1;
+            _selDragInitWordStart = isTouchHoldDrag ? initialWordStart : -1;
+            _selDragInitWordEnd = isTouchHoldDrag ? initialWordEnd : -1;
+            _selDragLastActivePageIndex = -1;
+            _selDragLastActiveCharIndex = -2;
+            _selDragIsTouchMode = isTouchHoldDrag;
+        }
+        else
+        {
+            if (_selDragAnchorCharIndex < 0 && anchorCharIndex >= 0)
+            {
+                _selDragAnchorCharIndex = anchorCharIndex;
+            }
+
+            if (isTouchHoldDrag &&
+                initialWordStart >= 0 &&
+                initialWordEnd >= initialWordStart)
+            {
+                _selDragInitWordPageIndex = initialWordPageIndex;
+                _selDragInitWordStart = initialWordStart;
+                _selDragInitWordEnd = initialWordEnd;
+            }
+        }
+
+        long activeSession = _crossPageSelectionSessionId;
+        _selDragSourceCanvas = null;
+        _selDragSourceSessionId = 0;
+
+        _ = FinalizeCrossPageSelectionAsync(pointerRoot, activeSession, showTouchFlyout: isTouchHoldDrag);
+    }
+
+    private void OnCanvasSelectionDragCanceled(PdfPageCanvas sourceCanvas)
+    {
+        if (ReferenceEquals(_selDragSourceCanvas, sourceCanvas))
+        {
+            StopSelectionEdgeAutoScroll();
+            _crossPageSelectionSessionId++;
+            _isCrossPageSelectionInFlight = false;
+            _hasPendingCrossPageSelection = false;
+            _isMouseCrossPageDragActive = false;
+            _selDragSourceCanvas = null;
+            _selDragSourceSessionId = 0;
+        }
+    }
+
+    private bool TryResolvePagePointFromRoot(
+        Point rootPos,
+        int fallbackPageIndex,
+        out int targetPageIndex,
+        out System.Numerics.Vector2 targetPdfPt)
+    {
+        targetPageIndex = fallbackPageIndex;
+        targetPdfPt = System.Numerics.Vector2.Zero;
+
+        if (ScrollViewerContentRoot is null)
+        {
+            return false;
+        }
+
+        bool isDoublePage = ViewModel?.CurrentDocument is { IsDoublePage: true } && ViewModel.IsPresentationMode != true;
+        PdfPageCanvas? bestCanvas = null;
+        double bestScore = double.MaxValue;
+
+        foreach (PdfPageCanvas canvas in _activeCanvases)
+        {
+            if (canvas.IsSwipePreview || !canvas.IsLoaded || canvas.PageInfo is not { } pageInfo)
+            {
+                continue;
+            }
+
+            double cw = canvas.ActualWidth > 0 ? canvas.ActualWidth : canvas.Width;
+            double ch = canvas.ActualHeight > 0 ? canvas.ActualHeight : canvas.Height;
+            if (cw <= 0 || ch <= 0)
+            {
+                continue;
+            }
+
+            Rect rootBounds;
+            try
+            {
+                rootBounds = canvas.TransformToVisual(ScrollViewerContentRoot).TransformBounds(new Rect(0, 0, cw, ch));
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (rootPos.X >= rootBounds.Left && rootPos.X <= rootBounds.Right &&
+                rootPos.Y >= rootBounds.Top && rootPos.Y <= rootBounds.Bottom)
+            {
+                try
+                {
+                    Point localPt = ScrollViewerContentRoot.TransformToVisual(canvas).TransformPoint(rootPos);
+                    Point clamped = new(Math.Clamp(localPt.X, 0.0, cw), Math.Clamp(localPt.Y, 0.0, ch));
+                    targetPageIndex = pageInfo.Index;
+                    targetPdfPt = canvas.ToPdfPoint(clamped);
+                    return true;
+                }
+                catch
+                {
+                    continue;
+                }
+            }
+
+            double dx = rootPos.X < rootBounds.Left
+                ? (rootBounds.Left - rootPos.X)
+                : (rootPos.X > rootBounds.Right ? (rootPos.X - rootBounds.Right) : 0.0);
+            double dy = rootPos.Y < rootBounds.Top
+                ? (rootBounds.Top - rootPos.Y)
+                : (rootPos.Y > rootBounds.Bottom ? (rootPos.Y - rootBounds.Bottom) : 0.0);
+            double score = isDoublePage ? ((dy * dy) + (dx * dx)) : ((dy * dy * 4.0) + (dx * dx));
+            if (score < bestScore)
+            {
+                bestScore = score;
+                bestCanvas = canvas;
+            }
+        }
+
+        if (bestCanvas is null && fallbackPageIndex >= 0)
+        {
+            bestCanvas = FindRealizedCanvasForPage(fallbackPageIndex);
+        }
+
+        if (bestCanvas is not null && bestCanvas.PageInfo is { } bestInfo)
+        {
+            double bw = bestCanvas.ActualWidth > 0 ? bestCanvas.ActualWidth : bestCanvas.Width;
+            double bh = bestCanvas.ActualHeight > 0 ? bestCanvas.ActualHeight : bestCanvas.Height;
+            if (bw > 0 && bh > 0)
+            {
+                try
+                {
+                    Point localPt = ScrollViewerContentRoot.TransformToVisual(bestCanvas).TransformPoint(rootPos);
+                    Point clamped = new(Math.Clamp(localPt.X, 0.0, bw), Math.Clamp(localPt.Y, 0.0, bh));
+                    targetPageIndex = bestInfo.Index;
+                    targetPdfPt = bestCanvas.ToPdfPoint(clamped);
+                    return true;
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private void RequestCrossPageSelectionUpdate(Point rootPos, bool force)
+    {
+        if (!force)
+        {
+            double dx = rootPos.X - _selDragLastRootPoint.X;
+            double dy = rootPos.Y - _selDragLastRootPoint.Y;
+            if (((dx * dx) + (dy * dy)) < 1.0)
+            {
+                return;
+            }
+        }
+
+        _selDragLastRootPoint = rootPos;
+
+        if (_isCrossPageSelectionInFlight)
+        {
+            _pendingCrossPageRootPoint = rootPos;
+            _hasPendingCrossPageSelection = true;
+            return;
+        }
+
+        _ = RunCrossPageSelectionLoopAsync(rootPos, _crossPageSelectionSessionId);
+    }
+
+    private async Task RunCrossPageSelectionLoopAsync(Point initialRootPos, long sessionId)
+    {
+        _isCrossPageSelectionInFlight = true;
+        Point currentRoot = initialRootPos;
+
+        try
+        {
+            while (_crossPageSelectionSessionId == sessionId &&
+                   ViewModel?.CurrentDocument is { DocumentId: > 0 } doc)
+            {
+                long docId = doc.DocumentId;
+                int anchorPage = _selDragAnchorPageIndex;
+                int anchorChar = _selDragAnchorCharIndex;
+                System.Numerics.Vector2 anchorPdf = _selDragAnchorPdfPt;
+                PdfSelectionAnchorClamp clampMode = _selDragClampMode;
+                int initWordPage = _selDragInitWordPageIndex;
+                int initWordStart = _selDragInitWordStart;
+                int initWordEnd = _selDragInitWordEnd;
+                int prevActivePage = _selDragLastActivePageIndex;
+                int prevActiveChar = _selDragLastActiveCharIndex;
+
+                if (!TryResolvePagePointFromRoot(currentRoot, anchorPage, out int activePage, out System.Numerics.Vector2 activePdf))
+                {
+                    break;
+                }
+
+                PdfTextSelection? updated = await _pdfService.SelectTextAcrossPagesAsync(
+                    docId,
+                    anchorPage,
+                    anchorChar,
+                    anchorPdf.X,
+                    anchorPdf.Y,
+                    activePage,
+                    activePdf.X,
+                    activePdf.Y,
+                    clampMode,
+                    initWordPage,
+                    initWordStart,
+                    initWordEnd,
+                    prevActivePage,
+                    prevActiveChar);
+
+                if (_crossPageSelectionSessionId != sessionId ||
+                    !ReferenceEquals(ViewModel?.CurrentDocument, doc) ||
+                    doc.DocumentId != docId)
+                {
+                    break;
+                }
+
+                if (updated is { HasContent: true })
+                {
+                    if (clampMode == PdfSelectionAnchorClamp.None &&
+                        initWordPage < 0 &&
+                        updated.AnchorCharIndex >= 0)
+                    {
+                        _selDragAnchorCharIndex = updated.AnchorCharIndex;
+                    }
+
+                    _selDragLastActivePageIndex = updated.ActivePageIndex >= 0
+                        ? updated.ActivePageIndex
+                        : updated.LastPageIndex;
+                    _selDragLastActiveCharIndex = updated.ActiveCharIndex >= 0
+                        ? updated.ActiveCharIndex
+                        : updated.LastPageEndCharIndex;
+                    doc.SetSelection(updated);
+                }
+
+                if (_hasPendingCrossPageSelection && _crossPageSelectionSessionId == sessionId)
+                {
+                    currentRoot = _pendingCrossPageRootPoint;
+                    _hasPendingCrossPageSelection = false;
+                }
+                else
+                {
+                    break;
+                }
+            }
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _isCrossPageSelectionInFlight = false;
+            _hasPendingCrossPageSelection = false;
+        }
+    }
+
+    private async Task FinalizeCrossPageSelectionAsync(Point finalRootPos, long sessionId, bool showTouchFlyout)
+    {
+        try
+        {
+            if (ViewModel?.CurrentDocument is not { DocumentId: > 0 } doc ||
+                _crossPageSelectionSessionId != sessionId)
+            {
+                return;
+            }
+
+            long docId = doc.DocumentId;
+            int anchorPage = _selDragAnchorPageIndex;
+            int anchorChar = _selDragAnchorCharIndex;
+            System.Numerics.Vector2 anchorPdf = _selDragAnchorPdfPt;
+            PdfSelectionAnchorClamp clampMode = _selDragClampMode;
+            int initWordPage = _selDragInitWordPageIndex;
+            int initWordStart = _selDragInitWordStart;
+            int initWordEnd = _selDragInitWordEnd;
+
+            if (!TryResolvePagePointFromRoot(finalRootPos, anchorPage, out int activePage, out System.Numerics.Vector2 activePdf))
+            {
+                return;
+            }
+
+            PdfTextSelection? updated = await _pdfService.SelectTextAcrossPagesAsync(
+                docId,
+                anchorPage,
+                anchorChar,
+                anchorPdf.X,
+                anchorPdf.Y,
+                activePage,
+                activePdf.X,
+                activePdf.Y,
+                clampMode,
+                initWordPage,
+                initWordStart,
+                initWordEnd,
+                -1,
+                -2);
+
+            if (_crossPageSelectionSessionId != sessionId ||
+                !ReferenceEquals(ViewModel?.CurrentDocument, doc) ||
+                doc.DocumentId != docId)
+            {
+                return;
+            }
+
+            PdfTextSelection? finalSel = updated is { HasContent: true }
+                ? updated
+                : doc.ActiveSelection;
+
+            if (updated is { HasContent: true })
+            {
+                doc.SetSelection(updated);
+            }
+
+            if (showTouchFlyout && finalSel is { HasContent: true })
+            {
+                _isTouchSelectionHandlesActive = true;
+                UpdateTouchSelectionHandlesLayout();
+                ShowTouchSelectionCopyFlyout(finalSel);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private void UpdateSelectionEdgeAutoScroll(Point pointerRoot)
+    {
+        _selectionAutoScrollPointerRoot = pointerRoot;
+
+        if (ScrollViewerContentRoot is null ||
+            ContinuousScrollViewer is null ||
+            ViewModel?.IsPresentationMode == true ||
+            ViewModel?.CurrentDocument is not { IsContinuous: true } ||
+            ContinuousScrollViewer.ScrollableHeight <= 1.0 ||
+            (!_isDraggingSelectionHandle && _activeTouchSelectingCanvas is not { IsTouchSelecting: true } && !_isMouseCrossPageDragActive))
+        {
+            StopSelectionEdgeAutoScroll();
+            return;
+        }
+
+        double rootH = ScrollViewerContentRoot.ActualHeight > 0
+            ? ScrollViewerContentRoot.ActualHeight
+            : ContinuousScrollViewer.ActualHeight;
+        if (rootH <= 96.0)
+        {
+            StopSelectionEdgeAutoScroll();
+            return;
+        }
+
+        const double edgeZoneDip = 48.0;
+        bool inTopZone = pointerRoot.Y < edgeZoneDip && ContinuousScrollViewer.VerticalOffset > 0.5;
+        bool inBottomZone = pointerRoot.Y > (rootH - edgeZoneDip) &&
+                            ContinuousScrollViewer.VerticalOffset < (ContinuousScrollViewer.ScrollableHeight - 0.5);
+
+        if (inTopZone || inBottomZone)
+        {
+            if (!_isSelectionAutoScrollSubscribed)
+            {
+                _lastSelectionAutoScrollTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+                CompositionTarget.Rendering += OnSelectionEdgeAutoScrollRendering;
+                _isSelectionAutoScrollSubscribed = true;
+            }
+        }
+        else
+        {
+            StopSelectionEdgeAutoScroll();
+        }
+    }
+
+    private void StopSelectionEdgeAutoScroll()
+    {
+        if (_isSelectionAutoScrollSubscribed)
+        {
+            CompositionTarget.Rendering -= OnSelectionEdgeAutoScrollRendering;
+            _isSelectionAutoScrollSubscribed = false;
+        }
+    }
+
+    private void OnSelectionEdgeAutoScrollRendering(object? sender, object e)
+    {
+        if (ScrollViewerContentRoot is null ||
+            ContinuousScrollViewer is null ||
+            ViewModel?.IsPresentationMode == true ||
+            ViewModel?.CurrentDocument is not { IsContinuous: true } doc ||
+            ContinuousScrollViewer.ScrollableHeight <= 1.0 ||
+            (!_isDraggingSelectionHandle && _activeTouchSelectingCanvas is not { IsTouchSelecting: true } && !_isMouseCrossPageDragActive))
+        {
+            StopSelectionEdgeAutoScroll();
+            return;
+        }
+
+        double rootH = ScrollViewerContentRoot.ActualHeight > 0
+            ? ScrollViewerContentRoot.ActualHeight
+            : ContinuousScrollViewer.ActualHeight;
+        if (rootH <= 96.0)
+        {
+            StopSelectionEdgeAutoScroll();
+            return;
+        }
+
+        long nowTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        double dt = (double)(nowTicks - _lastSelectionAutoScrollTicks) / System.Diagnostics.Stopwatch.Frequency;
+        _lastSelectionAutoScrollTicks = nowTicks;
+        dt = Math.Clamp(dt, 0.004, 0.050);
+
+        const double edgeZoneDip = 48.0;
+        double py = _selectionAutoScrollPointerRoot.Y;
+        double intensity;
+        int direction;
+
+        if (py < edgeZoneDip)
+        {
+            direction = -1;
+            intensity = Math.Clamp((edgeZoneDip - py) / edgeZoneDip, 0.05, 1.0);
+        }
+        else if (py > rootH - edgeZoneDip)
+        {
+            direction = 1;
+            intensity = Math.Clamp((py - (rootH - edgeZoneDip)) / edgeZoneDip, 0.05, 1.0);
+        }
+        else
+        {
+            StopSelectionEdgeAutoScroll();
+            return;
+        }
+
+        double curV = ContinuousScrollViewer.VerticalOffset;
+        double maxV = ContinuousScrollViewer.ScrollableHeight;
+        double speedDipPerSec = 140.0 + (420.0 * intensity);
+        double nextV = Math.Clamp(curV + (direction * speedDipPerSec * dt), 0.0, maxV);
+        if (Math.Abs(nextV - curV) < 0.25)
+        {
+            StopSelectionEdgeAutoScroll();
+            return;
+        }
+
+        if (ContinuousScrollViewer.VerticalScrollMode != ScrollMode.Enabled)
+        {
+            ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Enabled;
+        }
+
+        ContinuousScrollViewer.ChangeView(null, nextV, null, disableAnimation: true);
+        if (_activeTouchSelectingCanvas is { IsTouchSelecting: true } || _isDraggingSelectionHandle)
+        {
+            ContinuousScrollViewer.VerticalScrollMode = ScrollMode.Disabled;
+        }
+
+        doc.LastVerticalOffset = nextV;
+        SyncScrollMetricsFromVerticalOffset(nextV);
+        ScheduleViewportUpdate();
+
+        Point targetRoot = _isDraggingSelectionHandle
+            ? new Point(
+                _selectionAutoScrollPointerRoot.X + _handleGrabOffsetRootDip.X,
+                _selectionAutoScrollPointerRoot.Y + _handleGrabOffsetRootDip.Y)
+            : _selectionAutoScrollPointerRoot;
+
+        if (_isDraggingSelectionHandle)
+        {
+            _lastHandleTargetRootDip = targetRoot;
+        }
+
+        RequestCrossPageSelectionUpdate(targetRoot, force: true);
+
+        if (_isTouchSelectionHandlesActive)
+        {
+            UpdateTouchSelectionHandlesLayout();
+        }
+    }
+
+    private void ShowTouchSelectionCopyFlyout(PdfTextSelection selection, PdfPageCanvas? fallbackCanvas = null)
     {
         if (TouchSelectionCommandBarFlyout is null ||
             ScrollViewerContentRoot is null ||
             !selection.HasContent ||
-            canvas.PageInfo is not { } pageInfo ||
             ViewModel?.IsPresentationMode == true)
         {
             return;
@@ -6052,9 +6813,6 @@ public sealed partial class DocumentView : Page
 
         try
         {
-            PageCoordinateTransform pageTransform = PageCoordinateTransform.FromPage(pageInfo, canvas.RotationAngle);
-            GeneralTransform toRoot = canvas.TransformToVisual(ScrollViewerContentRoot);
-
             double rootW = ScrollViewerContentRoot.ActualWidth;
             double rootH = ScrollViewerContentRoot.ActualHeight;
             if (rootW <= 0 || rootH <= 0)
@@ -6062,40 +6820,59 @@ public sealed partial class DocumentView : Page
                 return;
             }
 
-            double minX = double.MaxValue;
-            double maxX = double.MinValue;
-            double minY = double.MaxValue;
-            double maxY = double.MinValue;
+            double visMinX = double.MaxValue;
+            double visMaxX = double.MinValue;
+            double visMinY = double.MaxValue;
+            double visMaxY = double.MinValue;
             bool hasVisibleRect = false;
 
-            for (int i = 0; i < selection.Rects.Count; i++)
+            double allMinX = double.MaxValue;
+            double allMaxX = double.MinValue;
+            double allMinY = double.MaxValue;
+            double allMaxY = double.MinValue;
+
+            int pageCount = selection.Pages is { Count: > 0 } ? selection.Pages.Count : 1;
+            for (int p = 0; p < pageCount; p++)
             {
-                Rect pageDipRect = pageTransform.ToPageRect(selection.Rects[i]);
-                Rect rootRect = toRoot.TransformBounds(pageDipRect);
-                if (rootRect.Right < 0 || rootRect.Left > rootW || rootRect.Bottom < 0 || rootRect.Top > rootH)
+                int pageIndex = selection.Pages is { Count: > 0 } ? selection.Pages[p].PageIndex : selection.PageIndex;
+                IReadOnlyList<PdfRect> rects = selection.Pages is { Count: > 0 } ? selection.Pages[p].Rects : selection.Rects;
+                PdfPageCanvas? canvas = FindRealizedCanvasForPage(pageIndex) ??
+                    (fallbackCanvas?.PageInfo?.Index == pageIndex ? fallbackCanvas : null);
+                if (canvas?.PageInfo is not { } pageInfo)
                 {
                     continue;
                 }
 
-                hasVisibleRect = true;
-                minX = Math.Min(minX, rootRect.Left);
-                maxX = Math.Max(maxX, rootRect.Right);
-                minY = Math.Min(minY, rootRect.Top);
-                maxY = Math.Max(maxY, rootRect.Bottom);
-            }
+                PageCoordinateTransform pageTransform = PageCoordinateTransform.FromPage(pageInfo, canvas.RotationAngle);
+                GeneralTransform toRoot = canvas.TransformToVisual(ScrollViewerContentRoot);
 
-            if (!hasVisibleRect)
-            {
-                for (int i = 0; i < selection.Rects.Count; i++)
+                for (int i = 0; i < rects.Count; i++)
                 {
-                    Rect pageDipRect = pageTransform.ToPageRect(selection.Rects[i]);
+                    Rect pageDipRect = pageTransform.ToPageRect(rects[i]);
                     Rect rootRect = toRoot.TransformBounds(pageDipRect);
-                    minX = Math.Min(minX, rootRect.Left);
-                    maxX = Math.Max(maxX, rootRect.Right);
-                    minY = Math.Min(minY, rootRect.Top);
-                    maxY = Math.Max(maxY, rootRect.Bottom);
+
+                    allMinX = Math.Min(allMinX, rootRect.Left);
+                    allMaxX = Math.Max(allMaxX, rootRect.Right);
+                    allMinY = Math.Min(allMinY, rootRect.Top);
+                    allMaxY = Math.Max(allMaxY, rootRect.Bottom);
+
+                    if (rootRect.Right < 0 || rootRect.Left > rootW || rootRect.Bottom < 0 || rootRect.Top > rootH)
+                    {
+                        continue;
+                    }
+
+                    hasVisibleRect = true;
+                    visMinX = Math.Min(visMinX, rootRect.Left);
+                    visMaxX = Math.Max(visMaxX, rootRect.Right);
+                    visMinY = Math.Min(visMinY, rootRect.Top);
+                    visMaxY = Math.Max(visMaxY, rootRect.Bottom);
                 }
             }
+
+            double minX = hasVisibleRect ? visMinX : allMinX;
+            double maxX = hasVisibleRect ? visMaxX : allMaxX;
+            double minY = hasVisibleRect ? visMinY : allMinY;
+            double maxY = hasVisibleRect ? visMaxY : allMaxY;
 
             if (minX > maxX || minY > maxY)
             {
@@ -6157,7 +6934,7 @@ public sealed partial class DocumentView : Page
 
     private void CancelTouchHoldOnAllCanvases()
     {
-        foreach (PdfPageCanvas canvas in _activeCanvases.ToArray())
+        foreach (PdfPageCanvas canvas in _activeCanvases)
         {
             if (canvas.IsTouchWaitingForHold)
             {
@@ -6207,20 +6984,6 @@ public sealed partial class DocumentView : Page
         }
 
         return false;
-    }
-
-    private void StopTwoFingerTapPolling()
-    {
-        if (_isTwoFingerTapPollingSubscribed)
-        {
-            CompositionTarget.Rendering -= OnTwoFingerTapPollingRendering;
-            _isTwoFingerTapPollingSubscribed = false;
-        }
-    }
-
-    private void OnTwoFingerTapPollingRendering(object? sender, object e)
-    {
-        StopTwoFingerTapPolling();
     }
 
     private void OnSlideSwipePointerPressed(object sender, PointerRoutedEventArgs e)
@@ -6304,12 +7067,10 @@ public sealed partial class DocumentView : Page
                 CancelInteractiveSlideSwipeImmediate(stopSmoothZoom: true, resetManipulationSession: false);
             }
 
-            StopTwoFingerTapPolling();
             EnsureScrollModesEnabledForViewChange();
             return;
         }
 
-        StopTwoFingerTapPolling();
         _firstTouchPointer = e.Pointer;
 
         if (!CanUseInteractiveSlideSwipe())

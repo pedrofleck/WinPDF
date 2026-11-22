@@ -410,7 +410,7 @@
                     <!-- Left / Start Selection Handle -->
                     <Grid
                         x:Name="TouchSelectionStartHandle"
-                        Width="44"
+                        Width="34"
                         Padding="0,0,0,14"
                         Background="Transparent"
                         ManipulationMode="None"
@@ -428,7 +428,7 @@
                             Grid.Row="0"
                             Width="2"
                             Height="18"
-                            Margin="28,0,0,0"
+                            Margin="30,0,0,0"
                             HorizontalAlignment="Left"
                             VerticalAlignment="Top"
                             Background="{ThemeResource AccentFillColorDefaultBrush}"
@@ -439,7 +439,7 @@
                             Grid.Row="1"
                             Width="16"
                             Height="16"
-                            Margin="14,-1,0,0"
+                            Margin="16,-1,0,0"
                             HorizontalAlignment="Left"
                             VerticalAlignment="Top"
                             Background="{ThemeResource AccentFillColorDefaultBrush}"
@@ -452,7 +452,7 @@
                     <!-- Right / End Selection Handle -->
                     <Grid
                         x:Name="TouchSelectionEndHandle"
-                        Width="44"
+                        Width="34"
                         Padding="0,0,0,14"
                         Background="Transparent"
                         ManipulationMode="None"
@@ -470,7 +470,7 @@
                             Grid.Row="0"
                             Width="2"
                             Height="18"
-                            Margin="14,0,0,0"
+                            Margin="2,0,0,0"
                             HorizontalAlignment="Left"
                             VerticalAlignment="Top"
                             Background="{ThemeResource AccentFillColorDefaultBrush}"
@@ -481,7 +481,7 @@
                             Grid.Row="1"
                             Width="16"
                             Height="16"
-                            Margin="14,-1,0,0"
+                            Margin="2,-1,0,0"
                             HorizontalAlignment="Left"
                             VerticalAlignment="Top"
                             Background="{ThemeResource AccentFillColorDefaultBrush}"

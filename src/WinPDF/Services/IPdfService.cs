@@ -186,6 +186,45 @@ public interface IPdfService : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Computes an updated <see cref="PdfTextSelection"/> spanning one or more pages from an anchor page/character
+    /// to an active target page/coordinate, optionally clamping direction or preserving an initial touch-held word.
+    /// Returns <see langword="null"/> if the resolved active endpoint matches <paramref name="previousActivePageIndex"/>
+    /// and <paramref name="previousActiveCharIndex"/> or if no character could be resolved.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="anchorPageIndex">Zero-based page index of the fixed selection anchor.</param>
+    /// <param name="anchorCharIndex">Zero-based character index of the anchor on <paramref name="anchorPageIndex"/>, or -1 to resolve from coordinates.</param>
+    /// <param name="anchorPdfX">Anchor X coordinate in PDF user space (points).</param>
+    /// <param name="anchorPdfY">Anchor Y coordinate in PDF user space (points).</param>
+    /// <param name="activePageIndex">Zero-based page index currently targeted by the pointer or selection handle.</param>
+    /// <param name="activePdfX">Active pointer X coordinate in PDF user space (points) on <paramref name="activePageIndex"/>.</param>
+    /// <param name="activePdfY">Active pointer Y coordinate in PDF user space (points) on <paramref name="activePageIndex"/>.</param>
+    /// <param name="clampMode">Optional directional clamping mode relative to the fixed anchor.</param>
+    /// <param name="initialWordPageIndex">Zero-based page index of an initially held touch word, or -1 if none.</param>
+    /// <param name="initialWordStartCharIndex">Inclusive start character index of an initially held touch word, or -1 if none.</param>
+    /// <param name="initialWordEndCharIndex">Inclusive end character index of an initially held touch word, or -1 if none.</param>
+    /// <param name="previousActivePageIndex">Previously resolved active page index for deduplication, or -1 to force computation.</param>
+    /// <param name="previousActiveCharIndex">Previously resolved active character index for deduplication, or -2 to force computation.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The updated single- or multi-page <see cref="PdfTextSelection"/>, or <see langword="null"/> if unchanged.</returns>
+    Task<PdfTextSelection?> SelectTextAcrossPagesAsync(
+        long documentId,
+        int anchorPageIndex,
+        int anchorCharIndex,
+        double anchorPdfX,
+        double anchorPdfY,
+        int activePageIndex,
+        double activePdfX,
+        double activePdfY,
+        PdfSelectionAnchorClamp clampMode = PdfSelectionAnchorClamp.None,
+        int initialWordPageIndex = -1,
+        int initialWordStartCharIndex = -1,
+        int initialWordEndCharIndex = -1,
+        int previousActivePageIndex = -1,
+        int previousActiveCharIndex = -2,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Selects the whole word located at <c>(pdfX, pdfY)</c> in PDF user space on <paramref name="pageIndex"/>,
     /// computing its bounding rectangles (<c>FPDFText_CountRects</c> / <c>FPDFText_GetRect</c>) and UTF-16 string
     /// (<c>FPDFText_GetText</c>).

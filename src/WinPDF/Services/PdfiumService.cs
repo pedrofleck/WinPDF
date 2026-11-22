@@ -244,6 +244,45 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
             highPriority: true);
 
     /// <inheritdoc/>
+    public Task<PdfTextSelection?> SelectTextAcrossPagesAsync(
+        long documentId,
+        int anchorPageIndex,
+        int anchorCharIndex,
+        double anchorPdfX,
+        double anchorPdfY,
+        int activePageIndex,
+        double activePdfX,
+        double activePdfY,
+        PdfSelectionAnchorClamp clampMode = PdfSelectionAnchorClamp.None,
+        int initialWordPageIndex = -1,
+        int initialWordStartCharIndex = -1,
+        int initialWordEndCharIndex = -1,
+        int previousActivePageIndex = -1,
+        int previousActiveCharIndex = -2,
+        CancellationToken cancellationToken = default)
+        => Enqueue<PdfTextSelection?>(
+            new PdfiumJob<PdfTextSelection?>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.SelectTextAcrossPages(
+                    documentId,
+                    anchorPageIndex,
+                    anchorCharIndex,
+                    anchorPdfX,
+                    anchorPdfY,
+                    activePageIndex,
+                    activePdfX,
+                    activePdfY,
+                    clampMode,
+                    initialWordPageIndex,
+                    initialWordStartCharIndex,
+                    initialWordEndCharIndex,
+                    previousActivePageIndex,
+                    previousActiveCharIndex,
+                    token),
+                cancellationToken),
+            highPriority: true);
+
+    /// <inheritdoc/>
     public Task<PdfTextSelection?> SelectWordAtPointAsync(
         long documentId,
         int pageIndex,

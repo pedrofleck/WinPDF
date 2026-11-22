@@ -864,6 +864,323 @@ internal sealed unsafe class PdfiumEngine : IDisposable
     }
 
     /// <summary>
+    /// Computes an updated single- or multi-page <see cref="PdfTextSelection"/> between an anchor page/character
+    /// and an active page/coordinate, supporting directional clamping and initial-word preservation.
+    /// </summary>
+    internal PdfTextSelection? SelectTextAcrossPages(
+        long documentId,
+        int anchorPageIndex,
+        int anchorCharIndex,
+        double anchorPdfX,
+        double anchorPdfY,
+        int activePageIndex,
+        double activePdfX,
+        double activePdfY,
+        PdfSelectionAnchorClamp clampMode,
+        int initialWordPageIndex,
+        int initialWordStartCharIndex,
+        int initialWordEndCharIndex,
+        int previousActivePageIndex,
+        int previousActiveCharIndex,
+        CancellationToken cancellationToken)
+    {
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        int pageCount = Math.Max(0, PdfiumNative.FPDF_GetPageCount(document));
+        if (anchorPageIndex < 0 || anchorPageIndex >= pageCount ||
+            activePageIndex < 0 || activePageIndex >= pageCount)
+        {
+            return null;
+        }
+
+        PdfiumTextPageHandle? anchorTextPage = _pageCache.GetOrLoadTextPage(document, documentId, anchorPageIndex);
+        int anchorTotalChars = anchorTextPage is { IsInvalid: false }
+            ? PdfiumNative.FPDFText_CountChars(anchorTextPage)
+            : 0;
+
+        int resolvedAnchor = -1;
+        if (anchorTotalChars > 0 && anchorTextPage is not null)
+        {
+            resolvedAnchor = (anchorCharIndex >= 0 && anchorCharIndex < anchorTotalChars)
+                ? anchorCharIndex
+                : FindCharIndexForDrag(anchorTextPage, anchorTotalChars, anchorPdfX, anchorPdfY);
+        }
+
+        bool clampedCrossPageToAnchor =
+            (clampMode == PdfSelectionAnchorClamp.AtOrBeforeAnchor && activePageIndex > anchorPageIndex) ||
+            (clampMode == PdfSelectionAnchorClamp.AtOrAfterAnchor && activePageIndex < anchorPageIndex);
+
+        if (clampedCrossPageToAnchor)
+        {
+            activePageIndex = anchorPageIndex;
+        }
+
+        // Single-page selection path (including cross-page handle drag clamped back to anchor).
+        if (anchorPageIndex == activePageIndex)
+        {
+            if (anchorTextPage is null || anchorTextPage.IsInvalid || anchorTotalChars <= 0 ||
+                resolvedAnchor < 0 || resolvedAnchor >= anchorTotalChars)
+            {
+                return null;
+            }
+
+            int activeChar = clampedCrossPageToAnchor
+                ? resolvedAnchor
+                : FindCharIndexForDrag(anchorTextPage, anchorTotalChars, activePdfX, activePdfY);
+            if (activeChar < 0 || activeChar >= anchorTotalChars)
+            {
+                return null;
+            }
+
+            if (clampMode == PdfSelectionAnchorClamp.AtOrBeforeAnchor && activeChar > resolvedAnchor)
+            {
+                activeChar = resolvedAnchor;
+            }
+            else if (clampMode == PdfSelectionAnchorClamp.AtOrAfterAnchor && activeChar < resolvedAnchor)
+            {
+                activeChar = resolvedAnchor;
+            }
+
+            int startChar;
+            int endChar;
+            int outAnchor = resolvedAnchor;
+
+            if (clampMode == PdfSelectionAnchorClamp.None &&
+                initialWordPageIndex == anchorPageIndex &&
+                initialWordStartCharIndex >= 0 &&
+                initialWordEndCharIndex >= initialWordStartCharIndex)
+            {
+                int wordStart = Math.Clamp(initialWordStartCharIndex, 0, anchorTotalChars - 1);
+                int wordEnd = Math.Clamp(initialWordEndCharIndex, wordStart, anchorTotalChars - 1);
+                if (activeChar < wordStart)
+                {
+                    startChar = activeChar;
+                    endChar = wordEnd;
+                    outAnchor = wordEnd;
+                }
+                else if (activeChar > wordEnd)
+                {
+                    startChar = wordStart;
+                    endChar = activeChar;
+                    outAnchor = wordStart;
+                }
+                else
+                {
+                    startChar = wordStart;
+                    endChar = wordEnd;
+                    outAnchor = wordStart;
+                    activeChar = wordEnd;
+                }
+            }
+            else
+            {
+                startChar = Math.Min(resolvedAnchor, activeChar);
+                endChar = Math.Max(resolvedAnchor, activeChar);
+            }
+
+            if (activePageIndex == previousActivePageIndex &&
+                activeChar == previousActiveCharIndex &&
+                outAnchor == anchorCharIndex)
+            {
+                return null;
+            }
+
+            int count = endChar - startChar + 1;
+            IReadOnlyList<PdfRect> rects = ExtractTextRects(anchorTextPage, startChar, count);
+            string selectedText = ExtractTextString(anchorTextPage, startChar, count);
+            return new PdfTextSelection(
+                anchorPageIndex,
+                startChar,
+                endChar,
+                rects,
+                selectedText,
+                AnchorCharIndex: outAnchor,
+                ActiveCharIndex: activeChar,
+                Pages: null,
+                AnchorPageIndex: anchorPageIndex,
+                ActivePageIndex: anchorPageIndex);
+        }
+
+        // Multi-page selection path.
+        bool isForward = activePageIndex > anchorPageIndex;
+        int effectiveAnchor = resolvedAnchor;
+
+        if (clampMode == PdfSelectionAnchorClamp.None &&
+            initialWordPageIndex == anchorPageIndex &&
+            initialWordStartCharIndex >= 0 &&
+            initialWordEndCharIndex >= initialWordStartCharIndex &&
+            anchorTotalChars > 0)
+        {
+            int wordStart = Math.Clamp(initialWordStartCharIndex, 0, anchorTotalChars - 1);
+            int wordEnd = Math.Clamp(initialWordEndCharIndex, wordStart, anchorTotalChars - 1);
+            effectiveAnchor = isForward ? wordStart : wordEnd;
+        }
+
+        PdfiumTextPageHandle? activeTextPage = _pageCache.GetOrLoadTextPage(document, documentId, activePageIndex);
+        int activeTotalChars = activeTextPage is { IsInvalid: false }
+            ? PdfiumNative.FPDFText_CountChars(activeTextPage)
+            : 0;
+        int activeEndpointChar = (activeTotalChars > 0 && activeTextPage is not null)
+            ? FindCharIndexForDrag(activeTextPage, activeTotalChars, activePdfX, activePdfY)
+            : -1;
+
+        if (activePageIndex == previousActivePageIndex &&
+            activeEndpointChar == previousActiveCharIndex &&
+            effectiveAnchor == anchorCharIndex)
+        {
+            return null;
+        }
+
+        int minPage = Math.Min(anchorPageIndex, activePageIndex);
+        int maxPage = Math.Max(anchorPageIndex, activePageIndex);
+        List<PdfPageTextSelection> pageSelections = new(maxPage - minPage + 1);
+        StringBuilder combinedText = new();
+
+        for (int p = minPage; p <= maxPage; p++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            PdfiumPageHandle? transientPage = null;
+            PdfiumTextPageHandle? transientTextPage = null;
+            try
+            {
+                PdfiumTextPageHandle? pText = null;
+                if (p == anchorPageIndex)
+                {
+                    pText = anchorTextPage;
+                }
+                else if (p == activePageIndex)
+                {
+                    pText = activeTextPage;
+                }
+                else if (_pageCache.TryGetCached(documentId, p, out PdfiumPageHandle? cachedPage, out PdfiumTextPageHandle? cachedText)
+                         && cachedPage is { IsInvalid: false })
+                {
+                    pText = cachedText is { IsInvalid: false }
+                        ? cachedText
+                        : _pageCache.GetOrLoadTextPage(document, documentId, p);
+                }
+                else
+                {
+                    transientPage = PdfiumNative.FPDF_LoadPage(document, p);
+                    if (!transientPage.IsInvalid)
+                    {
+                        transientTextPage = PdfiumNative.FPDFText_LoadPage(transientPage);
+                        if (!transientTextPage.IsInvalid)
+                        {
+                            pText = transientTextPage;
+                        }
+                    }
+                }
+
+                if (pText is null || pText.IsInvalid)
+                {
+                    continue;
+                }
+
+                int pTotal = PdfiumNative.FPDFText_CountChars(pText);
+                if (pTotal <= 0)
+                {
+                    continue;
+                }
+
+                int pStart;
+                int pEnd;
+                if (p == anchorPageIndex)
+                {
+                    if (effectiveAnchor < 0 || effectiveAnchor >= pTotal)
+                    {
+                        continue;
+                    }
+
+                    if (isForward)
+                    {
+                        pStart = effectiveAnchor;
+                        pEnd = pTotal - 1;
+                    }
+                    else
+                    {
+                        pStart = 0;
+                        pEnd = effectiveAnchor;
+                    }
+                }
+                else if (p == activePageIndex)
+                {
+                    if (activeEndpointChar < 0 || activeEndpointChar >= pTotal)
+                    {
+                        continue;
+                    }
+
+                    if (isForward)
+                    {
+                        pStart = 0;
+                        pEnd = activeEndpointChar;
+                    }
+                    else
+                    {
+                        pStart = activeEndpointChar;
+                        pEnd = pTotal - 1;
+                    }
+                }
+                else
+                {
+                    pStart = 0;
+                    pEnd = pTotal - 1;
+                }
+
+                if (pEnd < pStart)
+                {
+                    continue;
+                }
+
+                int count = pEnd - pStart + 1;
+                IReadOnlyList<PdfRect> rects = ExtractTextRects(pText, pStart, count);
+                string text = ExtractTextString(pText, pStart, count);
+                if (rects.Count == 0 && string.IsNullOrEmpty(text))
+                {
+                    continue;
+                }
+
+                pageSelections.Add(new PdfPageTextSelection(p, pStart, pEnd, rects, text));
+                if (!string.IsNullOrEmpty(text))
+                {
+                    if (combinedText.Length > 0)
+                    {
+                        combinedText.AppendLine();
+                    }
+
+                    combinedText.Append(text);
+                }
+            }
+            finally
+            {
+                transientTextPage?.Dispose();
+                transientPage?.Dispose();
+            }
+        }
+
+        if (pageSelections.Count == 0)
+        {
+            return null;
+        }
+
+        PdfPageTextSelection first = pageSelections[0];
+        PdfPageTextSelection last = pageSelections[^1];
+        return new PdfTextSelection(
+            first.PageIndex,
+            first.StartCharIndex,
+            last.EndCharIndex,
+            first.Rects,
+            combinedText.ToString(),
+            AnchorCharIndex: effectiveAnchor,
+            ActiveCharIndex: activeEndpointChar,
+            Pages: pageSelections,
+            AnchorPageIndex: anchorPageIndex,
+            ActivePageIndex: activePageIndex);
+    }
+
+    /// <summary>
     /// Selects the entire word at <c>(pdfX, pdfY)</c> on <paramref name="pageIndex"/>.
     /// </summary>
     internal PdfTextSelection? SelectWordAtPoint(
@@ -1295,25 +1612,11 @@ internal sealed unsafe class PdfiumEngine : IDisposable
         // Fallback when dragging into page margins or inter-paragraph whitespace: snap to the closest character box.
         int bestIndex = -1;
         double bestScore = double.MaxValue;
-        int limit = Math.Min(totalChars, 8000);
+        int stride = Math.Max(1, (totalChars + 7999) / 8000);
 
-        for (int i = 0; i < limit; i++)
+        for (int i = 0; i < totalChars; i += stride)
         {
-            if (PdfiumNative.FPDFText_GetLooseCharBox(textPage, i, out FsRectF box) == 0)
-            {
-                continue;
-            }
-
-            double left = Math.Min(box.Left, box.Right);
-            double right = Math.Max(box.Left, box.Right);
-            double bottom = Math.Min(box.Bottom, box.Top);
-            double top = Math.Max(box.Bottom, box.Top);
-
-            double dy = pdfY < bottom ? (bottom - pdfY) : (pdfY > top ? (pdfY - top) : 0.0);
-            double dx = pdfX < left ? (left - pdfX) : (pdfX > right ? (pdfX - right) : 0.0);
-
-            // Weight vertical distance heavily so dragging horizontally in a line's margin stays on that line.
-            double score = (dy * 12.0) + dx;
+            double score = ScoreCharBoxDistance(textPage, i, pdfX, pdfY);
             if (score < bestScore)
             {
                 bestScore = score;
@@ -1321,7 +1624,41 @@ internal sealed unsafe class PdfiumEngine : IDisposable
             }
         }
 
+        if (stride > 1 && bestIndex >= 0)
+        {
+            int refineStart = Math.Max(0, bestIndex - stride);
+            int refineEnd = Math.Min(totalChars - 1, bestIndex + stride);
+            for (int i = refineStart; i <= refineEnd; i++)
+            {
+                double score = ScoreCharBoxDistance(textPage, i, pdfX, pdfY);
+                if (score < bestScore)
+                {
+                    bestScore = score;
+                    bestIndex = i;
+                }
+            }
+        }
+
         return bestIndex;
+    }
+
+    private static double ScoreCharBoxDistance(PdfiumTextPageHandle textPage, int charIndex, double pdfX, double pdfY)
+    {
+        if (PdfiumNative.FPDFText_GetLooseCharBox(textPage, charIndex, out FsRectF box) == 0)
+        {
+            return double.MaxValue;
+        }
+
+        double left = Math.Min(box.Left, box.Right);
+        double right = Math.Max(box.Left, box.Right);
+        double bottom = Math.Min(box.Bottom, box.Top);
+        double top = Math.Max(box.Bottom, box.Top);
+
+        double dy = pdfY < bottom ? (bottom - pdfY) : (pdfY > top ? (pdfY - top) : 0.0);
+        double dx = pdfX < left ? (left - pdfX) : (pdfX > right ? (pdfX - right) : 0.0);
+
+        // Weight vertical distance heavily so dragging horizontally in a line's margin stays on that line.
+        return (dy * 12.0) + dx;
     }
 
     private static IReadOnlyList<PdfRect> ExtractTextRects(PdfiumTextPageHandle textPage, int startCharIndex, int charCount)
