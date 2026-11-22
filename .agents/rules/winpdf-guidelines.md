@@ -8,6 +8,11 @@
 These guidelines are mandatory for all AI agents and engineers working on WinPDF.
 They supersede generic coding suggestions and must be respected in every commit.
 
+> **Mandatory Progress Tracking:** Before finishing any task, you **MUST** update `AGENTS.md` and
+> `TODO.md` (and `local-todo.md` when applicable) to record what was implemented (with file links
+> and architectural notes) and keep the remaining roadmap for `v0.6.x` and `v0.7.x` accurate for
+> future agents and conversations.
+
 ---
 
 ## 1. Strict Priority Hierarchy

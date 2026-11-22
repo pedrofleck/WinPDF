@@ -88,61 +88,66 @@ Checklist de melhorias de usabilidade, ergonomia visual (Fluent 2 / Grid de 4px)
 
 ---
 
-## 📦 Implementação de Abas (Multi-Document Tabbed Shell)
-- [ ] **Refatoração do Estado para Múltiplos Documentos (`ShellViewModel.cs`):**
-  - Criar uma coleção observável `ObservableCollection<DocumentViewModel> OpenDocuments` e gerenciar a troca de `CurrentDocument` (aba ativa) preservando de forma independente o estado de cada documento (`CurrentPageIndex`, `ZoomFactor`, `ViewMode`, `LastVerticalOffset`, `LastHorizontalOffset`, histórico de busca e barra lateral).
-  - Liberar deterministicamente os recursos nativos (`CloseDocumentAsync`, `TileCache` e bitmaps Win2D) ao fechar uma aba individual sem afetar as demais abas abertas.
-- [ ] **Barra de Abas Integrada ao Fluent Design (`MainWindow.xaml`):**
-  - Adicionar suporte a abas de documentos usando `TabView` nativo do WinUI 3 (ou faixa de abas compacta integrada ao Mica), exibindo o nome do arquivo, indicador de modificação (`•` / `*` quando `HasUnsavedChanges == true`) e botão de fechar (`×`) ou clique com o botão do meio do mouse.
-  - Botão `+` na faixa de abas para abrir um novo PDF rapidamente.
-- [ ] **Atalhos de Teclado e Fluxo de Janelas de Abas:**
-  - `Ctrl + T` / `Ctrl + O`: Abrir novo arquivo em uma nova aba (ou focar na aba existente caso o mesmo caminho de arquivo já esteja aberto).
-  - `Ctrl + W` / `Ctrl + F4`: Fechar a aba atual (voltando para o Empty State se for a última aba).
-  - `Ctrl + Tab` / `Ctrl + Shift + Tab`: Alternar rapidamente entre as abas abertas.
-  - Suporte a abrir múltiplos arquivos selecionados simultaneamente no `FileOpenPicker` ou via *Drag-and-Drop* de vários PDFs na janela.
-  - Persistir a lista de abas abertas (e a aba ativa) em `AppSettings` quando a opção *"Reabrir último documento ao iniciar"* estiver ativa.
+## 📦 Experiência de Toque e Gestos (`v0.5.x` — Concluído)
+- [x] **Deslize Lateral Interativo de Slides (Modo Não Contínuo e Apresentação `F5`):**
+  - Gesto de arraste horizontal com 1 dedo na tela sensível ao toque e 2 dedos no Precision Touchpad (`AdjacentSlidePreviewContainer` com prefetch via `TileCache` Nível 0 e `s_slideBuffer`).
+  - Resistência elástica de borda (*rubber-banding*) na primeira/última página e física de *commit* vs. *bounce-back* suave (`CubicEase.EaseOut`), mantendo teclado, roda do mouse e botões laterais instantâneos.
+- [x] **Seleção de Texto por Toque (Segurar ~320 ms e Arrastar) + Barra Flutuante Nativa (`CommandBarFlyout`):**
+  - Reconhecimento de *long-press* sobre texto sem interferir na rolagem rápida por toque, alças de ajuste de início/fim (`TouchSelectionStartHandle` / `TouchSelectionEndHandle`) e `TouchSelectionCommandBarFlyout` acima da seleção (expandido na `v0.6.0-alpha.6` com Copiar, Marca-texto, Comentário, Sublinhado, Tachado, Sublinhado Ondulado e 6 cores).
+  - *Long-press* em área vazia da página abre criação de nota de comentário (`FPDF_ANNOT_TEXT`).
+- [x] **Barra de Rolagem Vertical Assistida para Toque (*Touch Scroll Scrubber*):**
+  - Pílula Acrylic nativa (`TouchScrollScrubberContainer` / `TouchScrollPill`) exibida exclusivamente ao interagir por toque no modo Contínuo, com *fast scrubbing* 1:1, bolha de página ao vivo (`TouchScrollPageBubble`) e *auto-hide* após `2.2 s`.
 
 ---
 
-## 📦 Motor de Anotações, Escrita com Caneta/Toque, Undo/Redo e Salvamento Real
-- [ ] **Interop Nativo de Anotações do PDFium (`PdfiumNative.cs`):**
-  - Mapear as APIs de leitura, criação e modificação de anotações da `pdfium.dll`:
-    - `FPDFPage_GetAnnotCount`, `FPDFPage_GetAnnot`, `FPDFPage_CloseAnnot`, `FPDFAnnot_GetSubtype`, `FPDFAnnot_GetRect`, `FPDFAnnot_SetRect`.
-    - `FPDFPage_CreateAnnot`, `FPDFPage_RemoveAnnot`, `FPDFAnnot_SetColor`, `FPDFAnnot_GetColor`.
-    - `FPDFAnnot_AddInkStroke`, `FPDFAnnot_RemoveInkList` (para traços de caneta/tinta `FPDF_ANNOT_INK`).
-    - `FPDFAnnot_AppendAttachmentPoints`, `FPDFAnnot_CountAttachmentPoints`, `FPDFAnnot_GetAttachmentPoints` (para `QuadPoints` de Marca-texto `FPDF_ANNOT_HIGHLIGHT`, Sublinhado `FPDF_ANNOT_UNDERLINE` e Tachado `FPDF_ANNOT_STRIKEOUT`).
-    - `FPDFAnnot_SetStringValue`, `FPDFAnnot_GetStringValue` (para conteúdo de Notas Adesivas `FPDF_ANNOT_TEXT`, autor e datas) integrando com `IPdfPageEditCommitter` e `FPDFPage_GenerateContent` (já prontos em `PdfSaveOptions` e `PdfiumEngine.SaveDocument`).
-- [ ] **Ferramentas de Marcação de Texto (`AnnotationTool.Highlighter`, `Underline` e `Strikethrough`):**
-  - Ao selecionar texto com uma ferramenta de marcação ativa ou clicar na ferramenta com texto já selecionado, converter os retângulos selecionados em `FS_QUADPOINTSF` nas coordenadas nativas do PDF (`PageCoordinateTransform`), gravar a anotação na página via PDFium e invalidar o cache da página (`_tileCache.RemovePage`) para re-renderizar instantaneamente.
-  - Adicionar seletor rápido (Flyout/Paleta) de cores de marca-texto (Amarelo, Verde, Azul, Rosa, Laranja) e espessura/opacidade da caneta.
-- [ ] **Desenho Livre / Tinta (`AnnotationTool.Pen`) e Borracha (`AnnotationTool.Eraser`):**
-  - Capturar eventos de ponteiro (`PointerPressed`, `PointerMoved`, `PointerReleased`) no `PdfPageCanvas` respeitando a configuração `IsTouchDrawingEnabled` (quando desativada, dedos fazem pan/pinch-zoom no `ScrollViewer` enquanto a caneta Stylus ou o mouse desenham; quando ativada, o toque também desenha).
-  - Desenhar o traço em tempo real na camada Win2D com latência zero durante o movimento da caneta/mouse e, ao soltar o ponteiro (`PointerReleased`), converter os pontos para coordenadas PDF (`FPDFAnnot_AddInkStroke`) e persistir na página.
-  - Implementar a ferramenta **Borracha (`AnnotationTool.Eraser`)** para remover traços de tinta ou anotações clicadas/tocadas (`FPDFPage_RemoveAnnot`).
-- [ ] **Notas Adesivas (`AnnotationTool.TextNote`) e Painel Lateral de Anotações (`AnnotationsTabPage.xaml`):**
-  - Permitir clicar em qualquer ponto da página com a ferramenta de Nota Adesiva para inserir um ícone de comentário e abrir um `Flyout` de edição de texto.
-  - Popular dinamicamente a aba **Anotações** da barra lateral (`DocumentViewModel.AnnotationsSummary`) listando todas as anotações do documento agrupadas por página, com clique para navegar até a página/anotação, edição de comentário e botão de exclusão.
-- [ ] **Pilha de Undo / Redo (`Ctrl + Z` / `Ctrl + Y`) e Salvamento Incremental:**
-  - Implementar histórico de comandos de anotação por documento (`UndoCommand` / `RedoCommand`) e adicionar os botões Desfazer/Refazer na barra de ferramentas de anotações.
-  - Marcar o documento como modificado (`HasUnsavedChanges = true`), habilitar o salvamento direto (`Ctrl + S` -> `SaveAsync`) e avisar o usuário com diálogo de confirmação ("Deseja salvar as alterações?") antes de fechar uma aba ou encerrar o aplicativo com modificações pendentes.
+## 📦 Anotações de Texto, Comentários, Formas Externas, Undo e Assinaturas Digitais (`v0.6.0-alpha.6` — Concluído)
+- [x] **Interop Nativo de Anotações, Form XObjects e FormFill do PDFium (`PdfiumNative.cs`, `PdfiumEngine.cs`):**
+  - Mapeamento completo de `FPDFPage_GetAnnotCount`, `FPDFPage_GetAnnot`, `FPDFPage_CloseAnnot`, `FPDFPage_CreateAnnot`, `FPDFPage_RemoveAnnot`, `FPDFAnnot_*`, `FPDFAnnot_SetAP` / `FPDFAnnot_GetAP`, `FPDFPath_*`, `FPDFFormObj_CountObjects` / `FPDFFormObj_GetObject`, `FPDFDOC_InitFormFillEnvironment` e `FPDF_FFLDraw`.
+- [x] **Marcações de Texto (`Highlight`, `Underline`, `Squiggly`, `StrikeOut`) e 6 Cores Padrão:**
+  - Marca-texto com `/AP` em modo `/BM /Multiply` (`ca 0.42`) e espaçamento vertical óptico (`-6%` na base e `+10%` no topo); Sublinhado (`-6%` abaixo da base), Sublinhado Ondulado (senoide contínua com ícone nativo `PathIcon` de `W` ondulado) e Tachado (`42%` da altura).
+  - 6 cores predefinidas: Amarelo (`#FFFFE620`), Verde (`#FF4CD964`), Azul (`#FF4DA6FF`), Rosa (`#FFFF66B2`), Laranja (`#FFFF9F40`) e Vermelho (`#FFF24C4C`). Escolher uma cor nos menus apenas altera a cor ativa padrão sem criar marcação prematuramente.
+- [x] **Notas de Comentário em Balão de Fala (`FPDF_ANNOT_TEXT`) e Menus Flutuantes Contextuais:**
+  - Ícone vetorial `22×22 pt` de balão de fala criado via barra superior, botão direito em área vazia da página ou *long-press* de toque.
+  - `MouseSelectionFlyout` compacto (ícones lado a lado + 6 cores) ao clicar com o botão direito sobre texto selecionado.
+  - `AnnotationQuickBarFlyout` em Acrylic deslocado `20 DIPs` acima/abaixo da anotação (prevenindo exclusão acidental em duplo clique) e `AnnotationEditorFlyout` enxuto (botão único `×` no topo, Salvar + Excluir à esquerda na base e 6 cores à direita).
+- [x] **Manipulação de Formas e Escritas de Outros Leitores (Mover, Copiar, Recortar e Colar):**
+  - Arraste interativo (`AnnotationMoved` + `AnnotationDragGhostBorder`) e `Ctrl+C` / `Ctrl+X` / `Ctrl+V` para anotações não-textuais (`Ink`, `Square`, `Circle`, `Line`, `Polygon`, `PolyLine`, `FreeText`, `Stamp`), preservando cor e espessura originais de `Form XObjects` aninhados e colando exatamente na posição do último clique do mouse (`MouseClickedOnPage` + rastreamento de *light-dismiss*).
+- [x] **Aba Lateral de Anotações Sem Flicker (`AnnotationsTabPage.xaml`) e Undo de 40 Níveis (`Ctrl + Z`):**
+  - Atualização diferencial in-place de `AnnotationsSummary` (sem piscar ao mover ou trocar cor) com animações `AddDeleteThemeTransition` e `RepositionThemeTransition` ao criar/excluir.
+  - Histórico `_annotationUndoStack` (até 40 ações) revertendo criação, edição de texto/cor, movimentação, recorte, colagem e exclusão com `Ctrl + Z`.
+- [x] **Inspeção Universal de Assinaturas Digitais PKCS#7 e Carimbos Visuais (`PdfSignatureInspector.cs`):**
+  - Renderização de carimbos visuais (`/FT /Sig`) no documento via `FPDF_FFLDraw`, indicador discreto na barra de status ao lado do tamanho do arquivo e exibição detalhada no diálogo unificado de **Propriedades do Documento** (`Alt+Enter` ou clique na barra de status / carimbo).
 
 ---
 
-## 📦 Formulários (AcroForms), Anexos, Marcadores Persistentes, Updater e Release
-- [ ] **Exportação de Anexos Embutidos (`AttachmentsTabPage.xaml`):**
-  - A leitura real via `FPDFDoc_GetAttachmentCount`, `FPDFDoc_GetAttachment` e `FPDFAttachment_GetName` já está implementada em `PdfiumEngine.ReadAttachmentNames`.
-  - Mapear `FPDFAttachment_GetFile` e implementar o comando de **Salvar/Exportar Anexo** em disco usando `FileSavePicker` ao clicar em um anexo na aba `AttachmentsTabPage`.
-- [ ] **Marcadores de Usuário Persistentes (`BookmarksTabPage.xaml`):**
-  - Persistir os marcadores criados pelo usuário por documento (associados ao caminho/hash do arquivo em `%LOCALAPPDATA%\WinPDF\bookmarks.json`), permitindo renomear e excluir marcadores entre sessões.
-- [ ] **Preenchimento Básico de Formulários Interativos (AcroForms):**
-  - Integrar `FPDFDOC_InitFormFillEnvironment` e `FPDFDOC_ExitFormFillEnvironment` no `PdfiumEngine` para permitir interação básica com campos de texto e caixas de seleção (`CheckBox` / `RadioButton`) em PDFs de formulários e salvar os valores preenchidos via `FPDF_SaveAsCopy`.
-- [ ] **Associação de Arquivos no Windows e Redirecionamento Single-Instance:**
-  - O processamento de argumentos de linha de comando (`Environment.GetCommandLineArgs()` e `args.Arguments` com `IsInitialDocumentOpening`) em `App.xaml.cs` já está implementado.
-  - Adicionar redirecionamento de instância única (`AppInstance.FindOrRegisterForKey`) para abrir arquivos clicados no Explorer como novas abas na janela existente e registrar a associação `.pdf` no instalador/manifesto.
-- [ ] **Sistema de Atualização Automática via GitHub Releases (`SettingsView.xaml`):**
-  - Implementar o `UpdateService` consultando `https://api.github.com/repos/pedrofleck/winpdf/releases` sem necessidade de servidor externo.
-  - Adicionar na seção **Sobre** da `SettingsView.xaml` o botão **"Verificar atualizações"** e uma chave seletora (*ToggleSwitch*) **"Incluir versões de teste (Pre-release)"**, exibindo o status e baixando/executando o instalador automaticamente.
-- [ ] **Empacotamento, Instalador e Publicação (Fluentify):**
-  - Criar script de automação do instalador Inno Setup (`tools/Build-Installer.ps1` + `installer.iss`) para gerar o executável único `WinPDF-Setup.exe` enxuto para distribuição direta e auto-update via GitHub.
-  - Configurar o manifesto de empacotamento (`Package.appxmanifest`) para geração do pacote `.msixupload` assinado para submissão na **Microsoft Store** sob o publicador **Fluentify**.
-  - Expandir a suíte `AutoTestRunner.cs` (`tools/Run-AutoTest.ps1`) cobrindo seleção/busca de texto, abertura/fechamento de múltiplas abas e ciclo de criação/remoção de anotações com zero vazamento de handles nativos.
+## 📦 Próximos Passos da Série `v0.6.x` (`v0.6.1+` — Caneta Livre, Borracha, Salvamento Direto e Ajustes)
+- [ ] **Desenho Livre com Caneta / Tinta (`AnnotationTool.Pen`) e Borracha (`AnnotationTool.Eraser`):**
+  - Capturar eventos de ponteiro (`PointerPressed`, `PointerMoved`, `PointerReleased`) no `PdfPageCanvas` respeitando `IsTouchDrawingEnabled` (separando pan/zoom com dedo de escrita com Stylus/mouse).
+  - Desenhar o traço em tempo real na camada Win2D com latência zero durante o movimento e persistir `FPDF_ANNOT_INK` (`FPDFAnnot_AddInkStroke` + `/AP` stream) ao soltar o ponteiro.
+  - Implementar a ferramenta **Borracha (`AnnotationTool.Eraser`)** para remover traços de tinta ou anotações tocadas/arrastadas.
+- [ ] **Redo (`Ctrl + Y`), Salvamento Direto (`Ctrl + S`) e Aviso de Alterações Não Salvas:**
+  - Complementar a pilha de Undo (`Ctrl + Z`) com **Redo (`Ctrl + Y` / `Ctrl + Shift + Z`)** e botões de Desfazer/Refazer na barra de ferramentas.
+  - Implementar salvamento direto no arquivo atual (`Ctrl + S`), opção de salvamento automático de anotações e diálogo de confirmação ao fechar documento com `HasUnsavedChanges == true`.
+- [ ] **Configurações de Anotação e Refinamento Visual da Barra Lateral (`v0.6.1`):**
+  - Opção nas Configurações: *"Continuar editando anotações"* (manter ferramenta ativa após criar uma anotação em vez de voltar para a ferramenta de seleção/mão).
+  - Opções nas Configurações para caneta/tinta: tempo de agrupamento entre traços (tinta multi-traço), suavização de tinta e comportamento da Stylus (caneta vs. mão).
+  - Corrigir a borda de destaque da página atual nas miniaturas da barra lateral (`ThumbnailsTabPage.xaml`) para ficar perfeitamente retangular ao redor da página, sem cantos arredondados vazando.
+
+---
+
+## 📦 Planejado para `v0.7.x`: Sistema de Abas (Multi-Document Tabbed Shell) e Integração com Windows
+- [ ] **Refatoração do Estado para Múltiplos Documentos (`ShellViewModel.cs` — `v0.7.0`):**
+  - Criar `ObservableCollection<DocumentViewModel> OpenDocuments` e gerenciar a troca de `CurrentDocument` (aba ativa) preservando de forma independente o estado de cada documento (`CurrentPageIndex`, `ZoomFactor`, `ViewMode`, `LastVerticalOffset`, `LastHorizontalOffset`, histórico de busca, barra lateral e pilha de Undo/Redo).
+  - Implementar suspensão/hibernação em disco de abas inativas em background para economizar RAM e liberar deterministicamente recursos nativos (`CloseDocumentAsync`, `TileCache` e bitmaps Win2D) ao fechar uma aba individual.
+- [ ] **Barra de Abas Integrada ao Fluent Design (`MainWindow.xaml` — `v0.7.0`):**
+  - Adicionar `TabView` nativo do WinUI 3 integrado ao Mica, exibindo nome do arquivo, indicador de modificação (`•` quando `HasUnsavedChanges == true`), botão de fechar (`×` / clique do meio) e botão `+` para abrir novo PDF.
+- [ ] **Atalhos de Teclado, Sessão de Abas e Integração com o Shell do Windows (`v0.7.0`):**
+  - `Ctrl + T` / `Ctrl + O`, `Ctrl + W` / `Ctrl + F4`, `Ctrl + Tab` / `Ctrl + Shift + Tab`, abertura/drop de múltiplos PDFs simultaneamente e restauração de sessão de abas em `AppSettings`.
+  - Redirecionamento single-instance (`AppInstance.FindOrRegisterForKey`) para abrir arquivos `.pdf` do Explorer como novas abas na janela existente.
+  - Menu **Compartilhar** nativo do Windows e lista de arquivos **Recentes** na Jump List do ícone na barra de tarefas (botão direito).
+- [ ] **Formulários (AcroForms), Anexos, Marcadores, Logs, Traduções, Auto-Updater e Store (`v0.7.1+`):**
+  - Exportação de anexos embutidos (`FPDFAttachment_GetFile` em `AttachmentsTabPage.xaml`).
+  - Marcadores de usuário persistentes (`%LOCALAPPDATA%\WinPDF\bookmarks.json` em `BookmarksTabPage.xaml`).
+  - Preenchimento interativo básico de formulários AcroForms.
+  - Botão de acesso aos arquivos de log nas Configurações, traduções adicionais com seletor de idiomas em fase Beta, `UpdateService` via GitHub Releases e empacotamento `.msix` para a Microsoft Store.
+  - Expansão contínua do `AutoTestRunner.cs` (`tools/Run-AutoTest.ps1`) cobrindo múltiplas abas e novos fluxos com zero vazamento de handles nativos.
