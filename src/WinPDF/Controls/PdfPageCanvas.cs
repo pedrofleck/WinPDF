@@ -3133,21 +3133,31 @@ public sealed partial class PdfPageCanvas : Grid
                         continue;
                     }
 
-                    // Expand slightly by 1 DIP vertically for comfortable visual breathing room around glyphs.
+                    // Expand proportionally with minimum DIP padding for comfortable visual breathing room around matched glyphs.
+                    double padX = Math.Clamp(dipRect.Height * 0.20, 2.25, 5.5);
+                    double padTop = Math.Clamp(dipRect.Height * 0.20, 2.0, 5.0);
+                    double padBottom = Math.Clamp(dipRect.Height * 0.18, 1.75, 4.5);
+                    if (isActive)
+                    {
+                        padX += 0.5;
+                        padTop += 0.5;
+                        padBottom += 0.5;
+                    }
+
                     Rect drawRect = new(
-                        dipRect.X + offsetX - 0.5,
-                        dipRect.Y + offsetY - 1.0,
-                        dipRect.Width + 1.0,
-                        dipRect.Height + 2.0);
+                        dipRect.X + offsetX - padX,
+                        dipRect.Y + offsetY - padTop,
+                        dipRect.Width + (padX * 2.0),
+                        dipRect.Height + padTop + padBottom);
 
                     if (isActive)
                     {
-                        ds.FillRoundedRectangle(drawRect, 2.5f, 2.5f, activeFill);
-                        ds.DrawRoundedRectangle(drawRect, 2.5f, 2.5f, activeBorder, 1.25f);
+                        ds.FillRoundedRectangle(drawRect, 3.0f, 3.0f, activeFill);
+                        ds.DrawRoundedRectangle(drawRect, 3.0f, 3.0f, activeBorder, 1.5f);
                     }
                     else
                     {
-                        ds.FillRoundedRectangle(drawRect, 2.0f, 2.0f, passiveFill);
+                        ds.FillRoundedRectangle(drawRect, 2.5f, 2.5f, passiveFill);
                     }
                 }
             }

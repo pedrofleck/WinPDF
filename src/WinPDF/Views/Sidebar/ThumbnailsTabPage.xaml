@@ -55,7 +55,7 @@
                                 Background="{ThemeResource LayerFillColorDefaultBrush}"
                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                 BorderThickness="1"
-                                CornerRadius="4"
+                                CornerRadius="0"
                                 IsHitTestVisible="True">
                                 <Grid HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent">
                                     <FontIcon
@@ -66,11 +66,12 @@
                                         Glyph="&#xE8A5;" />
                                     <controls:ThumbnailPresenter Item="{x:Bind Mode=OneWay}" IsNightMode="{x:Bind IsNightMode, Mode=OneWay}" />
                                     <Border
+                                        Margin="-1"
                                         HorizontalAlignment="Stretch"
                                         VerticalAlignment="Stretch"
                                         BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
                                         BorderThickness="2"
-                                        CornerRadius="4"
+                                        CornerRadius="0"
                                         IsHitTestVisible="False"
                                         Visibility="{x:Bind converters:UiHelpers.VisibleIf(IsCurrentPage), Mode=OneWay}" />
                                 </Grid>

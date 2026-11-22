@@ -240,7 +240,10 @@ priority channels. Every public `IPdfService` method enqueues a job and returns 
 - **In-Place Save & Annotation Preferences (`local-todo.md`):**
   - Direct save (`Ctrl+S`) + unsaved-changes confirmation prompt (`HasUnsavedChanges`) on close, plus optional auto-save setting.
   - Settings toggles: *"Keep annotation tool active after creation"*, pen multi-stroke grouping timeout, ink smoothing, and Stylus mode (Pen vs. Hand).
-  - Fix active-page thumbnail border in `ThumbnailsTabPage` (sharp rectangular border matching exact page bounds without rounded corner overflow).
+- **Completed in `v0.6.1`:**
+  - Square active-page thumbnail border in `ThumbnailsTabPage.xaml` (`CornerRadius="0"`, `Margin="-1"`) matching exact page bounds without rounded corner bleed.
+  - Full-titlebar drag & double-click maximize/restore (`SetTitleBar(AppTitleBar)` + `InputNonClientPointerSource` passthrough rects for interactive buttons only) so the WinPDF icon & title area supports native window drag and double-click.
+  - Enlarged proportional search match highlight padding in `PdfPageCanvas.DrawTextOverlays`.
 
 #### Planned for `v0.7.x` (Multi-Document Tabbed Shell & Platform Integration)
 - **Multi-Document Tabbed Architecture (`v0.7.0`):**

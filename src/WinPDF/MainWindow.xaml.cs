@@ -430,9 +430,11 @@ public sealed partial class MainWindow : Window
 
         ViewModel = App.CurrentApp.Services.GetRequiredService<ShellViewModel>();
 
-        // Custom TitleBar integration with Mica: only center drag region moves the window
+        // Custom TitleBar integration with Mica: entire top bar is caption-draggable except interactive buttons (Passthrough)
         ExtendsContentIntoTitleBar = true;
-        SetTitleBar(TitleBarDragRegion);
+        SetTitleBar(AppTitleBar);
+        AppTitleBar.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
+        OpenFileBtn.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
 
         string iconPath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "Assets", "appicon.ico");
         if (System.IO.File.Exists(iconPath))
@@ -515,6 +517,11 @@ public sealed partial class MainWindow : Window
                 UpdateTitleBarTheme();
                 UpdateTitleBarInsets();
                 UpdateTitleBarNonClientRegions();
+                if (root.XamlRoot is { } xamlRoot)
+                {
+                    xamlRoot.Changed -= OnRootXamlRootChanged;
+                    xamlRoot.Changed += OnRootXamlRootChanged;
+                }
 
                 double initialWidthDip = root.ActualWidth > 0 ? root.ActualWidth : 1280.0;
                 bool initialSidebarAllowed = initialWidthDip >= SidebarAutoCloseBreakpoint;
@@ -1175,6 +1182,8 @@ public sealed partial class MainWindow : Window
             SidebarToggleTransform.TranslateX = 0.0;
             SidebarToggleButton.Opacity = 1.0;
         }
+
+        DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
     }
 
     private void AnimateSidebarToggleButton(bool collapse)
@@ -1239,6 +1248,7 @@ public sealed partial class MainWindow : Window
         sb.Completed += (_, _) =>
         {
             ApplySidebarToggleStateImmediate(!ViewModel.HasDocument || !ViewModel.IsSidebarAllowed);
+            DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
         };
 
         _sidebarToggleStoryboard = sb;
@@ -1256,6 +1266,7 @@ public sealed partial class MainWindow : Window
         SetElementSwallowStateImmediate(AppTitleTextClipContainer, AppTitleTextBlock, AppTitleTextTransform, compact, ref _cachedAppTitleTextWidth, 56.0);
         SetElementSwallowStateImmediate(OpenFileTextClipContainer, OpenFileButtonTextBlock, OpenFileTextTransform, compact, ref _cachedOpenFileTextWidth, 88.0);
         SetElementSwallowStateImmediate(SettingsTitleTextClipContainer, SettingsTitleTextBlock, SettingsTitleTextTransform, compact, ref _cachedSettingsTitleTextWidth, 56.0);
+        DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
     }
 
     private static void SetElementSwallowStateImmediate(
@@ -1313,6 +1324,7 @@ public sealed partial class MainWindow : Window
         sb.Completed += (_, _) =>
         {
             ApplyTitleBarCompactStateImmediate(ViewModel.IsCompactChrome);
+            DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
         };
 
         _titleBarCompactStoryboard = sb;
@@ -2069,9 +2081,15 @@ public sealed partial class MainWindow : Window
 
 
 
+    private void OnRootXamlRootChanged(XamlRoot sender, XamlRootChangedEventArgs args)
+    {
+        UpdateTitleBarInsets();
+        UpdateTitleBarNonClientRegions();
+    }
+
     private void UpdateTitleBarNonClientRegions()
     {
-        if (!AppWindowTitleBar.IsCustomizationSupported())
+        if (!AppWindowTitleBar.IsCustomizationSupported() || AppTitleBar is null || Content?.XamlRoot is not { } xamlRoot)
         {
             return;
         }
@@ -2079,12 +2097,91 @@ public sealed partial class MainWindow : Window
         try
         {
             var nonClientInput = InputNonClientPointerSource.GetForWindowId(AppWindow.Id);
-            nonClientInput.ClearRegionRects(NonClientRegionKind.Passthrough);
+            if (AppTitleBar.Visibility != Visibility.Visible || ViewModel.IsPresentationMode)
+            {
+                nonClientInput.ClearRegionRects(NonClientRegionKind.Passthrough);
+                return;
+            }
+
+            double scale = xamlRoot.RasterizationScale > 0.01 ? xamlRoot.RasterizationScale : 1.0;
+            var rects = new List<RectInt32>(8);
+
+            void TryAddPassthrough(FrameworkElement? element)
+            {
+                if (element is null ||
+                    element.ActualWidth < 1.0 ||
+                    element.ActualHeight < 1.0 ||
+                    !IsElementTreeVisible(element, AppTitleBar))
+                {
+                    return;
+                }
+
+                GeneralTransform transform = element.TransformToVisual(null);
+                Rect bounds = transform.TransformBounds(new Rect(0, 0, element.ActualWidth, element.ActualHeight));
+                if (bounds.Width < 1.0 || bounds.Height < 1.0)
+                {
+                    return;
+                }
+
+                int x = (int)Math.Floor(bounds.X * scale);
+                int y = (int)Math.Floor(bounds.Y * scale);
+                int w = (int)Math.Ceiling((bounds.X + bounds.Width) * scale) - x;
+                int h = (int)Math.Ceiling((bounds.Y + bounds.Height) * scale) - y;
+                if (w > 0 && h > 0)
+                {
+                    rects.Add(new RectInt32(x, y, w, h));
+                }
+            }
+
+            if (SidebarToggleClipContainer is not null &&
+                SidebarToggleClipContainer.Visibility == Visibility.Visible &&
+                SidebarToggleClipContainer.ActualWidth >= 4.0)
+            {
+                TryAddPassthrough(SidebarToggleButton);
+            }
+
+            TryAddPassthrough(OpenFileBtn);
+            TryAddPassthrough(SearchBtn);
+            TryAddPassthrough(SettingsBackBtn);
+            TryAddPassthrough(AnnotationToolsToggleBtn);
+            TryAddPassthrough(DocumentMenuBtn);
+            TryAddPassthrough(SettingsBtn);
+            TryAddPassthrough(ExitFullScreenBtn);
+
+            if (rects.Count > 0)
+            {
+                nonClientInput.SetRegionRects(NonClientRegionKind.Passthrough, rects.ToArray());
+            }
+            else
+            {
+                nonClientInput.ClearRegionRects(NonClientRegionKind.Passthrough);
+            }
         }
         catch
         {
             // Fallback gracefully on environments where custom non-client regions are unavailable
         }
+    }
+
+    private static bool IsElementTreeVisible(FrameworkElement element, DependencyObject stopAt)
+    {
+        DependencyObject? current = element;
+        while (current is not null)
+        {
+            if (current is FrameworkElement fe && fe.Visibility != Visibility.Visible)
+            {
+                return false;
+            }
+
+            if (ReferenceEquals(current, stopAt))
+            {
+                return true;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
     }
 
     private void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -2525,7 +2622,7 @@ public sealed partial class MainWindow : Window
                     {
                         ExtendsContentIntoTitleBar = true;
                     }
-                    SetTitleBar(TitleBarDragRegion);
+                    SetTitleBar(AppTitleBar);
 
                     if (AppWindowTitleBar.IsCustomizationSupported())
                     {

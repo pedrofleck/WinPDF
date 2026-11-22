@@ -128,10 +128,13 @@ Checklist de melhorias de usabilidade, ergonomia visual (Fluent 2 / Grid de 4px)
 - [ ] **Redo (`Ctrl + Y`), Salvamento Direto (`Ctrl + S`) e Aviso de Alterações Não Salvas:**
   - Complementar a pilha de Undo (`Ctrl + Z`) com **Redo (`Ctrl + Y` / `Ctrl + Shift + Z`)** e botões de Desfazer/Refazer na barra de ferramentas.
   - Implementar salvamento direto no arquivo atual (`Ctrl + S`), opção de salvamento automático de anotações e diálogo de confirmação ao fechar documento com `HasUnsavedChanges == true`.
-- [ ] **Configurações de Anotação e Refinamento Visual da Barra Lateral (`v0.6.1`):**
+- [ ] **Configurações de Anotação (`v0.6.1+`):**
   - Opção nas Configurações: *"Continuar editando anotações"* (manter ferramenta ativa após criar uma anotação em vez de voltar para a ferramenta de seleção/mão).
   - Opções nas Configurações para caneta/tinta: tempo de agrupamento entre traços (tinta multi-traço), suavização de tinta e comportamento da Stylus (caneta vs. mão).
-  - Corrigir a borda de destaque da página atual nas miniaturas da barra lateral (`ThumbnailsTabPage.xaml`) para ficar perfeitamente retangular ao redor da página, sem cantos arredondados vazando.
+- [x] **Refinamentos Visuais e de Janela (`v0.6.1`):**
+  - Borda de destaque da página atual nas miniaturas da barra lateral (`ThumbnailsTabPage.xaml`) perfeitamente retangular ao redor da página (`CornerRadius="0"`, `Margin="-1"`), sem cantos arredondados vazando.
+  - Área do ícone e título `"WinPDF"` na barra de título integrada (`MainWindow.xaml.cs`) integrada à região nativa de arraste e duplo clique para maximizar/restaurar (`SetTitleBar(AppTitleBar)` + `InputNonClientPointerSource` passthrough apenas nos botões).
+  - Caixa de destaque dos resultados de busca (`PdfPageCanvas.DrawTextOverlays`) ampliada proporcionalmente em torno do texto encontrado.
 
 ---
 
