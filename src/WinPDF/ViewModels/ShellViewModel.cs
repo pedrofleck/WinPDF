@@ -90,10 +90,18 @@ public sealed partial class ShellViewModel : ObservableObject
     public partial bool IsCompactChrome { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the window width is at least 950 DIPs so the sidebar is allowed.
+    /// Gets or sets a value indicating whether the window width is at least 718 DIPs (500 DIPs document area plus
+    /// the 218 DIPs minimum sidebar) so the sidebar can be opened manually. The sidebar still auto-closes below 950 DIPs.
     /// </summary>
     [ObservableProperty]
     public partial bool IsSidebarAllowed { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the document area (window width minus the open sidebar) is narrower
+    /// than 720 DIPs, which switches the bottom status bar to its compact layout.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsDocumentAreaNarrow { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether programmatic sidebar changes should avoid overwriting user settings.

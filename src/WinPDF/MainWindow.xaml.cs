@@ -28,11 +28,12 @@ public sealed partial class MainWindow : Window
 {
     private const double CompactBreakpoint = 750.0;
     private const double SidebarAutoCloseBreakpoint = 950.0;
+    private const double SidebarManualMinWindowDip = 718.0;
     private const double SidebarMaxConstraintBreakpoint = 1200.0;
     private const double MinDocumentAreaWithSidebarDip = 720.0;
     private const double MinWindowWidthDip = 500.0;
     private const double MinWindowHeightDip = 360.0;
-    private const double MinSidebarWidth = 230.0;
+    private const double MinSidebarWidth = 218.0;
     private const double MaxSidebarWidth = 480.0;
     private const double DefaultSidebarWidth = 260.0;
     private const double SidebarToggleSlotWidthDip = 44.0;
@@ -102,6 +103,7 @@ public sealed partial class MainWindow : Window
     private double _savedSidebarWidth = DefaultSidebarWidth;
     private double _effectiveSidebarWidth = DefaultSidebarWidth;
     private bool _wasSidebarClosedByNarrowWindow;
+    private bool? _lastWindowInAutoOpenZone;
     private bool _isNarrowWindowSidebarToggle;
     private bool _suppressSidebarAnimation;
     private bool _isSidebarOpenCloseAnimating;
@@ -524,12 +526,14 @@ public sealed partial class MainWindow : Window
                 }
 
                 double initialWidthDip = root.ActualWidth > 0 ? root.ActualWidth : 1280.0;
-                bool initialSidebarAllowed = initialWidthDip >= SidebarAutoCloseBreakpoint;
+                bool initialSidebarAllowed = initialWidthDip >= SidebarManualMinWindowDip;
+                bool initialInAutoOpenZone = initialWidthDip >= SidebarAutoCloseBreakpoint;
+                _lastWindowInAutoOpenZone = initialInAutoOpenZone;
                 ViewModel.IsSidebarAllowed = initialSidebarAllowed;
                 _effectiveSidebarWidth = GetEffectiveSidebarWidth(initialWidthDip);
                 SidebarPaneContainer.Width = _effectiveSidebarWidth;
 
-                if (!initialSidebarAllowed && ViewModel.IsSidebarOpen)
+                if (!initialInAutoOpenZone && ViewModel.IsSidebarOpen)
                 {
                     _wasSidebarClosedByNarrowWindow = true;
                     SetSidebarOpenFromWindowThreshold(false, animate: false);
@@ -544,6 +548,7 @@ public sealed partial class MainWindow : Window
                 UpdateSidebarLayout();
                 UpdateSidebarClipGeometries();
                 UpdateMainContainerStyle();
+                UpdateDocumentAreaNarrowState();
 
                 // Initial frame navigation
                 MainContentFrame.Navigate(typeof(DocumentView), ViewModel);
@@ -988,9 +993,14 @@ public sealed partial class MainWindow : Window
             }
         }
 
-        // 2. < 950 DIPs Sidebar & Sidebar Toggle Button auto-hide with animation,
-        //    and [950..1200] DIPs dynamic sidebar width reduction (keeping document area >= 720 DIPs)
-        bool isSidebarAllowed = widthDip >= SidebarAutoCloseBreakpoint;
+        // 2. Sidebar availability: the toggle button stays available while the window is >= 718 DIPs
+        //    (document area >= 500 DIPs + 218 DIPs sidebar). An open sidebar still auto-closes when the
+        //    window shrinks across the 950 DIPs breakpoint, and auto-reopens when it grows back past it.
+        //    [718..1200] DIPs also dynamically reduces the sidebar width (keeping document area >= 720 DIPs when possible).
+        bool isSidebarAllowed = widthDip >= SidebarManualMinWindowDip;
+        bool inAutoOpenZone = widthDip >= SidebarAutoCloseBreakpoint;
+        bool crossedBelowAutoClose = _lastWindowInAutoOpenZone == true && !inAutoOpenZone;
+        _lastWindowInAutoOpenZone = inAutoOpenZone;
         bool sidebarAllowedChanged = ViewModel.IsSidebarAllowed != isSidebarAllowed;
         if (sidebarAllowedChanged)
         {
@@ -1017,11 +1027,35 @@ public sealed partial class MainWindow : Window
         {
             ApplyEffectiveSidebarWidthForWindow(widthDip);
 
-            if (_wasSidebarClosedByNarrowWindow && !ViewModel.IsSidebarOpen && !ViewModel.IsFullScreen && !ViewModel.IsPresentationMode)
+            if (crossedBelowAutoClose && ViewModel.IsSidebarOpen)
+            {
+                _wasSidebarClosedByNarrowWindow = true;
+                SetSidebarOpenFromWindowThreshold(false, animate: !_isFullScreenTransitionRunning);
+            }
+            else if (inAutoOpenZone && _wasSidebarClosedByNarrowWindow && !ViewModel.IsSidebarOpen && !ViewModel.IsFullScreen && !ViewModel.IsPresentationMode)
             {
                 _wasSidebarClosedByNarrowWindow = false;
                 SetSidebarOpenFromWindowThreshold(true, animate: !_isFullScreenTransitionRunning);
             }
+        }
+
+        UpdateDocumentAreaNarrowState();
+    }
+
+    /// <summary>
+    /// Recomputes whether the document area (window width minus the open sidebar) is narrower than 720 DIPs,
+    /// which makes the bottom status bar use its compact (swallowed) layout.
+    /// </summary>
+    private void UpdateDocumentAreaNarrowState()
+    {
+        bool narrow = ViewModel.HasDocument &&
+                      ViewModel.IsSidebarOpen &&
+                      !ViewModel.IsFullScreen &&
+                      !ViewModel.IsPresentationMode &&
+                      (GetCurrentWindowWidthDip() - _effectiveSidebarWidth) < MinDocumentAreaWithSidebarDip - 0.5;
+        if (ViewModel.IsDocumentAreaNarrow != narrow)
+        {
+            ViewModel.IsDocumentAreaNarrow = narrow;
         }
     }
 
@@ -2222,11 +2256,12 @@ public sealed partial class MainWindow : Window
             }
 
             UpdateSidebarLayout(animate: !_suppressSidebarAnimation && !_isFullScreenTransitionRunning);
+            UpdateDocumentAreaNarrowState();
         }
         else if (e.PropertyName == nameof(ShellViewModel.HasDocument))
         {
             double currentW = GetCurrentWindowWidthDip();
-            bool sidebarAllowed = currentW >= SidebarAutoCloseBreakpoint;
+            bool sidebarAllowed = currentW >= SidebarManualMinWindowDip;
             ViewModel.IsSidebarAllowed = sidebarAllowed;
 
             if (ViewModel.HasDocument && !sidebarAllowed && ViewModel.IsSidebarOpen)
@@ -2238,6 +2273,7 @@ public sealed partial class MainWindow : Window
             ApplySidebarToggleStateImmediate(collapse: !ViewModel.HasDocument || !sidebarAllowed);
             UpdateSidebarLayout();
             UpdateMainContainerStyle();
+            UpdateDocumentAreaNarrowState();
             SelectSidebarTab(ViewModel.SidebarTab);
             DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
         }
@@ -2458,7 +2494,7 @@ public sealed partial class MainWindow : Window
         if (_sidebarOpenBeforeFullScreen)
         {
             _sidebarOpenBeforeFullScreen = false;
-            if (GetCurrentWindowWidthDip() >= SidebarAutoCloseBreakpoint)
+            if (GetCurrentWindowWidthDip() >= SidebarManualMinWindowDip)
             {
                 SetSidebarOpenFromWindowThreshold(true, animate: false);
             }

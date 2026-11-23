@@ -70,6 +70,9 @@ public sealed partial class DocumentView : Page
     private Storyboard? _searchBarStoryboard;
     private Storyboard? _horizontalPushStoryboard;
     private Storyboard? _statusBarCompactStoryboard;
+    private bool _lastStatusBarCompact;
+
+    private bool IsStatusBarCompact => ViewModel.IsCompactChrome || ViewModel.IsDocumentAreaNarrow;
     private double _statusBarMetadataExpandedWidth = 148.0;
     private double _statusBarPresentationExpandedWidth = 68.0;
     private bool _isAutoScrolling;
@@ -663,7 +666,8 @@ public sealed partial class DocumentView : Page
         }
 
         SyncPaneOffsetsImmediate();
-        ApplyStatusBarCompactStateImmediate(ViewModel.IsCompactChrome);
+        _lastStatusBarCompact = IsStatusBarCompact;
+        ApplyStatusBarCompactStateImmediate(_lastStatusBarCompact);
 
         if (ViewModel.CurrentDocument is not null)
         {
@@ -1106,9 +1110,14 @@ public sealed partial class DocumentView : Page
                 FullScreenInfoBar.IsOpen = false;
             }
         }
-        else if (e.PropertyName == nameof(ShellViewModel.IsCompactChrome))
+        else if (e.PropertyName is nameof(ShellViewModel.IsCompactChrome) or nameof(ShellViewModel.IsDocumentAreaNarrow))
         {
-            AnimateStatusBarCompactMode(ViewModel.IsCompactChrome);
+            bool compact = IsStatusBarCompact;
+            if (compact != _lastStatusBarCompact)
+            {
+                _lastStatusBarCompact = compact;
+                AnimateStatusBarCompactMode(compact);
+            }
         }
     }
 
@@ -11374,7 +11383,7 @@ public sealed partial class DocumentView : Page
 
         sb.Completed += (_, _) =>
         {
-            if (ViewModel.IsCompactChrome)
+            if (IsStatusBarCompact)
             {
                 StatusBarMetadataClipContainer.Visibility = Visibility.Collapsed;
                 StatusBarPresentationClipContainer.Visibility = Visibility.Collapsed;

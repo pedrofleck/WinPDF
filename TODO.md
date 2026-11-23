@@ -143,6 +143,7 @@ Checklist de melhorias de usabilidade, ergonomia visual (Fluent 2 / Grid de 4px)
   - Borda de destaque da página atual nas miniaturas da barra lateral (`ThumbnailsTabPage.xaml`) perfeitamente retangular ao redor da página (`CornerRadius="0"`, `Margin="-1"`), sem cantos arredondados vazando.
   - Área do ícone e título `"WinPDF"` na barra de título integrada (`MainWindow.xaml.cs`) integrada à região nativa de arraste e duplo clique para maximizar/restaurar (`SetTitleBar(AppTitleBar)` + `InputNonClientPointerSource` passthrough apenas nos botões).
   - Caixa de destaque dos resultados de busca (`PdfPageCanvas.DrawTextOverlays`) ampliada proporcionalmente em torno do texto encontrado.
+  - Suporte a reabertura manual da barra lateral em tela dividida (`SidebarManualMinWindowDip = 718.0`, `MinSidebarWidth = 218.0` em `MainWindow.xaml.cs`): a barra lateral continua fechando automaticamente abaixo de `950 DIPs`, mas permanece disponível para abertura manual até `718 DIPs` (mantendo no mínimo `500 DIPs` para a área do documento) e encolhe automaticamente os botões da barra inferior (`ShellViewModel.IsDocumentAreaNarrow`) quando a área útil do documento fica abaixo de `720 DIPs`.
 
 ---
 
