@@ -2144,6 +2144,7 @@ public sealed partial class MainWindow : Window
             TryAddPassthrough(SearchBtn);
             TryAddPassthrough(SettingsBackBtn);
             TryAddPassthrough(AnnotationToolsToggleBtn);
+            TryAddPassthrough(InsertMenuBtn);
             TryAddPassthrough(DocumentMenuBtn);
             TryAddPassthrough(SettingsBtn);
             TryAddPassthrough(ExitFullScreenBtn);

@@ -483,6 +483,34 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
     }
 
     /// <inheritdoc/>
+    public Task<PdfPageAnnotationMutationResult> AddImageAnnotationAsync(
+        long documentId,
+        PdfCreateImageRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Enqueue<PdfPageAnnotationMutationResult>(
+            new PdfiumJob<PdfPageAnnotationMutationResult>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.AddImageAnnotation(documentId, request, token),
+                cancellationToken),
+            highPriority: true);
+    }
+
+    /// <inheritdoc/>
+    public Task<PdfCapturedImage?> CaptureStampImageAsync(
+        long documentId,
+        int pageIndex,
+        int annotIndex,
+        CancellationToken cancellationToken = default)
+        => Enqueue<PdfCapturedImage?>(
+            new PdfiumJob<PdfCapturedImage?>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.CaptureStampImage(documentId, pageIndex, annotIndex, token),
+                cancellationToken),
+            highPriority: true);
+
+    /// <inheritdoc/>
     public Task<PdfPageAnnotationMutationResult> UpdateAnnotationAsync(
         long documentId,
         PdfUpdateAnnotationRequest request,
@@ -508,6 +536,21 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
             new PdfiumJob<PdfPageAnnotationMutationResult>(
                 PdfJobPriority.Critical,
                 (engine, token) => engine.MoveAnnotation(documentId, request, token),
+                cancellationToken),
+            highPriority: true);
+    }
+
+    /// <inheritdoc/>
+    public Task<PdfPageAnnotationMutationResult> ResizeAnnotationAsync(
+        long documentId,
+        PdfResizeAnnotationRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Enqueue<PdfPageAnnotationMutationResult>(
+            new PdfiumJob<PdfPageAnnotationMutationResult>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.ResizeAnnotation(documentId, request, token),
                 cancellationToken),
             highPriority: true);
     }

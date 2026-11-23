@@ -135,6 +135,19 @@ public readonly record struct PdfCapturedPathSegment(
     bool IsClosed);
 
 /// <summary>
+/// Captured raster image payload (BGRA8888) extracted from or destined for a PDF <c>/Stamp</c> annotation.
+/// </summary>
+/// <param name="PixelWidth">Image width in pixels.</param>
+/// <param name="PixelHeight">Image height in pixels.</param>
+/// <param name="BgraPixels">Tightly packed BGRA8888 pixel bytes (<c>PixelWidth * PixelHeight * 4</c>).</param>
+/// <param name="Subject">Optional image/stamp subject label.</param>
+public sealed record PdfCapturedImage(
+    int PixelWidth,
+    int PixelHeight,
+    byte[] BgraPixels,
+    string Subject = "");
+
+/// <summary>
 /// Captured vector path object from an annotation appearance stream so ink strokes and arbitrary shapes can be pasted faithfully.
 /// </summary>
 /// <param name="Segments">Ordered path segments in page user space (points).</param>
@@ -173,6 +186,7 @@ public sealed record PdfCapturedPath(
 /// <param name="BorderWidthPt">Stroke / border width in PDF points.</param>
 /// <param name="Strokes">Optional vector stroke paths for ink, line, polygon, or polyline annotations.</param>
 /// <param name="CapturedPaths">Optional captured vector paths from the annotation's appearance stream (<c>/AP</c>).</param>
+/// <param name="CapturedImage">Optional captured raster image payload for <c>/Stamp</c> annotations.</param>
 public sealed record PdfAnnotationInfo(
     int PageIndex,
     int AnnotIndex,
@@ -192,7 +206,8 @@ public sealed record PdfAnnotationInfo(
     PdfAnnotationColor? InteriorColor = null,
     float BorderWidthPt = 2.0f,
     IReadOnlyList<IReadOnlyList<System.Numerics.Vector2>>? Strokes = null,
-    IReadOnlyList<PdfCapturedPath>? CapturedPaths = null)
+    IReadOnlyList<PdfCapturedPath>? CapturedPaths = null,
+    PdfCapturedImage? CapturedImage = null)
 {
     /// <summary>Gets a value indicating whether this annotation carries a non-empty comment or text body.</summary>
     public bool HasComment => !string.IsNullOrWhiteSpace(Contents);
@@ -208,6 +223,9 @@ public sealed record PdfAnnotationInfo(
 
     /// <summary>Gets a value indicating whether this annotation can be copied, cut, or pasted.</summary>
     public bool CanCopyOrCut => !IsSignatureWidget && !IsTextMarkup;
+
+    /// <summary>Gets a value indicating whether this annotation supports interactive corner-handle resizing.</summary>
+    public bool IsResizable => Subtype == PdfAnnotationSubtype.Stamp && !IsSignatureWidget;
 
     /// <summary>
     /// Determines whether the specified PDF user-space point lies inside this annotation's hit area.
@@ -357,6 +375,31 @@ public sealed record PdfCreateFreeTextRequest(
     double MaxWidthPt = 240.0);
 
 /// <summary>
+/// Request to insert a raster image onto a PDF page as a <c>/Stamp</c> annotation.
+/// </summary>
+/// <param name="PageIndex">Zero-based target page index.</param>
+/// <param name="PdfX">Anchor top-left X coordinate in PDF points.</param>
+/// <param name="PdfY">Anchor top-left Y coordinate in PDF points.</param>
+/// <param name="PixelWidth">Image width in pixels.</param>
+/// <param name="PixelHeight">Image height in pixels.</param>
+/// <param name="BgraPixels">Tightly packed BGRA8888 pixel bytes.</param>
+/// <param name="Author">Author display name.</param>
+/// <param name="Subject">Optional subject label.</param>
+/// <param name="ExplicitWidthPt">Optional explicit width in PDF points (used when pasting/undoing).</param>
+/// <param name="ExplicitHeightPt">Optional explicit height in PDF points (used when pasting/undoing).</param>
+public sealed record PdfCreateImageRequest(
+    int PageIndex,
+    double PdfX,
+    double PdfY,
+    int PixelWidth,
+    int PixelHeight,
+    byte[] BgraPixels,
+    string Author,
+    string Subject = "",
+    double? ExplicitWidthPt = null,
+    double? ExplicitHeightPt = null);
+
+/// <summary>
 /// Request to update the comment body and optional color of an existing annotation.
 /// </summary>
 /// <param name="PageIndex">Zero-based page index.</param>
@@ -381,6 +424,17 @@ public sealed record PdfMoveAnnotationRequest(
     int AnnotIndex,
     double DeltaPdfX,
     double DeltaPdfY);
+
+/// <summary>
+/// Request to resize an existing resizable annotation (<c>Stamp</c>) to new PDF user-space bounds.
+/// </summary>
+/// <param name="PageIndex">Zero-based page index.</param>
+/// <param name="AnnotIndex">Zero-based index in the page's annotation list.</param>
+/// <param name="NewBounds">Target bounding rectangle in PDF user space (points).</param>
+public sealed record PdfResizeAnnotationRequest(
+    int PageIndex,
+    int AnnotIndex,
+    PdfRect NewBounds);
 
 /// <summary>
 /// Request to paste a non-markup annotation snapshot (comment note, text box, ink drawing, or shape) onto a target page.

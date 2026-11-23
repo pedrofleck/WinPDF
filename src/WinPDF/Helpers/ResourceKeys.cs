@@ -429,4 +429,13 @@ public static class ResourceKeys
 
     /// <summary>Tooltip for the top annotation toolbar default color picker.</summary>
     public const string ToolbarColorToolTip = "Toolbar_Color_ToolTip";
+
+    /// <summary>Toast hint shown after choosing Add Comment from the Insert menu.</summary>
+    public const string InsertCommentHint = "Insert_CommentHint";
+
+    /// <summary>Toast hint shown after choosing an image to insert on the page.</summary>
+    public const string InsertImageHint = "Insert_ImageHint";
+
+    /// <summary>Toast message shown when the selected image exceeds the 20 MB limit.</summary>
+    public const string InsertImageTooLarge = "Insert_ImageTooLarge";
 }

@@ -563,7 +563,9 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.SignatureClicked += OnCanvasSignatureClicked;
         PdfPageCanvas.TouchEmptyHoldRequested += OnCanvasTouchEmptyHoldRequested;
         PdfPageCanvas.PlaceTextNoteRequested += OnCanvasPlaceTextNoteRequested;
+        PdfPageCanvas.PlaceImageRequested += OnCanvasPlaceImageRequested;
         PdfPageCanvas.AnnotationMoved += OnCanvasAnnotationMoved;
+        PdfPageCanvas.AnnotationResized += OnCanvasAnnotationResized;
         PdfPageCanvas.MouseClickedOnPage += OnCanvasMouseClickedOnPage;
         PdfPageCanvas.IsSingleTouchViewerManipulating = () => _isManipulatingSlideSwipe && _activeTouchPointers.Count <= 1;
 
@@ -618,8 +620,12 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.TouchEmptyHoldRequested += OnCanvasTouchEmptyHoldRequested;
         PdfPageCanvas.PlaceTextNoteRequested -= OnCanvasPlaceTextNoteRequested;
         PdfPageCanvas.PlaceTextNoteRequested += OnCanvasPlaceTextNoteRequested;
+        PdfPageCanvas.PlaceImageRequested -= OnCanvasPlaceImageRequested;
+        PdfPageCanvas.PlaceImageRequested += OnCanvasPlaceImageRequested;
         PdfPageCanvas.AnnotationMoved -= OnCanvasAnnotationMoved;
         PdfPageCanvas.AnnotationMoved += OnCanvasAnnotationMoved;
+        PdfPageCanvas.AnnotationResized -= OnCanvasAnnotationResized;
+        PdfPageCanvas.AnnotationResized += OnCanvasAnnotationResized;
         PdfPageCanvas.MouseClickedOnPage -= OnCanvasMouseClickedOnPage;
         PdfPageCanvas.MouseClickedOnPage += OnCanvasMouseClickedOnPage;
         PdfPageCanvas.IsSingleTouchViewerManipulating = () => _isManipulatingSlideSwipe && _activeTouchPointers.Count <= 1;
@@ -724,7 +730,9 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.SignatureClicked -= OnCanvasSignatureClicked;
         PdfPageCanvas.TouchEmptyHoldRequested -= OnCanvasTouchEmptyHoldRequested;
         PdfPageCanvas.PlaceTextNoteRequested -= OnCanvasPlaceTextNoteRequested;
+        PdfPageCanvas.PlaceImageRequested -= OnCanvasPlaceImageRequested;
         PdfPageCanvas.AnnotationMoved -= OnCanvasAnnotationMoved;
+        PdfPageCanvas.AnnotationResized -= OnCanvasAnnotationResized;
         PdfPageCanvas.MouseClickedOnPage -= OnCanvasMouseClickedOnPage;
 
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
@@ -2730,8 +2738,16 @@ public sealed partial class DocumentView : Page
 
     private void OnTopNotificationInfoBarCloseButtonClick(InfoBar sender, object args)
     {
+        DismissTopNotification();
+    }
+
+    private void DismissTopNotification()
+    {
         _topNotificationTimer.Stop();
-        TopNotificationInfoBar.IsOpen = false;
+        if (TopNotificationInfoBar is not null)
+        {
+            TopNotificationInfoBar.IsOpen = false;
+        }
     }
 
     private void OnPresentationHideTimerTick(object? sender, object e)
@@ -2941,6 +2957,14 @@ public sealed partial class DocumentView : Page
 
         if (!isCtrl && !isAlt && e.Key == Windows.System.VirtualKey.Escape)
         {
+            if (ViewModel.ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertImage)
+            {
+                e.Handled = true;
+                DismissTopNotification();
+                ViewModel.CancelActiveInsertTool();
+                return;
+            }
+
             if (ViewModel.IsSearchOpen)
             {
                 e.Handled = true;
@@ -4425,11 +4449,6 @@ public sealed partial class DocumentView : Page
     private void OnToolEraserClicked(object sender, RoutedEventArgs e)
     {
         ViewModel.SetTool(AnnotationTool.Eraser);
-    }
-
-    private void OnToolTextNoteClicked(object sender, RoutedEventArgs e)
-    {
-        ViewModel.SetTool(AnnotationTool.TextNote);
     }
 
     private void OnDocumentDragOver(object sender, DragEventArgs e)
@@ -6257,6 +6276,15 @@ public sealed partial class DocumentView : Page
         }
     }
 
+    private void OnCanvasAnnotationResized(PdfPageCanvas canvas, PdfAnnotationInfo annot, PdfRect newBounds)
+    {
+        HideAnnotationPopupsImmediate();
+        if (ViewModel.CurrentDocument is { } doc)
+        {
+            _ = doc.ResizeAnnotationAsync(annot.PageIndex, annot.AnnotIndex, newBounds);
+        }
+    }
+
     private void OnCanvasSignatureClicked(PdfPageCanvas canvas, PdfSignatureInfo sig, Point canvasDipPt)
     {
         HideAnnotationPopupsImmediate();
@@ -6270,8 +6298,33 @@ public sealed partial class DocumentView : Page
             return;
         }
 
+        if (ViewModel.ActiveTool == AnnotationTool.TextNote)
+        {
+            ViewModel.ActiveTool = AnnotationTool.Select;
+        }
+
+        DismissTopNotification();
         HideAnnotationPopupsImmediate();
         OpenCreateAnnotationEditor(AnnotationEditorMode.CreateNote, pageInfo.Index, pdfPt, canvas, canvasDipPt, pendingSelection: null);
+    }
+
+    private async void OnCanvasPlaceImageRequested(PdfPageCanvas canvas, Vector2 pdfPt, Point canvasDipPt)
+    {
+        if (canvas.PageInfo is not { } pageInfo || ViewModel.CurrentDocument is not { } doc)
+        {
+            return;
+        }
+
+        PdfCapturedImage? pending = ViewModel.PendingImageToInsert;
+        DismissTopNotification();
+        ViewModel.CancelActiveInsertTool();
+        if (pending is null)
+        {
+            return;
+        }
+
+        HideAnnotationPopupsImmediate();
+        await doc.AddImageAnnotationAsync(pageInfo.Index, pdfPt.X, pdfPt.Y, pending);
     }
 
     private void OnCanvasTouchEmptyHoldRequested(PdfPageCanvas canvas, Vector2 pdfPt, Point canvasDipPt)
@@ -6832,11 +6885,23 @@ public sealed partial class DocumentView : Page
     // Annotation clipboard (copy / cut / paste)
     // =========================================================================
 
-    private void CopyAnnotationToClipboard(PdfAnnotationInfo annot)
+    private void CopyAnnotationToClipboard(PdfAnnotationInfo annot) => _ = CopyAnnotationToClipboardAsync(annot);
+
+    private async Task CopyAnnotationToClipboardAsync(PdfAnnotationInfo annot)
     {
         if (!annot.CanCopyOrCut)
         {
             return;
+        }
+
+        if (annot is { Subtype: PdfAnnotationSubtype.Stamp, CapturedImage: null } &&
+            ViewModel.CurrentDocument is { } doc)
+        {
+            PdfCapturedImage? captured = await doc.CaptureStampImageAsync(annot.PageIndex, annot.AnnotIndex);
+            if (captured is not null)
+            {
+                annot = annot with { CapturedImage = captured };
+            }
         }
 
         _copiedAnnotation = annot;
@@ -6848,6 +6913,15 @@ public sealed partial class DocumentView : Page
         if (!annot.CanCopyOrCut)
         {
             return;
+        }
+
+        if (annot is { Subtype: PdfAnnotationSubtype.Stamp, CapturedImage: null })
+        {
+            PdfCapturedImage? captured = await doc.CaptureStampImageAsync(annot.PageIndex, annot.AnnotIndex);
+            if (captured is not null)
+            {
+                annot = annot with { CapturedImage = captured };
+            }
         }
 
         _copiedAnnotation = annot;

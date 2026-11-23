@@ -110,6 +110,10 @@ internal static unsafe partial class PdfiumNative
 
     [LibraryImport(Lib)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial PdfiumBitmapHandle FPDFBitmap_Create(int width, int height, int alpha);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial PdfiumBitmapHandle FPDFBitmap_CreateEx(int width, int height, int format, void* firstScan, int stride);
 
     [LibraryImport(Lib)]
@@ -123,6 +127,18 @@ internal static unsafe partial class PdfiumNative
     [LibraryImport(Lib)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial int FPDFBitmap_GetStride(PdfiumBitmapHandle bitmap);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFBitmap_GetFormat(PdfiumBitmapHandle bitmap);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFBitmap_GetWidth(PdfiumBitmapHandle bitmap);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFBitmap_GetHeight(PdfiumBitmapHandle bitmap);
 
     [LibraryImport(Lib)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
@@ -677,6 +693,38 @@ internal static unsafe partial class PdfiumNative
     // ------------------------------------------------------------------------------------------
     // FormFill & interactive widget rendering (fpdf_formfill.h)
     // ------------------------------------------------------------------------------------------
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial nint FPDFPageObj_NewImageObj(PdfiumDocumentHandle document);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial void FPDFPageObj_Destroy(nint pageObject);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFImageObj_SetBitmap(nint* pages, int count, nint imageObject, PdfiumBitmapHandle bitmap);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFImageObj_SetMatrix(nint imageObject, double a, double b, double c, double d, double e, double f);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial PdfiumBitmapHandle FPDFImageObj_GetBitmap(nint imageObject);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial void FPDFPageObj_Transform(nint pageObject, double a, double b, double c, double d, double e, double f);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_AppendObject(PdfiumAnnotationHandle annot, nint pageObject);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_UpdateObject(PdfiumAnnotationHandle annot, nint pageObject);
 
     [LibraryImport(Lib)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]

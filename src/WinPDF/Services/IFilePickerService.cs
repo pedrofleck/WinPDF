@@ -19,4 +19,11 @@ public interface IFilePickerService
     /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
     /// <returns>The path chosen by the user, or <c>null</c> if cancelled.</returns>
     Task<string?> PickSavePdfAsync(string suggestedFileName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Prompts the user to select an image file to insert onto the document.
+    /// </summary>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The path to the selected image file, or <c>null</c> if cancelled.</returns>
+    Task<string?> PickOpenImageAsync(CancellationToken cancellationToken = default);
 }

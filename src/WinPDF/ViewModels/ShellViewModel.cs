@@ -28,6 +28,11 @@ public sealed partial class ShellViewModel : ObservableObject
     private string? _pendingNotificationMessage;
 
     /// <summary>
+    /// Gets or sets the decoded image waiting to be positioned on a PDF page via <see cref="AnnotationTool.InsertImage"/>.
+    /// </summary>
+    public PdfCapturedImage? PendingImageToInsert { get; set; }
+
+    /// <summary>
     /// Gets the application settings persistence service.
     /// </summary>
     public ISettingsService SettingsService => _settingsService;
@@ -1517,13 +1522,124 @@ public sealed partial class ShellViewModel : ObservableObject
     public void ToggleAnnotationToolbar()
     {
         IsAnnotationToolbarOpen = !IsAnnotationToolbarOpen;
-        if (!IsAnnotationToolbarOpen)
+        if (IsAnnotationToolbarOpen)
+        {
+            PendingImageToInsert = null;
+            if (ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertImage)
+            {
+                ActiveTool = AnnotationTool.Select;
+            }
+        }
+        else
         {
             IsAnnotationNoticeOpen = false;
             if (ActiveTool != AnnotationTool.Select)
             {
                 ActiveTool = AnnotationTool.Select;
             }
+        }
+    }
+
+    /// <summary>
+    /// Activates the Add Comment placement tool from the top-bar Insert menu.
+    /// </summary>
+    [RelayCommand]
+    public void StartInsertComment()
+    {
+        if (CurrentDocument is null)
+        {
+            return;
+        }
+
+        IsAnnotationToolbarOpen = false;
+        IsAnnotationNoticeOpen = false;
+        PendingImageToInsert = null;
+        ActiveTool = AnnotationTool.TextNote;
+        NotificationRequested?.Invoke(string.Empty, ResourceStrings.Get(ResourceKeys.InsertCommentHint));
+    }
+
+    /// <summary>
+    /// Prompts the user to pick an image file and enters placement mode (<see cref="AnnotationTool.InsertImage"/>).
+    /// </summary>
+    [RelayCommand]
+    public async Task StartInsertImageAsync()
+    {
+        if (CurrentDocument is null)
+        {
+            return;
+        }
+
+        IsAnnotationToolbarOpen = false;
+        IsAnnotationNoticeOpen = false;
+
+        string? path = await _filePickerService.PickOpenImageAsync();
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        try
+        {
+            const long MaxImageFileBytes = 20L * 1024 * 1024;
+            var fileInfo = new System.IO.FileInfo(path);
+            if (fileInfo.Exists && fileInfo.Length > MaxImageFileBytes)
+            {
+                NotificationRequested?.Invoke(string.Empty, ResourceStrings.Get(ResourceKeys.InsertImageTooLarge));
+                return;
+            }
+
+            Windows.Storage.StorageFile file = await Windows.Storage.StorageFile.GetFileFromPathAsync(path);
+            using var stream = await file.OpenReadAsync();
+            Windows.Graphics.Imaging.BitmapDecoder decoder = await Windows.Graphics.Imaging.BitmapDecoder.CreateAsync(stream);
+            uint srcW = decoder.PixelWidth;
+            uint srcH = decoder.PixelHeight;
+            if (srcW == 0 || srcH == 0)
+            {
+                return;
+            }
+
+            const uint MaxDim = 1600;
+            uint dstW = srcW;
+            uint dstH = srcH;
+            Windows.Graphics.Imaging.BitmapTransform transform = new();
+            if (Math.Max(srcW, srcH) > MaxDim)
+            {
+                double scale = MaxDim / (double)Math.Max(srcW, srcH);
+                dstW = Math.Max(1u, (uint)Math.Round(srcW * scale));
+                dstH = Math.Max(1u, (uint)Math.Round(srcH * scale));
+                transform.ScaledWidth = dstW;
+                transform.ScaledHeight = dstH;
+                transform.InterpolationMode = Windows.Graphics.Imaging.BitmapInterpolationMode.Fant;
+            }
+
+            Windows.Graphics.Imaging.PixelDataProvider pixelData = await decoder.GetPixelDataAsync(
+                Windows.Graphics.Imaging.BitmapPixelFormat.Bgra8,
+                Windows.Graphics.Imaging.BitmapAlphaMode.Straight,
+                transform,
+                Windows.Graphics.Imaging.ExifOrientationMode.RespectExifOrientation,
+                Windows.Graphics.Imaging.ColorManagementMode.ColorManageToSRgb);
+
+            byte[] pixels = pixelData.DetachPixelData();
+            string subject = System.IO.Path.GetFileNameWithoutExtension(path);
+            PendingImageToInsert = new PdfCapturedImage((int)dstW, (int)dstH, pixels, subject);
+            ActiveTool = AnnotationTool.InsertImage;
+            NotificationRequested?.Invoke(string.Empty, ResourceStrings.Get(ResourceKeys.InsertImageHint));
+        }
+        catch (Exception ex)
+        {
+            NotificationRequested?.Invoke(string.Empty, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Cancels any active Insert-menu placement mode and restores <see cref="AnnotationTool.Select"/>.
+    /// </summary>
+    public void CancelActiveInsertTool()
+    {
+        PendingImageToInsert = null;
+        if (ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertImage)
+        {
+            ActiveTool = AnnotationTool.Select;
         }
     }
 
@@ -1756,6 +1872,7 @@ public sealed partial class ShellViewModel : ObservableObject
         IsSearchOpen = false;
         IsAnnotationToolbarOpen = false;
         IsAnnotationNoticeOpen = false;
+        CancelActiveInsertTool();
         if (IsPresentationMode)
         {
             IsPresentationMode = false;

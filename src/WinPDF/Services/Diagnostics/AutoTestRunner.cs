@@ -646,6 +646,107 @@ public static partial class AutoTestRunner
                     Contents: string.Empty,
                     Author: "WinPDF AutoTest"));
 
+            // Verify Image Stamp creation, rendering, move, capture + paste, persistence, and deletion
+            byte[] imgPixels = new byte[32 * 32 * 4];
+            for (int p = 0; p < imgPixels.Length; p += 4)
+            {
+                imgPixels[p] = 240;     // B
+                imgPixels[p + 1] = 40;  // G
+                imgPixels[p + 2] = 20;  // R
+                imgPixels[p + 3] = 255; // A
+            }
+
+            PdfPageAnnotationMutationResult imgCreateRes = await pdfService.AddImageAnnotationAsync(
+                tempDocId,
+                new PdfCreateImageRequest(
+                    PageIndex: 0,
+                    PdfX: 380.0,
+                    PdfY: 640.0,
+                    PixelWidth: 32,
+                    PixelHeight: 32,
+                    BgraPixels: imgPixels,
+                    Author: "WinPDF AutoTest",
+                    Subject: "AutoTestImage"));
+            PdfAnnotationInfo? createdImg = imgCreateRes.Annotations.FirstOrDefault(a => a.AnnotIndex == imgCreateRes.TargetAnnotIndex);
+            double origImgLeft = createdImg?.Bounds.Left ?? 0.0;
+
+            async Task<int> CountBluePixelsAsync(PdfRect bounds)
+            {
+                if (openedAnnotDoc.Pages.Count == 0 || bounds.IsEmpty)
+                {
+                    return 0;
+                }
+
+                PdfPageInfo p0 = openedAnnotDoc.Pages[0];
+                PdfRenderRequest req = PdfRenderRequest.ForFullPage(tempDocId, p0, 1.0, 1.0, 0, PdfRenderFlags.Annotations);
+                using PdfBitmapLease rendered = await pdfService.RenderAsync(req, PdfJobPriority.Visible);
+
+                WinPDF.Rendering.PageCoordinateTransform tr = WinPDF.Rendering.PageCoordinateTransform.FromPage(p0, 0);
+                Windows.Foundation.Rect dip = tr.ToPageRect(bounds);
+                bool swap = WinPDF.Rendering.PageCoordinateTransform.NormalizeRotation(p0.Rotation) is 90 or 270;
+                double dispW = (swap ? p0.HeightPt : p0.WidthPt) * WinPDF.Rendering.PageCoordinateTransform.DipsPerPoint;
+                double dispH = (swap ? p0.WidthPt : p0.HeightPt) * WinPDF.Rendering.PageCoordinateTransform.DipsPerPoint;
+                double sx = rendered.Width / Math.Max(1.0, dispW);
+                double sy = rendered.Height / Math.Max(1.0, dispH);
+
+                int minX = Math.Clamp((int)Math.Floor(dip.Left * sx) + 2, 0, rendered.Width - 1);
+                int maxX = Math.Clamp((int)Math.Ceiling(dip.Right * sx) - 2, 0, rendered.Width - 1);
+                int minY = Math.Clamp((int)Math.Floor(dip.Top * sy) + 2, 0, rendered.Height - 1);
+                int maxY = Math.Clamp((int)Math.Ceiling(dip.Bottom * sy) - 2, 0, rendered.Height - 1);
+                int count = 0;
+                for (int y = minY; y <= maxY; y++)
+                {
+                    int rowOffset = y * rendered.Stride;
+                    for (int x = minX; x <= maxX; x++)
+                    {
+                        int px = rowOffset + (x * 4);
+                        byte b = Marshal.ReadByte(rendered.Scan0, px);
+                        byte g = Marshal.ReadByte(rendered.Scan0, px + 1);
+                        byte r = Marshal.ReadByte(rendered.Scan0, px + 2);
+                        if (b > 200 && r < 60 && g < 80)
+                        {
+                            count++;
+                        }
+                    }
+                }
+
+                return count;
+            }
+
+            int imgBluePixels = createdImg is not null ? await CountBluePixelsAsync(createdImg.Bounds) : 0;
+
+            PdfPageAnnotationMutationResult imgMoveRes = createdImg is not null
+                ? await pdfService.MoveAnnotationAsync(tempDocId, new PdfMoveAnnotationRequest(0, createdImg.AnnotIndex, 20.0, -14.0))
+                : imgCreateRes;
+            PdfAnnotationInfo? movedImgAnnot = imgMoveRes.Annotations.FirstOrDefault(a => a.AnnotIndex == imgMoveRes.TargetAnnotIndex);
+            int imgMoveBluePx = movedImgAnnot is not null ? await CountBluePixelsAsync(movedImgAnnot.Bounds) : 0;
+
+            float expectedResizedWidth = movedImgAnnot is not null ? movedImgAnnot.Bounds.Width * 2.0f : 48f;
+            PdfPageAnnotationMutationResult imgResizeRes = movedImgAnnot is not null
+                ? await pdfService.ResizeAnnotationAsync(
+                    tempDocId,
+                    new PdfResizeAnnotationRequest(
+                        0,
+                        movedImgAnnot.AnnotIndex,
+                        new PdfRect(
+                            movedImgAnnot.Bounds.Left,
+                            movedImgAnnot.Bounds.Top - (movedImgAnnot.Bounds.Height * 2.0f),
+                            movedImgAnnot.Bounds.Left + (movedImgAnnot.Bounds.Width * 2.0f),
+                            movedImgAnnot.Bounds.Top)))
+                : imgMoveRes;
+            PdfAnnotationInfo? resizedImgAnnot = imgResizeRes.Annotations.FirstOrDefault(a => a.AnnotIndex == imgResizeRes.TargetAnnotIndex);
+            int imgResizeBluePx = resizedImgAnnot is not null ? await CountBluePixelsAsync(resizedImgAnnot.Bounds) : 0;
+
+            PdfCapturedImage? capturedStampImg = await pdfService.CaptureStampImageAsync(tempDocId, 0, imgResizeRes.TargetAnnotIndex);
+            bool imgPasteOk = false;
+            if (capturedStampImg is not null && resizedImgAnnot is not null)
+            {
+                PdfPageAnnotationMutationResult imgPasteRes = await pdfService.PasteAnnotationAsync(
+                    tempDocId,
+                    new PdfPasteAnnotationRequest(resizedImgAnnot with { CapturedImage = capturedStampImg }, 0, 440.0, 600.0));
+                imgPasteOk = imgPasteRes.TargetAnnotIndex >= 0;
+            }
+
             bool pastedOk = false;
             if (createdFreeText is not null)
             {
@@ -680,6 +781,11 @@ public static partial class AutoTestRunner
             PdfAnnotationInfo? persistedBlueNote = loadedAnnots.FirstOrDefault(a => a.Subtype == PdfAnnotationSubtype.Text && a.Contents == "Blue Comment");
             PdfAnnotationInfo? persistedFreeText = loadedAnnots.FirstOrDefault(a => a.Subtype == PdfAnnotationSubtype.FreeText && a.Contents == "AutoTest FreeText Box");
             PdfAnnotationInfo? persistedUnderline = loadedAnnots.FirstOrDefault(a => a.Subtype == PdfAnnotationSubtype.Underline);
+            PdfAnnotationInfo? persistedImg = loadedAnnots.FirstOrDefault(a => a.Subtype == PdfAnnotationSubtype.Stamp && a.Subject == "AutoTestImage");
+            bool imgMovedOk = persistedImg is not null &&
+                              Math.Abs((persistedImg.Bounds.Left - origImgLeft) - 20.0) < 2.0;
+            bool imgResizedOk = persistedImg is not null &&
+                                Math.Abs(persistedImg.Bounds.Width - expectedResizedWidth) < 2.0;
 
             bool persistedBlueColor = persistedBlueNote is not null &&
                                       Math.Abs(persistedBlueNote.Color.R - PdfAnnotationColor.Blue.R) < 8 &&
@@ -739,6 +845,12 @@ public static partial class AutoTestRunner
                         pastedOk &&
                         colorUpdated &&
                         movedOk &&
+                        imgBluePixels > 100 &&
+                        imgMoveBluePx >= imgBluePixels * 0.85 &&
+                        imgResizeBluePx > imgMoveBluePx * 2 &&
+                        imgMovedOk &&
+                        imgResizedOk &&
+                        imgPasteOk &&
                         undoOk &&
                         nonWhitePixels > 20 &&
                         darkTextPixels > 5 &&
@@ -746,7 +858,7 @@ public static partial class AutoTestRunner
 
             annotDetails =
                 $"Sigs={sigs.Count}, Persisted={loadedAnnots.Count}, ColorOk={colorUpdated}, NoteColorOk={movedNoteKeptColor && persistedBlueColor}, " +
-                $"MovedOk={movedOk}, PastedOk={pastedOk}, UnderlineOk={persistedUnderline is not null}, UndoOk={undoOk}, " +
+                $"MovedOk={movedOk}, PastedOk={pastedOk}, UnderlineOk={persistedUnderline is not null}, ImgBluePx={imgBluePixels}, ImgMoveBluePx={imgMoveBluePx}, ImgResizeBluePx={imgResizeBluePx}, ImgMovedOk={imgMovedOk}, ImgResizedOk={imgResizedOk}, ImgPastedOk={imgPasteOk}, UndoOk={undoOk}, " +
                 $"FreeTextNonWhitePx={nonWhitePixels}, FreeTextDarkTextPx={darkTextPixels}, Page0BeforeDel={beforeDeletePage0}, AfterDel={afterDeleteCount}";
         }
         catch (Exception ex)

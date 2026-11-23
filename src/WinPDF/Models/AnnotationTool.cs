@@ -28,5 +28,10 @@ public enum AnnotationTool
     /// <summary>
     /// Adds a popup text note annotation.
     /// </summary>
-    TextNote
+    TextNote,
+
+    /// <summary>
+    /// Positions a selected image stamp annotation onto the page.
+    /// </summary>
+    InsertImage
 }

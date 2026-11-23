@@ -296,6 +296,61 @@
                     <FontIcon FontSize="16" Glyph="&#xED63;" />
                 </Button>
 
+                <!-- Insert elements menu (Comment, Text, Image, Signature) -->
+                <Button
+                    x:Name="InsertMenuBtn"
+                    x:Uid="InsertMenuButton"
+                    Width="36"
+                    Height="32"
+                    Padding="0"
+                    CornerRadius="4"
+                    IsTabStop="False"
+                    Style="{StaticResource SubtleButtonStyle}"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
+                    <FontIcon FontSize="16" Glyph="&#xE710;" />
+                    <Button.Flyout>
+                        <MenuFlyout Placement="BottomEdgeAlignedRight">
+                            <MenuFlyoutItem
+                                x:Uid="InsertMenu_Comment"
+                                Command="{x:Bind ViewModel.StartInsertCommentCommand}">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE90A;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutItem
+                                x:Uid="InsertMenu_Text"
+                                IsEnabled="False">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE8D2;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutItem
+                                x:Uid="InsertMenu_Image"
+                                Command="{x:Bind ViewModel.StartInsertImageCommand}">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xE91B;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                            <MenuFlyoutItem
+                                x:Uid="InsertMenu_Signature"
+                                IsEnabled="False">
+                                <MenuFlyoutItem.Icon>
+                                    <FontIcon Glyph="&#xEE56;" />
+                                </MenuFlyoutItem.Icon>
+                            </MenuFlyoutItem>
+                        </MenuFlyout>
+                    </Button.Flyout>
+                </Button>
+
+                <!-- Vertical divider separating annotation/insert tools from general menus -->
+                <Border
+                    Width="1"
+                    Height="16"
+                    Margin="4,0"
+                    VerticalAlignment="Center"
+                    Background="{ThemeResource DividerStrokeColorDefaultBrush}"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}" />
+
                 <!-- Document Options Menu (GNOME Papers) -->
                 <Button
                     x:Name="DocumentMenuBtn"

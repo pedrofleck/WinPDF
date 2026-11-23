@@ -381,4 +381,13 @@
   <data name="Annot_Undo_ToolTip" xml:space="preserve"><value>Undo (Ctrl+Z)</value></data>
   <data name="Context_UndoAnnotation.Text" xml:space="preserve"><value>Undo</value></data>
   <data name="Toolbar_Color_ToolTip" xml:space="preserve"><value>Default annotation color</value></data>
+  <data name="InsertMenuButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Insert</value></data>
+  <data name="InsertMenuButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Insert</value></data>
+  <data name="InsertMenu_Comment.Text" xml:space="preserve"><value>Add comment</value></data>
+  <data name="InsertMenu_Text.Text" xml:space="preserve"><value>Add text</value></data>
+  <data name="InsertMenu_Image.Text" xml:space="preserve"><value>Insert image</value></data>
+  <data name="InsertMenu_Signature.Text" xml:space="preserve"><value>Insert signature</value></data>
+  <data name="Insert_CommentHint" xml:space="preserve"><value>Click on the page to add a comment</value></data>
+  <data name="Insert_ImageHint" xml:space="preserve"><value>Click on the page to position the image</value></data>
+  <data name="Insert_ImageTooLarge" xml:space="preserve"><value>The selected image exceeds the 20 MB maximum file size limit.</value></data>
 </root>

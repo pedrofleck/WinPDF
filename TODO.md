@@ -131,6 +131,14 @@ Checklist de melhorias de usabilidade, ergonomia visual (Fluent 2 / Grid de 4px)
 - [ ] **Configurações de Anotação (`v0.6.1+`):**
   - Opção nas Configurações: *"Continuar editando anotações"* (manter ferramenta ativa após criar uma anotação em vez de voltar para a ferramenta de seleção/mão).
   - Opções nas Configurações para caneta/tinta: tempo de agrupamento entre traços (tinta multi-traço), suavização de tinta e comportamento da Stylus (caneta vs. mão).
+- [x] **Menu Inserir na Barra Superior (`v0.6.1` — Comentário e Imagem):**
+  - Novo botão `+` (`InsertMenuBtn` em `MainWindow.xaml` entre o lápis e o menu `...`) separando inserção de objetos das ferramentas de traço do lápis.
+  - **Adicionar comentário** movido da barra flutuante do lápis para o menu Inserir (`StartInsertCommentCommand`).
+  - **Inserir imagem** (`StartInsertImageCommand` + `FPDF_ANNOT_STAMP` via `FPDFPageObj_NewImageObj` / `FPDFImageObj_SetBitmap`) com suporte a transparência PNG, movimentação por arraste, redimensionamento interativo pelos 4 cantos (proporção travada + `Shift` livre), Copiar/Recortar/Colar, Undo (`Ctrl+Z`) e persistência no PDF.
+  - Itens **Adicionar texto** e **Inserir assinatura** já exibidos no menu como *grayed out* (`IsEnabled="False"`) aguardando implementação.
+- [ ] **Menu Inserir Fase 2 (`v0.6.1+` — Adicionar Texto e Inserir Assinatura):**
+  - **Adicionar texto (`FreeText` com formatação inline):** clicar na página para abrir uma caixa de edição transparente diretamente sobre o PDF com mini-barra Acrylic `12 DIPs` acima (`Fonte`, `Tamanho`, `Negrito`, `Itálico`, `Sublinhado`, `Cor`, `Excluir`, `Confirmar`), gravando `/AP` vetorial em `FPDF_ANNOT_FREETEXT` e permitindo reedição via QuickBar.
+  - **Inserir assinatura (rubrica visual):** diálogo modal para desenhar assinatura com mouse/caneta ou importar `.png` com fundo transparente, salvando assinaturas reutilizáveis localmente (`%LOCALAPPDATA%\WinPDF\signatures\`), carimbando como `FPDF_ANNOT_STAMP` e adicionando alças de redimensionamento nos cantos para imagens e assinaturas inseridas.
 - [x] **Refinamentos Visuais e de Janela (`v0.6.1`):**
   - Borda de destaque da página atual nas miniaturas da barra lateral (`ThumbnailsTabPage.xaml`) perfeitamente retangular ao redor da página (`CornerRadius="0"`, `Margin="-1"`), sem cantos arredondados vazando.
   - Área do ícone e título `"WinPDF"` na barra de título integrada (`MainWindow.xaml.cs`) integrada à região nativa de arraste e duplo clique para maximizar/restaurar (`SetTitleBar(AppTitleBar)` + `InputNonClientPointerSource` passthrough apenas nos botões).

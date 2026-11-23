@@ -82,6 +82,9 @@ public sealed partial class PdfPageCanvas : Grid
     private static readonly InputSystemCursor s_iBeamCursor = InputSystemCursor.Create(InputSystemCursorShape.IBeam);
     private static readonly InputSystemCursor s_handCursor = InputSystemCursor.Create(InputSystemCursorShape.Hand);
     private static readonly InputSystemCursor s_sizeAllCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeAll);
+    private static readonly InputSystemCursor s_crossCursor = InputSystemCursor.Create(InputSystemCursorShape.Cross);
+    private static readonly InputSystemCursor s_sizeNwSeCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeNorthwestSoutheast);
+    private static readonly InputSystemCursor s_sizeNeSwCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeNortheastSouthwest);
 
     [ComImport]
     [Guid("905a0fef-bc53-11df-8c49-001e4fc686da")]
@@ -258,9 +261,23 @@ public sealed partial class PdfPageCanvas : Grid
     private int _selectionAnchorCharIndex = -1;
     private int _lastDragEndCharIndex = -2;
     private PdfLinkTarget _pressedLink = PdfLinkTarget.None;
+    private enum AnnotationResizeHandle
+    {
+        None,
+        TopLeft,
+        TopRight,
+        BottomLeft,
+        BottomRight,
+    }
+
     private PdfAnnotationInfo? _pressedMovableAnnotation;
     private bool _isDraggingAnnotation;
     private Point _annotationDragDeltaDip;
+    private PdfAnnotationInfo? _resizingAnnotation;
+    private AnnotationResizeHandle _activeResizeHandle;
+    private bool _isResizingAnnotation;
+    private Rect _resizeOrigRectDip;
+    private Rect _annotationResizePreviewDip;
     private int _clickCount;
     private long _lastClickTick;
     private Point _lastClickDipPoint = new(-1000, -1000);
@@ -369,9 +386,19 @@ public sealed partial class PdfPageCanvas : Grid
     public static event Action<PdfPageCanvas, Vector2, Point>? PlaceTextNoteRequested;
 
     /// <summary>
+    /// Event raised when the user taps or clicks a page while the Insert Image tool is active.
+    /// </summary>
+    public static event Action<PdfPageCanvas, Vector2, Point>? PlaceImageRequested;
+
+    /// <summary>
     /// Event raised when the user finishes dragging a movable annotation to a new location on the page.
     /// </summary>
     public static event Action<PdfPageCanvas, PdfAnnotationInfo, Vector2>? AnnotationMoved;
+
+    /// <summary>
+    /// Event raised when the user finishes resizing a resizable annotation (<c>/Stamp</c>) via a corner handle.
+    /// </summary>
+    public static event Action<PdfPageCanvas, PdfAnnotationInfo, PdfRect>? AnnotationResized;
 
     /// <summary>
     /// Event raised when the user presses a mouse button over this page canvas, reporting the PDF-space point.
@@ -969,7 +996,7 @@ public sealed partial class PdfPageCanvas : Grid
             return false;
         }
 
-        return shell.ActiveTool is AnnotationTool.Select or AnnotationTool.Highlighter or AnnotationTool.TextNote;
+        return shell.ActiveTool is AnnotationTool.Select or AnnotationTool.Highlighter or AnnotationTool.TextNote or AnnotationTool.InsertImage;
     }
 
     private void FocusParentViewerIfNeeded()
@@ -997,6 +1024,9 @@ public sealed partial class PdfPageCanvas : Grid
             InputSystemCursorShape.IBeam => s_iBeamCursor,
             InputSystemCursorShape.Hand => s_handCursor,
             InputSystemCursorShape.SizeAll => s_sizeAllCursor,
+            InputSystemCursorShape.Cross => s_crossCursor,
+            InputSystemCursorShape.SizeNorthwestSoutheast => s_sizeNwSeCursor,
+            InputSystemCursorShape.SizeNortheastSouthwest => s_sizeNeSwCursor,
             _ => s_arrowCursor,
         };
     }
@@ -1282,9 +1312,17 @@ public sealed partial class PdfPageCanvas : Grid
         }
 
         if (!isTouch &&
-            (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool == AnnotationTool.TextNote)
+            (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertImage)
         {
+            AnnotationTool activeTool = _shellViewModel!.ActiveTool;
             Vector2 notePdfPt = ToPdfPoint(pt.Position);
+            if (activeTool == AnnotationTool.InsertImage)
+            {
+                PlaceImageRequested?.Invoke(this, notePdfPt, pt.Position);
+                e.Handled = true;
+                return;
+            }
+
             PdfAnnotationInfo? hitAnnot = _observedDocument?.HitTestAnnotation(PageInfo.Index, notePdfPt.X, notePdfPt.Y, tolerancePt: 6.0);
             if (hitAnnot is not null)
             {
@@ -1315,6 +1353,36 @@ public sealed partial class PdfPageCanvas : Grid
             (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool == AnnotationTool.Select &&
             _observedDocument is not null)
         {
+            if (_observedDocument.SelectedAnnotation is { IsResizable: true } selectedResizable &&
+                selectedResizable.PageIndex == PageInfo.Index)
+            {
+                AnnotationResizeHandle handle = HitTestResizeHandle(selectedResizable, pt.Position, out Rect origRectDip);
+                if (handle != AnnotationResizeHandle.None)
+                {
+                    _resizingAnnotation = selectedResizable;
+                    _activeResizeHandle = handle;
+                    _isResizingAnnotation = true;
+                    _resizeOrigRectDip = origRectDip;
+                    _annotationResizePreviewDip = origRectDip;
+                    _isPointerDown = true;
+                    _hasDraggedSelection = false;
+                    _pressedLink = PdfLinkTarget.None;
+                    _pressDipPoint = pt.Position;
+                    try
+                    {
+                        _ = CapturePointer(e.Pointer);
+                    }
+                    catch
+                    {
+                    }
+
+                    SetCursorShape(GetResizeCursorShape(handle));
+                    InvalidateOverlays();
+                    e.Handled = true;
+                    return;
+                }
+            }
+
             Vector2 pressPdf = ToPdfPoint(pt.Position);
             PdfAnnotationInfo? hitMovable = _observedDocument.HitTestAnnotation(PageInfo.Index, pressPdf.X, pressPdf.Y, tolerancePt: 4.0);
             if (hitMovable is { IsMovable: true })
@@ -2004,6 +2072,13 @@ public sealed partial class PdfPageCanvas : Grid
                 PlaceTextNoteRequested?.Invoke(this, _touchPressPdfPoint, releaseDip);
                 return;
             }
+
+            if (activeShell?.ActiveTool == AnnotationTool.InsertImage)
+            {
+                _lastTouchTapTick = 0;
+                PlaceImageRequested?.Invoke(this, _touchPressPdfPoint, releaseDip);
+                return;
+            }
         }
 
         Point curRootPt = new(_touchPressRootDipPoint.X + tdx, _touchPressRootDipPoint.Y + tdy);
@@ -2148,7 +2223,11 @@ public sealed partial class PdfPageCanvas : Grid
             if (!_hasDraggedSelection && _isPointerDown)
             {
                 _pressedLink = hit.Link;
-                if (hit.Link.IsValid)
+                if ((_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertImage)
+                {
+                    SetCursorShape(InputSystemCursorShape.Cross);
+                }
+                else if (hit.Link.IsValid)
                 {
                     SetCursorShape(InputSystemCursorShape.Hand);
                 }
@@ -2209,6 +2288,15 @@ public sealed partial class PdfPageCanvas : Grid
 
         Point posDip = e.GetCurrentPoint(this).Position;
 
+        if (_isPointerDown && _isResizingAnnotation && _resizingAnnotation is not null && PageInfo is not null)
+        {
+            UpdateAnnotationResizePreview(posDip);
+            SetCursorShape(GetResizeCursorShape(_activeResizeHandle));
+            InvalidateOverlays();
+            e.Handled = true;
+            return;
+        }
+
         if (_isPointerDown && _pressedMovableAnnotation is not null)
         {
             double adx = posDip.X - _pressDipPoint.X;
@@ -2266,6 +2354,18 @@ public sealed partial class PdfPageCanvas : Grid
             return;
         }
 
+        if (PageInfo is not null &&
+            _observedDocument?.SelectedAnnotation is { IsResizable: true } hoverResizable &&
+            hoverResizable.PageIndex == PageInfo.Index)
+        {
+            AnnotationResizeHandle hoverHandle = HitTestResizeHandle(hoverResizable, posDip, out _);
+            if (hoverHandle != AnnotationResizeHandle.None)
+            {
+                SetCursorShape(GetResizeCursorShape(hoverHandle));
+                return;
+            }
+        }
+
         RequestHoverHitTest(posDip);
     }
 
@@ -2301,6 +2401,9 @@ public sealed partial class PdfPageCanvas : Grid
         // synchronously raises OnCanvasPointerCaptureLost in WinUI 3!
         bool wasDragged = _hasDraggedSelection;
         bool wasAnnotDragged = _isDraggingAnnotation;
+        bool wasResizing = _isResizingAnnotation;
+        PdfAnnotationInfo? resizedAnnot = _resizingAnnotation;
+        Rect resizePreviewDip = _annotationResizePreviewDip;
         PdfAnnotationInfo? pressedMovableAnnot = _pressedMovableAnnotation;
         PdfLinkTarget pressedLink = _pressedLink;
         long activeSession = _selectionSessionId;
@@ -2313,6 +2416,10 @@ public sealed partial class PdfPageCanvas : Grid
         _isDraggingAnnotation = false;
         _pressedMovableAnnotation = null;
         _annotationDragDeltaDip = default;
+        _isResizingAnnotation = false;
+        _resizingAnnotation = null;
+        _activeResizeHandle = AnnotationResizeHandle.None;
+        _annotationResizePreviewDip = default;
         _pressedLink = PdfLinkTarget.None;
 
         _isReleasingCapture = true;
@@ -2326,6 +2433,25 @@ public sealed partial class PdfPageCanvas : Grid
         finally
         {
             _isReleasingCapture = false;
+        }
+
+        if (wasResizing && resizedAnnot is not null && PageInfo is not null)
+        {
+            e.Handled = true;
+            SetCursorShape(InputSystemCursorShape.Arrow);
+            InvalidateOverlays();
+
+            PageCoordinateTransform transform = PageCoordinateTransform.FromPage(PageInfo, RotationAngle);
+            PdfRect newPdfBounds = transform.ToPdfRect(resizePreviewDip);
+            if (Math.Abs(newPdfBounds.Width - resizedAnnot.Bounds.Width) > 0.5f ||
+                Math.Abs(newPdfBounds.Height - resizedAnnot.Bounds.Height) > 0.5f ||
+                Math.Abs(newPdfBounds.Left - resizedAnnot.Bounds.Left) > 0.5f ||
+                Math.Abs(newPdfBounds.Bottom - resizedAnnot.Bounds.Bottom) > 0.5f)
+            {
+                AnnotationResized?.Invoke(this, resizedAnnot, newPdfBounds);
+            }
+
+            return;
         }
 
         if (pressedMovableAnnot is not null)
@@ -2508,11 +2634,15 @@ public sealed partial class PdfPageCanvas : Grid
         // Do NOT clear _hasDraggedSelection or _observedDocument.ActiveSelection here so any selection
         // already made by the user remains intact.
         _isPointerDown = false;
-        if (_pressedMovableAnnotation is not null || _isDraggingAnnotation)
+        if (_pressedMovableAnnotation is not null || _isDraggingAnnotation || _isResizingAnnotation || _resizingAnnotation is not null)
         {
             _pressedMovableAnnotation = null;
             _isDraggingAnnotation = false;
             _annotationDragDeltaDip = default;
+            _resizingAnnotation = null;
+            _isResizingAnnotation = false;
+            _activeResizeHandle = AnnotationResizeHandle.None;
+            _annotationResizePreviewDip = default;
             SetCursorShape(InputSystemCursorShape.Arrow);
             InvalidateOverlays();
         }
@@ -2637,7 +2767,11 @@ public sealed partial class PdfPageCanvas : Grid
                     break;
                 }
 
-                if (hit.Link.IsValid)
+                if ((_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertImage)
+                {
+                    SetCursorShape(InputSystemCursorShape.Cross);
+                }
+                else if (hit.Link.IsValid)
                 {
                     SetCursorShape(InputSystemCursorShape.Hand);
                 }
@@ -3098,8 +3232,10 @@ public sealed partial class PdfPageCanvas : Grid
         bool hasSelectedAnnotOnPage = selectedAnnot is not null && selectedAnnot.PageIndex == pageIndex;
         PdfAnnotationInfo? draggedAnnot = _isDraggingAnnotation ? _pressedMovableAnnotation : null;
         bool hasDraggedAnnotOnPage = draggedAnnot is not null && draggedAnnot.PageIndex == pageIndex;
+        PdfAnnotationInfo? resizedAnnot = _isResizingAnnotation ? _resizingAnnotation : null;
+        bool hasResizedAnnotOnPage = resizedAnnot is not null && resizedAnnot.PageIndex == pageIndex;
 
-        if (pageMatches.Count == 0 && !hasSelectionOnPage && !hasSelectedAnnotOnPage && !hasDraggedAnnotOnPage)
+        if (pageMatches.Count == 0 && !hasSelectionOnPage && !hasSelectedAnnotOnPage && !hasDraggedAnnotOnPage && !hasResizedAnnotOnPage)
         {
             return;
         }
@@ -3189,16 +3325,14 @@ public sealed partial class PdfPageCanvas : Grid
         }
 
         // 3. Focused annotation highlight border (drawn cleanly over bitmaps without extra UI elements)
-        if (hasSelectedAnnotOnPage && selectedAnnot is not null && !selectedAnnot.Bounds.IsEmpty)
+        if (hasSelectedAnnotOnPage && !hasResizedAnnotOnPage && selectedAnnot is not null && !selectedAnnot.Bounds.IsEmpty)
         {
             Rect dipRect = transform.ToPageRect(selectedAnnot.Bounds);
             if (dipRect.Width > 0.1 && dipRect.Height > 0.1)
             {
-                Rect focusRect = new(
-                    dipRect.X + offsetX - 2.0,
-                    dipRect.Y + offsetY - 2.0,
-                    dipRect.Width + 4.0,
-                    dipRect.Height + 4.0);
+                Rect focusRect = selectedAnnot.IsResizable
+                    ? new Rect(dipRect.X + offsetX, dipRect.Y + offsetY, dipRect.Width, dipRect.Height)
+                    : new Rect(dipRect.X + offsetX - 2.0, dipRect.Y + offsetY - 2.0, dipRect.Width + 4.0, dipRect.Height + 4.0);
 
                 Windows.UI.Color focusFill = IsNightMode
                     ? Windows.UI.Color.FromArgb(40, 120, 195, 255)
@@ -3207,8 +3341,16 @@ public sealed partial class PdfPageCanvas : Grid
                     ? Windows.UI.Color.FromArgb(230, 120, 195, 255)
                     : Windows.UI.Color.FromArgb(225, 0, 108, 200);
 
-                ds.FillRoundedRectangle(focusRect, 3.0f, 3.0f, focusFill);
-                ds.DrawRoundedRectangle(focusRect, 3.0f, 3.0f, focusStroke, 1.75f);
+                if (selectedAnnot.IsResizable)
+                {
+                    ds.DrawRectangle(focusRect, focusStroke, 1.75f);
+                    DrawCornerResizeHandles(ds, focusRect, focusStroke);
+                }
+                else
+                {
+                    ds.FillRoundedRectangle(focusRect, 3.0f, 3.0f, focusFill);
+                    ds.DrawRoundedRectangle(focusRect, 3.0f, 3.0f, focusStroke, 1.75f);
+                }
             }
         }
 
@@ -3235,6 +3377,140 @@ public sealed partial class PdfPageCanvas : Grid
                 ds.DrawRoundedRectangle(ghostRect, 3.0f, 3.0f, ghostStroke, 2.0f);
             }
         }
+
+        // 5. Live corner-resize preview rectangle + handles
+        if (hasResizedAnnotOnPage && _annotationResizePreviewDip.Width > 0.1 && _annotationResizePreviewDip.Height > 0.1)
+        {
+            Rect previewRect = new(
+                _annotationResizePreviewDip.X + offsetX,
+                _annotationResizePreviewDip.Y + offsetY,
+                _annotationResizePreviewDip.Width,
+                _annotationResizePreviewDip.Height);
+
+            Windows.UI.Color previewFill = IsNightMode
+                ? Windows.UI.Color.FromArgb(48, 120, 195, 255)
+                : Windows.UI.Color.FromArgb(36, 0, 120, 215);
+            Windows.UI.Color previewStroke = IsNightMode
+                ? Windows.UI.Color.FromArgb(245, 130, 205, 255)
+                : Windows.UI.Color.FromArgb(235, 0, 108, 200);
+
+            ds.FillRectangle(previewRect, previewFill);
+            ds.DrawRectangle(previewRect, previewStroke, 1.75f);
+            DrawCornerResizeHandles(ds, previewRect, previewStroke);
+        }
+    }
+
+    private static void DrawCornerResizeHandles(CanvasDrawingSession ds, Rect rect, Windows.UI.Color stroke)
+    {
+        const float r = 4.5f;
+        Windows.UI.Color fill = Windows.UI.Color.FromArgb(255, 255, 255, 255);
+        float left = (float)rect.Left;
+        float right = (float)rect.Right;
+        float top = (float)rect.Top;
+        float bottom = (float)rect.Bottom;
+
+        ds.FillCircle(left, top, r, fill);
+        ds.DrawCircle(left, top, r, stroke, 1.75f);
+        ds.FillCircle(right, top, r, fill);
+        ds.DrawCircle(right, top, r, stroke, 1.75f);
+        ds.FillCircle(left, bottom, r, fill);
+        ds.DrawCircle(left, bottom, r, stroke, 1.75f);
+        ds.FillCircle(right, bottom, r, fill);
+        ds.DrawCircle(right, bottom, r, stroke, 1.75f);
+    }
+
+    private AnnotationResizeHandle HitTestResizeHandle(PdfAnnotationInfo annot, Point posDip, out Rect rectDip)
+    {
+        rectDip = default;
+        if (!annot.IsResizable || PageInfo is null || annot.PageIndex != PageInfo.Index || annot.Bounds.IsEmpty)
+        {
+            return AnnotationResizeHandle.None;
+        }
+
+        PageCoordinateTransform transform = PageCoordinateTransform.FromPage(PageInfo, RotationAngle);
+        rectDip = transform.ToPageRect(annot.Bounds);
+        if (rectDip.Width < 4.0 || rectDip.Height < 4.0)
+        {
+            return AnnotationResizeHandle.None;
+        }
+
+        const double hitRadiusSq = 10.0 * 10.0;
+        double distTl = ((posDip.X - rectDip.Left) * (posDip.X - rectDip.Left)) + ((posDip.Y - rectDip.Top) * (posDip.Y - rectDip.Top));
+        if (distTl <= hitRadiusSq)
+        {
+            return AnnotationResizeHandle.TopLeft;
+        }
+
+        double distTr = ((posDip.X - rectDip.Right) * (posDip.X - rectDip.Right)) + ((posDip.Y - rectDip.Top) * (posDip.Y - rectDip.Top));
+        if (distTr <= hitRadiusSq)
+        {
+            return AnnotationResizeHandle.TopRight;
+        }
+
+        double distBl = ((posDip.X - rectDip.Left) * (posDip.X - rectDip.Left)) + ((posDip.Y - rectDip.Bottom) * (posDip.Y - rectDip.Bottom));
+        if (distBl <= hitRadiusSq)
+        {
+            return AnnotationResizeHandle.BottomLeft;
+        }
+
+        double distBr = ((posDip.X - rectDip.Right) * (posDip.X - rectDip.Right)) + ((posDip.Y - rectDip.Bottom) * (posDip.Y - rectDip.Bottom));
+        if (distBr <= hitRadiusSq)
+        {
+            return AnnotationResizeHandle.BottomRight;
+        }
+
+        return AnnotationResizeHandle.None;
+    }
+
+    private static InputSystemCursorShape GetResizeCursorShape(AnnotationResizeHandle handle) =>
+        handle is AnnotationResizeHandle.TopLeft or AnnotationResizeHandle.BottomRight
+            ? InputSystemCursorShape.SizeNorthwestSoutheast
+            : InputSystemCursorShape.SizeNortheastSouthwest;
+
+    private void UpdateAnnotationResizePreview(Point posDip)
+    {
+        if (PageInfo is null)
+        {
+            return;
+        }
+
+        bool swap = PageCoordinateTransform.NormalizeRotation(PageInfo.Rotation + RotationAngle) is 90 or 270;
+        double pageW = ActualWidth > 1.0 ? ActualWidth : (swap ? PageInfo.HeightPt : PageInfo.WidthPt) * PageCoordinateTransform.DipsPerPoint;
+        double pageH = ActualHeight > 1.0 ? ActualHeight : (swap ? PageInfo.WidthPt : PageInfo.HeightPt) * PageCoordinateTransform.DipsPerPoint;
+
+        double anchorX = _activeResizeHandle is AnnotationResizeHandle.TopLeft or AnnotationResizeHandle.BottomLeft
+            ? _resizeOrigRectDip.Right
+            : _resizeOrigRectDip.Left;
+        double anchorY = _activeResizeHandle is AnnotationResizeHandle.TopLeft or AnnotationResizeHandle.TopRight
+            ? _resizeOrigRectDip.Bottom
+            : _resizeOrigRectDip.Top;
+
+        bool keepLeft = _activeResizeHandle is AnnotationResizeHandle.TopLeft or AnnotationResizeHandle.BottomLeft;
+        bool keepTop = _activeResizeHandle is AnnotationResizeHandle.TopLeft or AnnotationResizeHandle.TopRight;
+
+        double maxW = keepLeft ? anchorX : Math.Max(20.0, pageW - anchorX);
+        double maxH = keepTop ? anchorY : Math.Max(20.0, pageH - anchorY);
+
+        double rawW = Math.Clamp(keepLeft ? (anchorX - posDip.X) : (posDip.X - anchorX), 20.0, Math.Max(20.0, maxW));
+        double rawH = Math.Clamp(keepTop ? (anchorY - posDip.Y) : (posDip.Y - anchorY), 20.0, Math.Max(20.0, maxH));
+
+        bool shiftDown = (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift) &
+                          Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
+
+        double w = rawW;
+        double h = rawH;
+        if (!shiftDown && _resizeOrigRectDip.Width > 1.0 && _resizeOrigRectDip.Height > 1.0)
+        {
+            double scale = Math.Max(rawW / _resizeOrigRectDip.Width, rawH / _resizeOrigRectDip.Height);
+            double maxScale = Math.Min(maxW / _resizeOrigRectDip.Width, maxH / _resizeOrigRectDip.Height);
+            scale = Math.Min(scale, maxScale);
+            w = Math.Max(20.0, _resizeOrigRectDip.Width * scale);
+            h = Math.Max(20.0, _resizeOrigRectDip.Height * scale);
+        }
+
+        double left = keepLeft ? anchorX - w : anchorX;
+        double top = keepTop ? anchorY - h : anchorY;
+        _annotationResizePreviewDip = new Rect(left, top, w, h);
     }
 
     private void DrawBitmapWithNightMode(

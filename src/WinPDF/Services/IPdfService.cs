@@ -450,6 +450,18 @@ public interface IPdfService : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Resizes an existing resizable annotation (<c>/Stamp</c>) on its page to new PDF user-space bounds.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="request">Resize parameters.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The updated annotation index and refreshed annotations for the page.</returns>
+    Task<PdfPageAnnotationMutationResult> ResizeAnnotationAsync(
+        long documentId,
+        PdfResizeAnnotationRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Pastes a non-markup annotation snapshot (comment note, text box, ink drawing, or shape) onto a target page.
     /// </summary>
     /// <param name="documentId">Document identifier.</param>
@@ -459,6 +471,32 @@ public interface IPdfService : IDisposable
     Task<PdfPageAnnotationMutationResult> PasteAnnotationAsync(
         long documentId,
         PdfPasteAnnotationRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates a raster image stamp annotation (<c>/Stamp</c>) on a page.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="request">Image stamp creation parameters.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The created annotation index and refreshed annotations for the page.</returns>
+    Task<PdfPageAnnotationMutationResult> AddImageAnnotationAsync(
+        long documentId,
+        PdfCreateImageRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Captures the embedded raster image payload from an existing <c>/Stamp</c> annotation for copy/cut/undo.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="annotIndex">Zero-based annotation index on <paramref name="pageIndex"/>.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The captured image payload, or <see langword="null"/> if the annotation contains no raster image.</returns>
+    Task<PdfCapturedImage?> CaptureStampImageAsync(
+        long documentId,
+        int pageIndex,
+        int annotIndex,
         CancellationToken cancellationToken = default);
 
     /// <summary>

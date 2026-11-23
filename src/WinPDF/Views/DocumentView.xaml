@@ -882,14 +882,25 @@
         <!-- Standard non-intrusive notification at the top of the screen (e.g. Last document not found - 5s) -->
         <InfoBar
             x:Name="TopNotificationInfoBar"
+            Severity="Informational"
             IsOpen="False"
             IsIconVisible="False"
             IsClosable="True"
             HorizontalAlignment="Center"
             VerticalAlignment="Top"
+            MaxWidth="600"
             Margin="0,24,0,0"
             Canvas.ZIndex="110"
-            CloseButtonClick="OnTopNotificationInfoBarCloseButtonClick" />
+            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="8"
+            CloseButtonClick="OnTopNotificationInfoBarCloseButtonClick">
+            <InfoBar.Resources>
+                <StaticResource x:Key="InfoBarInformationalSeverityBackgroundBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
+                <StaticResource x:Key="InfoBarBackgroundFillColorDefaultBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
+            </InfoBar.Resources>
+        </InfoBar>
 
         <!-- Document display area -->
         <Grid
@@ -1737,12 +1748,6 @@
                                 Click="OnToolEraserClicked"
                                 IsChecked="{x:Bind converters:UiHelpers.IsEraserTool(ViewModel.ActiveTool), Mode=OneWay}">
                                 <FontIcon FontSize="14" Glyph="&#xE75C;" />
-                            </ToggleButton>
-                            <ToggleButton
-                                x:Uid="ToolTextNoteButton"
-                                Click="OnToolTextNoteClicked"
-                                IsChecked="{x:Bind converters:UiHelpers.IsTextNoteTool(ViewModel.ActiveTool), Mode=OneWay}">
-                                <FontIcon FontSize="14" Glyph="&#xE70B;" />
                             </ToggleButton>
                             <Button
                                 x:Name="ToolbarUndoButton"

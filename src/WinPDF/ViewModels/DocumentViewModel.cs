@@ -1412,6 +1412,62 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Inserts a raster image onto <paramref name="pageIndex"/> as a <c>/Stamp</c> annotation.
+    /// </summary>
+    public async Task<PdfAnnotationInfo?> AddImageAnnotationAsync(
+        int pageIndex,
+        double pdfX,
+        double pdfY,
+        PdfCapturedImage image,
+        string author = "",
+        bool recordUndo = true)
+    {
+        ArgumentNullException.ThrowIfNull(image);
+        if (_isDisposed || pageIndex < 0 || pageIndex >= Pages.Count)
+        {
+            return null;
+        }
+
+        PdfCreateImageRequest req = new(
+            PageIndex: pageIndex,
+            PdfX: pdfX,
+            PdfY: pdfY,
+            PixelWidth: image.PixelWidth,
+            PixelHeight: image.PixelHeight,
+            BgraPixels: image.BgraPixels,
+            Author: string.IsNullOrWhiteSpace(author) ? Environment.UserName : author,
+            Subject: image.Subject);
+
+        PdfPageAnnotationMutationResult result = await _pdfService.AddImageAnnotationAsync(DocumentId, req, _lifetime.Token);
+        if (_isDisposed)
+        {
+            return null;
+        }
+
+        ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
+        PdfAnnotationInfo? created = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
+        if (recordUndo && created is not null)
+        {
+            PushUndoEntry(new UndoCreatedAnnotationsEntry([new AnnotationLocation(created.PageIndex, created.AnnotIndex)]));
+        }
+
+        HasUnsavedChanges = true;
+        SelectedAnnotation = created;
+        return created;
+    }
+
+    /// <summary>
+    /// Captures the embedded raster image payload from an existing <c>/Stamp</c> annotation.
+    /// </summary>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="annotIndex">Zero-based annotation index.</param>
+    /// <returns>The captured image payload, or <see langword="null"/> if not available.</returns>
+    public Task<PdfCapturedImage?> CaptureStampImageAsync(int pageIndex, int annotIndex)
+        => _isDisposed
+            ? Task.FromResult<PdfCapturedImage?>(null)
+            : _pdfService.CaptureStampImageAsync(DocumentId, pageIndex, annotIndex, _lifetime.Token);
+
+    /// <summary>
     /// Creates a direct-on-page <c>/FreeText</c> text-box annotation on <paramref name="pageIndex"/>.
     /// </summary>
     public async Task<PdfAnnotationInfo?> AddFreeTextAsync(
@@ -1504,6 +1560,19 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         }
 
         PdfAnnotationInfo? before = recordUndo ? FindExactAnnotation(pageIndex, annotIndex) : null;
+        if (before is { Subtype: PdfAnnotationSubtype.Stamp, CapturedImage: null })
+        {
+            PdfCapturedImage? captured = await CaptureStampImageAsync(pageIndex, annotIndex);
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            if (captured is not null)
+            {
+                before = before with { CapturedImage = captured };
+            }
+        }
 
         IReadOnlyList<PdfAnnotationInfo> refreshed = await _pdfService.DeleteAnnotationAsync(DocumentId, pageIndex, annotIndex, _lifetime.Token);
         if (_isDisposed)
@@ -1566,6 +1635,46 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             {
                 PushUndoEntry(new UndoMovedAnnotationEntry(updated.PageIndex, updated.AnnotIndex, actualDx, actualDy));
             }
+        }
+
+        HasUnsavedChanges = true;
+        SelectedAnnotation = updated;
+        return updated;
+    }
+
+    /// <summary>
+    /// Resizes an existing resizable annotation (<c>/Stamp</c>) on <paramref name="pageIndex"/> to <paramref name="newBounds"/>.
+    /// </summary>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="annotIndex">Zero-based index in the page's annotation list.</param>
+    /// <param name="newBounds">Target bounding rectangle in PDF user space (points).</param>
+    /// <param name="recordUndo">Whether to push an entry onto the annotation undo stack.</param>
+    /// <returns>The updated <see cref="PdfAnnotationInfo"/>, or <see langword="null"/> if unsuccessful.</returns>
+    public async Task<PdfAnnotationInfo?> ResizeAnnotationAsync(
+        int pageIndex,
+        int annotIndex,
+        PdfRect newBounds,
+        bool recordUndo = true)
+    {
+        if (_isDisposed)
+        {
+            return null;
+        }
+
+        PdfAnnotationInfo? before = recordUndo ? FindExactAnnotation(pageIndex, annotIndex) : null;
+
+        PdfResizeAnnotationRequest req = new(pageIndex, annotIndex, newBounds);
+        PdfPageAnnotationMutationResult result = await _pdfService.ResizeAnnotationAsync(DocumentId, req, _lifetime.Token);
+        if (_isDisposed)
+        {
+            return null;
+        }
+
+        ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
+        PdfAnnotationInfo? updated = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
+        if (recordUndo && before is not null && updated is not null)
+        {
+            PushUndoEntry(new UndoResizedAnnotationEntry(updated.PageIndex, updated.AnnotIndex, before.Bounds));
         }
 
         HasUnsavedChanges = true;
@@ -1688,6 +1797,18 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
                         moved.Location.AnnotIndex,
                         -moved.ActualDeltaPdfX,
                         -moved.ActualDeltaPdfY,
+                        recordUndo: false);
+                }
+
+                return true;
+
+            case UndoResizedAnnotationEntry resized:
+                if (resized.Location.IsValid)
+                {
+                    _ = await ResizeAnnotationAsync(
+                        resized.Location.PageIndex,
+                        resized.Location.AnnotIndex,
+                        resized.OldBounds,
                         recordUndo: false);
                 }
 
@@ -1876,6 +1997,18 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         public AnnotationLocation Location { get; } = new(pageIndex, annotIndex);
         public double ActualDeltaPdfX { get; } = actualDeltaPdfX;
         public double ActualDeltaPdfY { get; } = actualDeltaPdfY;
+
+        public override void OnAnnotationDeleted(int pageIndex, int removedAnnotIndex) => Location.OnDeleted(pageIndex, removedAnnotIndex);
+        public override void OnAnnotationRestored(int pageIndex, int originalAnnotIndex, int restoredAnnotIndex) => Location.OnRestored(pageIndex, originalAnnotIndex, restoredAnnotIndex);
+    }
+
+    private sealed class UndoResizedAnnotationEntry(
+        int pageIndex,
+        int annotIndex,
+        PdfRect oldBounds) : AnnotationUndoEntry
+    {
+        public AnnotationLocation Location { get; } = new(pageIndex, annotIndex);
+        public PdfRect OldBounds { get; } = oldBounds;
 
         public override void OnAnnotationDeleted(int pageIndex, int removedAnnotIndex) => Location.OnDeleted(pageIndex, removedAnnotIndex);
         public override void OnAnnotationRestored(int pageIndex, int originalAnnotIndex, int restoredAnnotIndex) => Location.OnRestored(pageIndex, originalAnnotIndex, restoredAnnotIndex);

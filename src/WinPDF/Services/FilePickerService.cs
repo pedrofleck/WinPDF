@@ -53,4 +53,25 @@ public sealed class FilePickerService : IFilePickerService
         StorageFile? file = await picker.PickSaveFileAsync().AsTask(cancellationToken);
         return file?.Path;
     }
+
+    /// <inheritdoc/>
+    public async Task<string?> PickOpenImageAsync(CancellationToken cancellationToken = default)
+    {
+        FileOpenPicker picker = new()
+        {
+            ViewMode = PickerViewMode.Thumbnail,
+            SuggestedStartLocation = PickerLocationId.PicturesLibrary
+        };
+
+        InitializeWithWindow.Initialize(picker, _windowContext.WindowHandle);
+        picker.FileTypeFilter.Add(".png");
+        picker.FileTypeFilter.Add(".jpg");
+        picker.FileTypeFilter.Add(".jpeg");
+        picker.FileTypeFilter.Add(".bmp");
+        picker.FileTypeFilter.Add(".webp");
+        picker.FileTypeFilter.Add(".gif");
+
+        StorageFile? file = await picker.PickSingleFileAsync().AsTask(cancellationToken);
+        return file?.Path;
+    }
 }

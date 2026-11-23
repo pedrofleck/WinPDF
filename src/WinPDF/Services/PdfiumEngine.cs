@@ -2907,6 +2907,321 @@ internal sealed unsafe class PdfiumEngine : IDisposable
     }
 
     /// <summary>
+    /// Resizes an existing resizable annotation (<c>/Stamp</c>) to new PDF user-space bounds.
+    /// </summary>
+    internal PdfPageAnnotationMutationResult ResizeAnnotation(
+        long documentId,
+        PdfResizeAnnotationRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        PdfiumPageHandle page = _pageCache.GetOrLoad(document, documentId, request.PageIndex)
+            ?? throw new PdfiumException(PdfiumErrorCode.Page, $"Page {request.PageIndex} could not be loaded.");
+
+        using (PdfiumAnnotationHandle annot = PdfiumNative.FPDFPage_GetAnnot(page, request.AnnotIndex))
+        {
+            if (annot.IsInvalid)
+            {
+                throw new PdfiumException(PdfiumErrorCode.Page, $"Annotation {request.AnnotIndex} not found on page {request.PageIndex}.");
+            }
+
+            Box pageBox = ReadVisiblePageBox(document, page, request.PageIndex);
+            float left = Math.Clamp(request.NewBounds.Left, pageBox.Left, Math.Max(pageBox.Left, pageBox.Right - 16f));
+            float right = Math.Clamp(request.NewBounds.Right, Math.Min(pageBox.Right, left + 16f), pageBox.Right);
+            float bottom = Math.Clamp(request.NewBounds.Bottom, pageBox.Bottom, Math.Max(pageBox.Bottom, pageBox.Top - 16f));
+            float top = Math.Clamp(request.NewBounds.Top, Math.Min(pageBox.Top, bottom + 16f), pageBox.Top);
+
+            FsRectF newRect = new()
+            {
+                Left = left,
+                Bottom = bottom,
+                Right = right,
+                Top = top,
+            };
+            _ = PdfiumNative.FPDFAnnot_SetRect(annot, &newRect);
+            SetAnnotString(annot, "M", PdfSignatureInspector.FormatPdfDate(DateTimeOffset.Now));
+        }
+
+        IReadOnlyList<PdfAnnotationInfo> refreshed = ReadPageAnnotations(documentId, request.PageIndex, cancellationToken);
+        return new PdfPageAnnotationMutationResult(request.PageIndex, request.AnnotIndex, refreshed);
+    }
+
+    /// <summary>
+    /// Creates a raster image stamp annotation (<c>/Stamp</c>) anchored at <c>(request.PdfX, request.PdfY)</c>.
+    /// </summary>
+    internal PdfPageAnnotationMutationResult AddImageAnnotation(
+        long documentId,
+        PdfCreateImageRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.PixelWidth <= 0 || request.PixelHeight <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(request), "Image dimensions must be positive.");
+        }
+
+        long expectedBytes = (long)request.PixelWidth * request.PixelHeight * 4L;
+        if (request.BgraPixels is null || request.BgraPixels.Length < expectedBytes)
+        {
+            throw new ArgumentException("Image pixel buffer is smaller than expected BGRA dimensions.", nameof(request));
+        }
+
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        PdfiumPageHandle page = _pageCache.GetOrLoad(document, documentId, request.PageIndex)
+            ?? throw new PdfiumException(PdfiumErrorCode.Page, $"Page {request.PageIndex} could not be loaded.");
+
+        Box pageBox = ReadVisiblePageBox(document, page, request.PageIndex);
+        double pageW = Math.Max(48.0, pageBox.Right - pageBox.Left);
+        double pageH = Math.Max(48.0, pageBox.Top - pageBox.Bottom);
+
+        double widthPt;
+        double heightPt;
+        if (request.ExplicitWidthPt is > 4.0 and double ew &&
+            request.ExplicitHeightPt is > 4.0 and double eh)
+        {
+            widthPt = Math.Clamp(ew, 12.0, pageW);
+            heightPt = Math.Clamp(eh, 12.0, pageH);
+        }
+        else
+        {
+            double naturalW = request.PixelWidth * 0.75;
+            double naturalH = request.PixelHeight * 0.75;
+            double maxW = Math.Clamp(pageW * 0.45, 72.0, 240.0);
+            double maxH = Math.Clamp(pageH * 0.45, 72.0, 240.0);
+            double scale = Math.Min(1.0, Math.Min(maxW / Math.Max(1.0, naturalW), maxH / Math.Max(1.0, naturalH)));
+            widthPt = naturalW * scale;
+            heightPt = naturalH * scale;
+            double minSide = Math.Min(widthPt, heightPt);
+            if (minSide < 24.0 && minSide > 0.01)
+            {
+                double up = Math.Min(24.0 / minSide, Math.Min(maxW / Math.Max(1.0, widthPt), maxH / Math.Max(1.0, heightPt)));
+                widthPt *= up;
+                heightPt *= up;
+            }
+        }
+
+        float wPt = (float)widthPt;
+        float hPt = (float)heightPt;
+        float left = Math.Clamp((float)request.PdfX, pageBox.Left, Math.Max(pageBox.Left, pageBox.Right - wPt));
+        float top = Math.Clamp((float)request.PdfY, Math.Min(pageBox.Top, pageBox.Bottom + hPt), pageBox.Top);
+        FsRectF rect = new()
+        {
+            Left = left,
+            Bottom = top - hPt,
+            Right = left + wPt,
+            Top = top,
+        };
+
+        int createdIndex;
+        using (PdfiumAnnotationHandle annot = PdfiumNative.FPDFPage_CreateAnnot(page, (int)PdfAnnotationSubtype.Stamp))
+        {
+            if (annot.IsInvalid)
+            {
+                throw new PdfiumException(PdfiumErrorCode.Page, "Failed to create Stamp annotation.");
+            }
+
+            _ = PdfiumNative.FPDFAnnot_SetRect(annot, &rect);
+            _ = PdfiumNative.FPDFAnnot_SetFlags(annot, PdfiumConstants.AnnotFlagPrint);
+            SetAnnotString(annot, "T", string.IsNullOrWhiteSpace(request.Author) ? Environment.UserName : request.Author);
+            SetAnnotString(annot, "M", PdfSignatureInspector.FormatPdfDate(DateTimeOffset.Now));
+            SetAnnotString(annot, "Subj", string.IsNullOrWhiteSpace(request.Subject) ? "Image" : request.Subject);
+
+            using PdfiumBitmapHandle bmp = PdfiumNative.FPDFBitmap_Create(request.PixelWidth, request.PixelHeight, 1);
+            if (bmp.IsInvalid)
+            {
+                throw new PdfiumException(PdfiumErrorCode.Unknown, "Failed to create PDFium bitmap for image stamp.");
+            }
+
+            byte* dstPtr = (byte*)PdfiumNative.FPDFBitmap_GetBuffer(bmp);
+            int dstStride = PdfiumNative.FPDFBitmap_GetStride(bmp);
+            int srcStride = request.PixelWidth * 4;
+            if (dstPtr == null || dstStride < srcStride)
+            {
+                throw new PdfiumException(PdfiumErrorCode.Unknown, "Invalid PDFium bitmap buffer.");
+            }
+
+            fixed (byte* srcBase = request.BgraPixels)
+            {
+                for (int y = 0; y < request.PixelHeight; y++)
+                {
+                    Buffer.MemoryCopy(
+                        srcBase + ((long)y * srcStride),
+                        dstPtr + ((long)y * dstStride),
+                        dstStride,
+                        srcStride);
+                }
+            }
+
+            nint imgObj = PdfiumNative.FPDFPageObj_NewImageObj(document);
+            if (imgObj == nint.Zero)
+            {
+                throw new PdfiumException(PdfiumErrorCode.Unknown, "Failed to create PDFium image object.");
+            }
+
+            if (PdfiumNative.FPDFImageObj_SetBitmap(null, 0, imgObj, bmp) == 0 ||
+                PdfiumNative.FPDFImageObj_SetMatrix(imgObj, wPt, 0.0, 0.0, hPt, rect.Left, rect.Bottom) == 0 ||
+                PdfiumNative.FPDFAnnot_AppendObject(annot, imgObj) == 0)
+            {
+                PdfiumNative.FPDFPageObj_Destroy(imgObj);
+                throw new PdfiumException(PdfiumErrorCode.Unknown, "Failed to attach image object to Stamp annotation.");
+            }
+
+            createdIndex = PdfiumNative.FPDFPage_GetAnnotIndex(page, annot);
+        }
+
+        IReadOnlyList<PdfAnnotationInfo> refreshed = ReadPageAnnotations(documentId, request.PageIndex, cancellationToken);
+        return new PdfPageAnnotationMutationResult(request.PageIndex, createdIndex, refreshed);
+    }
+
+    /// <summary>
+    /// Extracts the embedded raster image payload from a <c>/Stamp</c> annotation, if present.
+    /// </summary>
+    internal PdfCapturedImage? CaptureStampImage(
+        long documentId,
+        int pageIndex,
+        int annotIndex,
+        CancellationToken cancellationToken)
+    {
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        PdfiumPageHandle page = _pageCache.GetOrLoad(document, documentId, pageIndex)
+            ?? throw new PdfiumException(PdfiumErrorCode.Page, $"Page {pageIndex} could not be loaded.");
+
+        using PdfiumAnnotationHandle annot = PdfiumNative.FPDFPage_GetAnnot(page, annotIndex);
+        if (annot.IsInvalid)
+        {
+            return null;
+        }
+
+        nint imgObj = FindFirstImageObjectInAnnot(annot);
+        if (imgObj == nint.Zero)
+        {
+            return null;
+        }
+
+        using PdfiumBitmapHandle bmp = PdfiumNative.FPDFImageObj_GetBitmap(imgObj);
+        if (bmp.IsInvalid)
+        {
+            return null;
+        }
+
+        int w = PdfiumNative.FPDFBitmap_GetWidth(bmp);
+        int h = PdfiumNative.FPDFBitmap_GetHeight(bmp);
+        int stride = PdfiumNative.FPDFBitmap_GetStride(bmp);
+        int format = PdfiumNative.FPDFBitmap_GetFormat(bmp);
+        byte* srcPtr = (byte*)PdfiumNative.FPDFBitmap_GetBuffer(bmp);
+        if (w <= 0 || h <= 0 || stride <= 0 || srcPtr == null)
+        {
+            return null;
+        }
+
+        const int BitmapFormatGray = 1;
+        const int BitmapFormatBgr = 2;
+        const int BitmapFormatBgrx = 3;
+        const int BitmapFormatBgra = 4;
+
+        byte[] bgra = new byte[w * h * 4];
+        for (int y = 0; y < h; y++)
+        {
+            byte* row = srcPtr + ((long)y * stride);
+            int dstRowOffset = y * w * 4;
+            switch (format)
+            {
+                case BitmapFormatBgra:
+                    Marshal.Copy((nint)row, bgra, dstRowOffset, w * 4);
+                    break;
+                case BitmapFormatBgrx:
+                    Marshal.Copy((nint)row, bgra, dstRowOffset, w * 4);
+                    for (int x = 0; x < w; x++)
+                    {
+                        bgra[dstRowOffset + (x * 4) + 3] = 255;
+                    }
+                    break;
+                case BitmapFormatBgr:
+                    for (int x = 0; x < w; x++)
+                    {
+                        int d = dstRowOffset + (x * 4);
+                        int s = x * 3;
+                        bgra[d] = row[s];
+                        bgra[d + 1] = row[s + 1];
+                        bgra[d + 2] = row[s + 2];
+                        bgra[d + 3] = 255;
+                    }
+                    break;
+                case BitmapFormatGray:
+                    for (int x = 0; x < w; x++)
+                    {
+                        int d = dstRowOffset + (x * 4);
+                        byte g = row[x];
+                        bgra[d] = g;
+                        bgra[d + 1] = g;
+                        bgra[d + 2] = g;
+                        bgra[d + 3] = 255;
+                    }
+                    break;
+                default:
+                    return null;
+            }
+        }
+
+        return new PdfCapturedImage(w, h, bgra, ReadAnnotString(annot, "Subj"));
+    }
+
+    private static nint FindFirstImageObjectInAnnot(PdfiumAnnotationHandle annot)
+    {
+        int count = Math.Min(PdfiumNative.FPDFAnnot_GetObjectCount(annot), 256);
+        for (int i = 0; i < count; i++)
+        {
+            nint obj = PdfiumNative.FPDFAnnot_GetObject(annot, i);
+            nint found = FindFirstImageObjectRecursive(obj, depth: 0);
+            if (found != nint.Zero)
+            {
+                return found;
+            }
+        }
+
+        return nint.Zero;
+    }
+
+    private static nint FindFirstImageObjectRecursive(nint obj, int depth)
+    {
+        const int PageObjImage = 3;
+        const int PageObjForm = 5;
+        if (obj == nint.Zero)
+        {
+            return nint.Zero;
+        }
+
+        int objType = PdfiumNative.FPDFPageObj_GetType(obj);
+        if (objType == PageObjImage)
+        {
+            return obj;
+        }
+
+        if (objType == PageObjForm && depth < 6)
+        {
+            int childCount = Math.Min(PdfiumNative.FPDFFormObj_CountObjects(obj), 256);
+            for (int i = 0; i < childCount; i++)
+            {
+                nint child = PdfiumNative.FPDFFormObj_GetObject(obj, (uint)i);
+                nint found = FindFirstImageObjectRecursive(child, depth + 1);
+                if (found != nint.Zero)
+                {
+                    return found;
+                }
+            }
+        }
+
+        return nint.Zero;
+    }
+
+    /// <summary>
     /// Pastes a non-markup annotation snapshot (comment note, FreeText box, ink drawing, or geometric shape) onto a page.
     /// </summary>
     internal PdfPageAnnotationMutationResult PasteAnnotation(
@@ -2948,6 +3263,24 @@ internal sealed unsafe class PdfiumEngine : IDisposable
                     string.IsNullOrWhiteSpace(source.Contents) ? "Text" : source.Contents,
                     string.IsNullOrWhiteSpace(source.Author) ? Environment.UserName : source.Author,
                     MaxWidthPt: maxW),
+                cancellationToken);
+        }
+
+        if (source.Subtype == PdfAnnotationSubtype.Stamp && source.CapturedImage is { } stampImg)
+        {
+            return AddImageAnnotation(
+                documentId,
+                new PdfCreateImageRequest(
+                    request.TargetPageIndex,
+                    request.TargetPdfX,
+                    request.TargetPdfY,
+                    stampImg.PixelWidth,
+                    stampImg.PixelHeight,
+                    stampImg.BgraPixels,
+                    string.IsNullOrWhiteSpace(source.Author) ? Environment.UserName : source.Author,
+                    string.IsNullOrWhiteSpace(stampImg.Subject) ? source.Subject : stampImg.Subject,
+                    ExplicitWidthPt: source.Bounds.Width > 4f ? source.Bounds.Width : null,
+                    ExplicitHeightPt: source.Bounds.Height > 4f ? source.Bounds.Height : null),
                 cancellationToken);
         }
 
