@@ -341,15 +341,6 @@
             Closed="OnTouchEmptyHoldFlyoutClosed">
             <CommandBarFlyout.PrimaryCommands>
                 <AppBarButton
-                    x:Name="TouchEmptyAddTextBoxButton"
-                    IsCompact="False"
-                    MinWidth="80"
-                    Click="OnTouchEmptyAddTextBoxClick">
-                    <AppBarButton.Icon>
-                        <FontIcon Glyph="&#xE90A;" FontSize="15" />
-                    </AppBarButton.Icon>
-                </AppBarButton>
-                <AppBarButton
                     x:Name="TouchEmptyPasteButton"
                     IsCompact="False"
                     MinWidth="72"

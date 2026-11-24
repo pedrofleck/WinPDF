@@ -1316,6 +1316,18 @@ public sealed partial class PdfPageCanvas : Grid
             _observedDocument.ClearSelection();
         }
 
+        if (isTouch && _observedDocument?.SelectedAnnotation is { } currentSelected)
+        {
+            Vector2 touchPdf = ToPdfPoint(pt.Position);
+            PdfAnnotationInfo? hitAtTouch = _observedDocument.HitTestAnnotation(PageInfo.Index, touchPdf.X, touchPdf.Y, tolerancePt: 12.0);
+            if (hitAtTouch is null ||
+                hitAtTouch.PageIndex != currentSelected.PageIndex ||
+                hitAtTouch.AnnotIndex != currentSelected.AnnotIndex)
+            {
+                _observedDocument.SelectedAnnotation = null;
+            }
+        }
+
         if (!isTouch &&
             (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage)
         {
@@ -1501,9 +1513,15 @@ public sealed partial class PdfPageCanvas : Grid
             _pendingTouchReleaseSelection = null;
             _isAwaitingInitialTouchWord = false;
             _touchHoldReleasedBeforeWordResolved = false;
-            _touchHoldTimer.Start();
 
-            _ = ResolveTouchHoldCandidateAsync(EffectiveDocumentId, PageInfo.Index, _touchPressPdfPoint, _touchHoldSessionId);
+            AnnotationTool touchTool = (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool ?? AnnotationTool.Select;
+            bool isTouchPlacementTool = touchTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage;
+            if (!isTouchPlacementTool)
+            {
+                _touchHoldTimer.Start();
+                _ = ResolveTouchHoldCandidateAsync(EffectiveDocumentId, PageInfo.Index, _touchPressPdfPoint, _touchHoldSessionId);
+            }
+
             return;
         }
 
@@ -1561,6 +1579,12 @@ public sealed partial class PdfPageCanvas : Grid
     {
         _touchHoldTimer.Stop();
         PruneStaleCanvasTouchPointers(Environment.TickCount64);
+        if ((_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage)
+        {
+            _isTouchWaitingForHold = false;
+            return;
+        }
+
         if (!_isTouchWaitingForHold ||
             _isUnloaded ||
             PageInfo is not { } pageInfo ||
@@ -2013,19 +2037,24 @@ public sealed partial class PdfPageCanvas : Grid
             return;
         }
 
+        AnnotationTool activeTool = (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool ?? AnnotationTool.Select;
+        bool isPlacementTool = activeTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage;
+        long maxTapDurationMs = isPlacementTool ? 550 : TouchSingleTapMaxDurationMs;
+        double maxTapMoveDip = isPlacementTool ? 14.0 : TouchSingleTapMaxMoveDip;
+
         long pressDurationMs = nowTouch - _touchPressTick;
         double tdx = releaseDip.X - _touchPressDipPoint.X;
         double tdy = releaseDip.Y - _touchPressDipPoint.Y;
         bool isCleanStationaryTap = pressDurationMs >= 0 &&
-                                    pressDurationMs <= TouchSingleTapMaxDurationMs &&
-                                    ((tdx * tdx) + (tdy * tdy)) <= (TouchSingleTapMaxMoveDip * TouchSingleTapMaxMoveDip);
+                                    pressDurationMs <= maxTapDurationMs &&
+                                    ((tdx * tdx) + (tdy * tdy)) <= (maxTapMoveDip * maxTapMoveDip);
 
         if (isCleanStationaryTap && _hasTouchStartScreenPx && GetPointerInfo(_touchPointerId, out POINTER_INFO relPi))
         {
             double scale = XamlRoot?.RasterizationScale > 0 ? XamlRoot.RasterizationScale : 1.0;
             double sdx = (relPi.ptPixelLocation.X - _touchStartScreenPx.X) / scale;
             double sdy = (relPi.ptPixelLocation.Y - _touchStartScreenPx.Y) / scale;
-            if (((sdx * sdx) + (sdy * sdy)) > (TouchSingleTapMaxMoveDip * TouchSingleTapMaxMoveDip))
+            if (((sdx * sdx) + (sdy * sdy)) > (maxTapMoveDip * maxTapMoveDip))
             {
                 isCleanStationaryTap = false;
             }
@@ -2041,6 +2070,10 @@ public sealed partial class PdfPageCanvas : Grid
         {
             _lastTouchTapTick = 0;
             _observedDocument?.ClearSelection();
+            if (_observedDocument is not null)
+            {
+                _observedDocument.SelectedAnnotation = null;
+            }
             ShellViewModel? shell = _shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>();
             if (shell is not null)
             {
@@ -2052,6 +2085,24 @@ public sealed partial class PdfPageCanvas : Grid
 
         if (PageInfo is not null && _observedDocument is { } tappedDoc)
         {
+            if (activeTool == AnnotationTool.InsertImage)
+            {
+                _lastTouchTapTick = 0;
+                tappedDoc.ClearSelection();
+                tappedDoc.SelectedAnnotation = null;
+                PlaceImageRequested?.Invoke(this, _touchPressPdfPoint, releaseDip);
+                return;
+            }
+
+            if (activeTool == AnnotationTool.InsertText)
+            {
+                _lastTouchTapTick = 0;
+                tappedDoc.ClearSelection();
+                tappedDoc.SelectedAnnotation = null;
+                PlaceTextBoxRequested?.Invoke(this, _touchPressPdfPoint, releaseDip);
+                return;
+            }
+
             PdfAnnotationInfo? hitAnnot = tappedDoc.HitTestAnnotation(
                 PageInfo.Index,
                 _touchPressPdfPoint.X,
@@ -2063,6 +2114,7 @@ public sealed partial class PdfPageCanvas : Grid
                 {
                     _lastTouchTapTick = 0;
                     tappedDoc.ClearSelection();
+                    tappedDoc.SelectedAnnotation = null;
                     SignatureClicked?.Invoke(this, sig, releaseDip);
                     return;
                 }
@@ -2077,25 +2129,12 @@ public sealed partial class PdfPageCanvas : Grid
                 }
             }
 
-            ShellViewModel? activeShell = _shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>();
-            if (activeShell?.ActiveTool == AnnotationTool.TextNote)
+            if (activeTool == AnnotationTool.TextNote)
             {
                 _lastTouchTapTick = 0;
+                tappedDoc.ClearSelection();
+                tappedDoc.SelectedAnnotation = null;
                 PlaceTextNoteRequested?.Invoke(this, _touchPressPdfPoint, releaseDip);
-                return;
-            }
-
-            if (activeShell?.ActiveTool == AnnotationTool.InsertImage)
-            {
-                _lastTouchTapTick = 0;
-                PlaceImageRequested?.Invoke(this, _touchPressPdfPoint, releaseDip);
-                return;
-            }
-
-            if (activeShell?.ActiveTool == AnnotationTool.InsertText)
-            {
-                _lastTouchTapTick = 0;
-                PlaceTextBoxRequested?.Invoke(this, _touchPressPdfPoint, releaseDip);
                 return;
             }
         }
@@ -2114,6 +2153,10 @@ public sealed partial class PdfPageCanvas : Grid
             _lastTouchTapTick = 0;
             _clickCount = 0;
             _observedDocument?.ClearSelection();
+            if (_observedDocument is not null)
+            {
+                _observedDocument.SelectedAnnotation = null;
+            }
             TouchSelectionDismissRequested?.Invoke();
             TouchDoubleTapZoomRequested?.Invoke(this, releaseDip);
             return;
@@ -2122,6 +2165,10 @@ public sealed partial class PdfPageCanvas : Grid
         _lastTouchTapTick = nowTouch;
         _lastTouchTapRootPoint = curRootPt;
         _observedDocument?.ClearSelection();
+        if (_observedDocument is not null)
+        {
+            _observedDocument.SelectedAnnotation = null;
+        }
         TouchSelectionDismissRequested?.Invoke();
     }
 

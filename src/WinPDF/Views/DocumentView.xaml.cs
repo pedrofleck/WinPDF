@@ -2855,6 +2855,7 @@ public sealed partial class DocumentView : Page
         if (AnnotationQuickBarFlyout?.IsOpen == true)
         {
             args.Handled = true;
+            _quickBarClosedProgrammatically = true;
             AnnotationQuickBarFlyout.Hide();
             ReturnFocusToViewer();
             return;
@@ -6059,13 +6060,6 @@ public sealed partial class DocumentView : Page
         ConfigureColorButton(TouchSelectionColorOrangeButton, ContextColorOrangeItem, AnnotColorOrangeButton, QuickColorOrangeButton, MouseSelColorOrangeButton, ToolbarColorOrangeButton, ResourceKeys.ColorOrange, PdfAnnotationColor.Orange);
         ConfigureColorButton(TouchSelectionColorRedButton, ContextColorRedItem, AnnotColorRedButton, QuickColorRedButton, MouseSelColorRedButton, ToolbarColorRedButton, ResourceKeys.ColorRed, PdfAnnotationColor.Red);
 
-        if (TouchEmptyAddTextBoxButton is not null)
-        {
-            string addTextBox = ResourceStrings.Get(ResourceKeys.TouchEmptyAddTextBoxLabel);
-            TouchEmptyAddTextBoxButton.Label = addTextBox;
-            ToolTipService.SetToolTip(TouchEmptyAddTextBoxButton, addTextBox);
-        }
-
         if (TouchEmptyPasteButton is not null)
         {
             string paste = ResourceStrings.Get(ResourceKeys.TouchEmptyPasteLabel);
@@ -6431,7 +6425,8 @@ public sealed partial class DocumentView : Page
 
     private void OnCanvasTouchEmptyHoldRequested(PdfPageCanvas canvas, Vector2 pdfPt, Point canvasDipPt)
     {
-        if (TouchEmptyHoldCommandBarFlyout is null ||
+        if (_copiedAnnotation is null ||
+            TouchEmptyHoldCommandBarFlyout is null ||
             ScrollViewerContentRoot is null ||
             canvas.PageInfo is null ||
             ViewModel.IsPresentationMode)
@@ -6495,18 +6490,6 @@ public sealed partial class DocumentView : Page
     private void OnTouchEmptyHoldFlyoutClosed(object? sender, object e)
     {
         _isTouchEmptyHoldFlyoutOpen = false;
-    }
-
-    private void OnTouchEmptyAddTextBoxClick(object sender, RoutedEventArgs e)
-    {
-        PdfPageCanvas? canvas = _touchEmptyHoldCanvas;
-        Vector2 pdfPt = _touchEmptyHoldPdfPt;
-        Point dipPt = _touchEmptyHoldDipPt;
-        HideAnnotationPopupsImmediate();
-        if (canvas?.PageInfo is { } pageInfo)
-        {
-            OpenCreateAnnotationEditor(AnnotationEditorMode.CreateNote, pageInfo.Index, pdfPt, canvas, dipPt, pendingSelection: null);
-        }
     }
 
     private void OnTouchEmptyPasteClick(object sender, RoutedEventArgs e)
@@ -6854,11 +6837,55 @@ public sealed partial class DocumentView : Page
         if (!wasProgrammatic && pending is null)
         {
             TryRecordLastMouseClickFromCursor();
+            if (ViewModel.CurrentDocument is { SelectedAnnotation: { } sel } doc)
+            {
+                bool keepForMouseResize = !_isLastPointerInputTouch &&
+                    sel.IsResizable &&
+                    IsCursorNearAnnotationBounds(sel, marginDip: 14.0);
+                if (!keepForMouseResize)
+                {
+                    doc.SelectedAnnotation = null;
+                }
+            }
         }
 
         if (pending is not null)
         {
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Normal, () => pending());
+        }
+    }
+
+    private bool IsCursorNearAnnotationBounds(PdfAnnotationInfo annot, double marginDip)
+    {
+        if (ScrollViewerContentRoot is null ||
+            XamlRoot?.Content is null ||
+            annot.Bounds.IsEmpty ||
+            FindRealizedCanvasForPage(annot.PageIndex) is not { PageInfo: { } pageInfo } canvas)
+        {
+            return false;
+        }
+
+        try
+        {
+            nint hwnd = Microsoft.UI.Win32Interop.GetWindowFromWindowId(XamlRoot.ContentIslandEnvironment.AppWindowId);
+            if (hwnd == nint.Zero || GetCursorPos(out NativePoint screenPt) == 0 || ScreenToClient(hwnd, ref screenPt) == 0)
+            {
+                return false;
+            }
+
+            double scale = XamlRoot.RasterizationScale > 0.01 ? XamlRoot.RasterizationScale : 1.0;
+            Point clientDip = new(screenPt.X / scale, screenPt.Y / scale);
+            Point canvasDip = XamlRoot.Content.TransformToVisual(canvas).TransformPoint(clientDip);
+            PageCoordinateTransform transform = PageCoordinateTransform.FromPage(pageInfo, canvas.RotationAngle);
+            Rect rectDip = transform.ToPageRect(annot.Bounds);
+            return canvasDip.X >= rectDip.Left - marginDip &&
+                   canvasDip.X <= rectDip.Right + marginDip &&
+                   canvasDip.Y >= rectDip.Top - marginDip &&
+                   canvasDip.Y <= rectDip.Bottom + marginDip;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -6971,6 +6998,11 @@ public sealed partial class DocumentView : Page
 
     private void OnQuickBarCloseClick(object sender, RoutedEventArgs e)
     {
+        if (ViewModel.CurrentDocument is { } doc)
+        {
+            doc.SelectedAnnotation = null;
+        }
+
         CloseQuickBarThen(null);
         ReturnFocusToViewer();
     }
@@ -7459,6 +7491,10 @@ public sealed partial class DocumentView : Page
     {
         _annotEditorPendingSelection = null;
         _annotEditorAnnotation = null;
+        if (ViewModel.CurrentDocument is { } doc)
+        {
+            doc.SelectedAnnotation = null;
+        }
     }
 
     private void HideAnnotationPopupsImmediate()
@@ -7508,6 +7544,7 @@ public sealed partial class DocumentView : Page
             _pendingAfterQuickBarClosed = null;
             if (AnnotationQuickBarFlyout?.IsOpen == true)
             {
+                _quickBarClosedProgrammatically = true;
                 AnnotationQuickBarFlyout.Hide();
             }
         }
@@ -10054,6 +10091,19 @@ public sealed partial class DocumentView : Page
         return false;
     }
 
+    private static bool IsDescendantOfPageCanvas(DependencyObject? source)
+    {
+        for (DependencyObject? cur = source; cur is not null; cur = VisualTreeHelper.GetParent(cur))
+        {
+            if (cur is PdfPageCanvas)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private void OnSlideSwipePointerPressed(object sender, PointerRoutedEventArgs e)
     {
         if (_isDraggingSelectionHandle || _isDraggingTouchScrollScrubber || IsDescendantOfTouchSelectionHandle(e.OriginalSource as DependencyObject))
@@ -10068,9 +10118,19 @@ public sealed partial class DocumentView : Page
             _isMouseButtonDown = pt.Properties.IsLeftButtonPressed || pt.Properties.IsRightButtonPressed || pt.Properties.IsMiddleButtonPressed;
             _lastMousePointerPosition = pt.Position;
             _hasLastMousePointerPosition = true;
-            if (pt.Properties.IsLeftButtonPressed && ViewModel.CurrentDocument?.ActiveSelection is { HasContent: true })
+            if (pt.Properties.IsLeftButtonPressed && ViewModel.CurrentDocument is { } mouseDoc)
             {
-                ViewModel.CurrentDocument.ClearSelection();
+                if (mouseDoc.ActiveSelection is { HasContent: true })
+                {
+                    mouseDoc.ClearSelection();
+                }
+
+                if (!IsDescendantOfPageCanvas(e.OriginalSource as DependencyObject) &&
+                    mouseDoc.SelectedAnnotation is not null)
+                {
+                    mouseDoc.SelectedAnnotation = null;
+                }
+
                 HideTouchSelectionFlyout();
             }
             else if (_isTouchSelectionFlyoutOpen)
@@ -10101,9 +10161,18 @@ public sealed partial class DocumentView : Page
         _activeTouchPointers[e.Pointer.PointerId] = (nowTick, pt.Position);
 
         // Immediately clear any existing text selection when touching anywhere outside the selection handles
-        if (ViewModel.CurrentDocument?.ActiveSelection is { HasContent: true })
+        if (ViewModel.CurrentDocument is { } touchDoc)
         {
-            ViewModel.CurrentDocument.ClearSelection();
+            if (touchDoc.ActiveSelection is { HasContent: true })
+            {
+                touchDoc.ClearSelection();
+            }
+
+            if (!IsDescendantOfPageCanvas(e.OriginalSource as DependencyObject) &&
+                touchDoc.SelectedAnnotation is not null)
+            {
+                touchDoc.SelectedAnnotation = null;
+            }
         }
 
         if (CanShowTouchScrollScrubber())

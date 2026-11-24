@@ -301,8 +301,6 @@
   <data name="TouchSelection_Underline.Text" xml:space="preserve"><value>Sublinhar</value></data>
   <data name="TouchSelection_StrikeOut.Text" xml:space="preserve"><value>Tachado</value></data>
   <data name="TouchSelection_Squiggly.Text" xml:space="preserve"><value>Sublinhado ondulado</value></data>
-  <data name="TouchEmpty_AddComment_Label" xml:space="preserve"><value>Comentário</value></data>
-  <data name="TouchEmpty_AddTextBox_Label" xml:space="preserve"><value>Comentário</value></data>
   <data name="Annot_Save" xml:space="preserve"><value>Salvar</value></data>
   <data name="Annot_Delete" xml:space="preserve"><value>Excluir</value></data>
   <data name="Annot_Close" xml:space="preserve"><value>Fechar</value></data>

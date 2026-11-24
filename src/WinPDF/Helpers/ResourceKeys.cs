@@ -223,12 +223,6 @@ public static class ResourceKeys
     /// <summary>Touch selection flyout highlight-with-comment tooltip.</summary>
     public const string TouchSelectionCommentToolTip = "TouchSelection_Comment_ToolTip";
 
-    /// <summary>Touch empty-hold flyout add comment label.</summary>
-    public const string TouchEmptyAddCommentLabel = "TouchEmpty_AddComment_Label";
-
-    /// <summary>Touch empty-hold flyout add text box label.</summary>
-    public const string TouchEmptyAddTextBoxLabel = "TouchEmpty_AddTextBox_Label";
-
     /// <summary>Annotation popup save button text.</summary>
     public const string AnnotSave = "Annot_Save";
 

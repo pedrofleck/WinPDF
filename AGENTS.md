@@ -209,7 +209,7 @@ priority channels. Every public `IPdfService` method enqueues a job and returns 
 2. **Touch Long-Press Text Selection & Floating Action Bar (`PdfPageCanvas.cs`, `DocumentView.xaml(.cs)`):**
    - Holding a finger for `320 ms` within `10 DIPs` over selectable text engages `_isTouchSelecting`, cancels `DirectManipulation`, selects the initial word, and tracks drag selection with draggable start/end handles (`TouchSelectionStartHandle` / `TouchSelectionEndHandle`).
    - Releasing the finger opens the native WinUI 3 `CommandBarFlyout` (`TouchSelectionCommandBarFlyout`) above the selection with Copy, Highlight, Add Comment, Underline, Strikethrough, Squiggly, and 6 preset color swatches.
-   - Holding `320 ms` on an empty page area triggers `TouchEmptyHoldRequested` to place a speech-bubble Comment Note (`FPDF_ANNOT_TEXT`).
+   - Holding `320 ms` on an empty page area triggers `TouchEmptyHoldRequested` only when an annotation is on the clipboard (offering Paste); tapping outside any selected annotation always deselects it.
 3. **Touch Scroll Scrubber Pill (`DocumentView.xaml(.cs)`):**
    - Appears on the right edge of the document viewport exclusively during touch interaction in Continuous mode (`TouchScrollScrubberContainer`, `48×64 DIP` hit target + `26×48 DIP` Acrylic pill + live `TouchScrollPageBubble` badge during 1:1 fast scrubbing), auto-hiding after `2.2 s` of inactivity.
 
