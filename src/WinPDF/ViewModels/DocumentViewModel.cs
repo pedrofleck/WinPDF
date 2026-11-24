@@ -35,7 +35,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     /// <summary>
     /// Gets the document file name prefixed with an unsaved indicator dot when dirty (tab-ready).
     /// </summary>
-    public string DisplayFileName => HasUnsavedChanges ? $"• {FileName}" : FileName;
+    public string DisplayFileName => HasUnsavedChanges ? $"•\u00A0{FileName}" : FileName;
 
     /// <summary>
     /// Gets or sets the total number of pages in the document.

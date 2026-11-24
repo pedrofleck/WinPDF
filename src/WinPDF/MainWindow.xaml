@@ -258,13 +258,16 @@
                 Background="Transparent">
                 <!-- Centered open file name -->
                 <TextBlock
+                    Margin="16,0"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Center"
-                    MaxWidth="400"
                     FontWeight="SemiBold"
+                    MaxLines="2"
                     Style="{StaticResource CaptionTextBlockStyle}"
                     Text="{x:Bind ViewModel.CurrentDocument.DisplayFileName, Mode=OneWay}"
+                    TextAlignment="Center"
                     TextTrimming="CharacterEllipsis"
+                    TextWrapping="Wrap"
                     Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}" />
             </Grid>
 
