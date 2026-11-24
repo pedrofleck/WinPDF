@@ -49,6 +49,15 @@ if (Test-Path $targetZipPath) {
     Remove-Item -Force $targetZipPath
 }
 
+$projectObjDir = Join-Path $repoRoot "src\WinPDF\obj\$Platform\$Configuration"
+$projectBinDir = Join-Path $repoRoot "src\WinPDF\bin\$Platform\$Configuration"
+if (Test-Path $projectObjDir) {
+    Remove-Item -Recurse -Force $projectObjDir
+}
+if (Test-Path $projectBinDir) {
+    Remove-Item -Recurse -Force $projectBinDir
+}
+
 $projectPath = Join-Path $repoRoot 'src\WinPDF\WinPDF.csproj'
 & dotnet publish $projectPath -c $Configuration -p:Platform=$Platform -p:Version=$cleanVersion --self-contained true -o $targetFolderPath
 
@@ -57,12 +66,17 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "Verifying essential binaries in $targetFolderPath..." -ForegroundColor Cyan
-$requiredFiles = @('WinPDF.exe', 'coreclr.dll', 'pdfium.dll', 'Microsoft.ui.xaml.dll', 'WinPDF.pri')
+$requiredFiles = @('WinPDF.exe', 'coreclr.dll', 'pdfium.dll', 'Microsoft.ui.xaml.dll', 'WinPDF.pri', 'WinPDF.deps.json')
 foreach ($req in $requiredFiles) {
     $full = Join-Path $targetFolderPath $req
     if (-not (Test-Path $full)) {
         throw "Missing required binary: $req"
     }
+}
+
+$depsJsonPath = Join-Path $targetFolderPath 'WinPDF.deps.json'
+if (-not (Select-String -Path $depsJsonPath -SimpleMatch 'coreclr.dll' -Quiet)) {
+    throw "WinPDF.deps.json does not reference coreclr.dll (stale or non-self-contained deps.json)."
 }
 
 Write-Host "Creating clean standard ZIP archive: $targetZipPath..." -ForegroundColor Cyan

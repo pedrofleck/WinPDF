@@ -957,6 +957,16 @@
                                     <FontIcon Glyph="&#xE90A;" FontSize="15" />
                                 </AppBarButton.Icon>
                             </AppBarButton>
+                            <AppBarButton
+                                x:Name="TouchSelectionPasteButton"
+                                Width="40"
+                                Height="36"
+                                Visibility="Collapsed"
+                                Click="OnTouchSelectionPasteButtonClick">
+                                <AppBarButton.Icon>
+                                    <FontIcon Glyph="&#xE77F;" FontSize="15" />
+                                </AppBarButton.Icon>
+                            </AppBarButton>
                         </CommandBarFlyout.PrimaryCommands>
                         <CommandBarFlyout.SecondaryCommands>
                             <AppBarButton
@@ -1236,6 +1246,222 @@
                             CornerRadius="2,8,8,8"
                             IsHitTestVisible="False" />
                     </Grid>
+                </Canvas>
+
+                <!-- Touch Selected Annotation Overlay (Move body + Corner Resize handles + Non-modal QuickBar above ScrollViewer so DirectManipulation never steals touch drags) -->
+                <Canvas
+                    x:Name="TouchAnnotationResizeHandlesCanvas"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    Canvas.ZIndex="96"
+                    Visibility="Collapsed">
+                    <Border
+                        x:Name="TouchAnnotationMoveBodyHandle"
+                        Background="Transparent"
+                        ManipulationMode="None"
+                        Visibility="Collapsed"
+                        PointerPressed="OnTouchMoveHandlePointerPressed"
+                        PointerMoved="OnTouchMoveHandlePointerMoved"
+                        PointerReleased="OnTouchMoveHandlePointerReleased"
+                        PointerCanceled="OnTouchMoveHandlePointerCanceled"
+                        PointerCaptureLost="OnTouchMoveHandlePointerCaptureLost" />
+                    <Border
+                        x:Name="TouchResizeTopLeftHandle"
+                        Tag="0"
+                        Width="40"
+                        Height="40"
+                        Background="Transparent"
+                        ManipulationMode="None"
+                        PointerPressed="OnTouchResizeHandlePointerPressed"
+                        PointerMoved="OnTouchResizeHandlePointerMoved"
+                        PointerReleased="OnTouchResizeHandlePointerReleased"
+                        PointerCanceled="OnTouchResizeHandlePointerCanceled"
+                        PointerCaptureLost="OnTouchResizeHandlePointerCaptureLost" />
+                    <Border
+                        x:Name="TouchResizeTopRightHandle"
+                        Tag="1"
+                        Width="40"
+                        Height="40"
+                        Background="Transparent"
+                        ManipulationMode="None"
+                        PointerPressed="OnTouchResizeHandlePointerPressed"
+                        PointerMoved="OnTouchResizeHandlePointerMoved"
+                        PointerReleased="OnTouchResizeHandlePointerReleased"
+                        PointerCanceled="OnTouchResizeHandlePointerCanceled"
+                        PointerCaptureLost="OnTouchResizeHandlePointerCaptureLost" />
+                    <Border
+                        x:Name="TouchResizeBottomLeftHandle"
+                        Tag="2"
+                        Width="40"
+                        Height="40"
+                        Background="Transparent"
+                        ManipulationMode="None"
+                        PointerPressed="OnTouchResizeHandlePointerPressed"
+                        PointerMoved="OnTouchResizeHandlePointerMoved"
+                        PointerReleased="OnTouchResizeHandlePointerReleased"
+                        PointerCanceled="OnTouchResizeHandlePointerCanceled"
+                        PointerCaptureLost="OnTouchResizeHandlePointerCaptureLost" />
+                    <Border
+                        x:Name="TouchResizeBottomRightHandle"
+                        Tag="3"
+                        Width="40"
+                        Height="40"
+                        Background="Transparent"
+                        ManipulationMode="None"
+                        PointerPressed="OnTouchResizeHandlePointerPressed"
+                        PointerMoved="OnTouchResizeHandlePointerMoved"
+                        PointerReleased="OnTouchResizeHandlePointerReleased"
+                        PointerCanceled="OnTouchResizeHandlePointerCanceled"
+                        PointerCaptureLost="OnTouchResizeHandlePointerCaptureLost" />
+                    <Border
+                        x:Name="TouchAnnotationQuickBarBorder"
+                        Padding="6,4"
+                        CornerRadius="8"
+                        BorderThickness="1"
+                        Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+                        BackgroundSizing="InnerBorderEdge"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        ManipulationMode="None"
+                        Translation="0,0,32"
+                        Visibility="Collapsed">
+                        <Border.Shadow>
+                            <ThemeShadow />
+                        </Border.Shadow>
+                        <StackPanel Spacing="6">
+                            <StackPanel Orientation="Horizontal" Spacing="2">
+                                <Button
+                                    x:Name="TouchQuickBarAddCommentButton"
+                                    Width="36"
+                                    Height="36"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Click="OnQuickBarAddCommentClick">
+                                    <FontIcon FontSize="15" Glyph="&#xE90A;" />
+                                </Button>
+                                <Button
+                                    x:Name="TouchQuickBarColorButton"
+                                    Width="36"
+                                    Height="36"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Click="OnQuickBarColorToggleClick">
+                                    <FontIcon FontSize="15" Glyph="&#xE790;" />
+                                </Button>
+                                <Button
+                                    x:Name="TouchQuickBarCopyButton"
+                                    Width="36"
+                                    Height="36"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Click="OnQuickBarCopyClick">
+                                    <FontIcon FontSize="15" Glyph="&#xE8C8;" />
+                                </Button>
+                                <Button
+                                    x:Name="TouchQuickBarCutButton"
+                                    Width="36"
+                                    Height="36"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Click="OnQuickBarCutClick">
+                                    <FontIcon FontSize="15" Glyph="&#xE8C6;" />
+                                </Button>
+                                <Button
+                                    x:Name="TouchQuickBarDeleteButton"
+                                    Width="36"
+                                    Height="36"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Click="OnQuickBarDeleteClick">
+                                    <FontIcon FontSize="15" Glyph="&#xE74D;" />
+                                </Button>
+                                <AppBarSeparator Margin="2,4" />
+                                <Button
+                                    x:Name="TouchQuickBarCloseButton"
+                                    Width="34"
+                                    Height="36"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Click="OnQuickBarCloseClick">
+                                    <FontIcon FontSize="12" Glyph="&#xE711;" />
+                                </Button>
+                            </StackPanel>
+
+                            <StackPanel
+                                x:Name="TouchQuickBarColorRow"
+                                Orientation="Horizontal"
+                                HorizontalAlignment="Center"
+                                Spacing="8"
+                                Padding="2,2,2,4"
+                                Visibility="Collapsed">
+                                <Button
+                                    x:Name="TouchQuickColorYellowButton"
+                                    Width="24"
+                                    Height="24"
+                                    Padding="0"
+                                    CornerRadius="12"
+                                    Background="#FFFFE620"
+                                    BorderThickness="1"
+                                    Tag="Yellow"
+                                    Click="OnQuickBarColorSelectClick" />
+                                <Button
+                                    x:Name="TouchQuickColorGreenButton"
+                                    Width="24"
+                                    Height="24"
+                                    Padding="0"
+                                    CornerRadius="12"
+                                    Background="#FF64DC78"
+                                    BorderThickness="1"
+                                    Tag="Green"
+                                    Click="OnQuickBarColorSelectClick" />
+                                <Button
+                                    x:Name="TouchQuickColorBlueButton"
+                                    Width="24"
+                                    Height="24"
+                                    Padding="0"
+                                    CornerRadius="12"
+                                    Background="#FF5AB4FF"
+                                    BorderThickness="1"
+                                    Tag="Blue"
+                                    Click="OnQuickBarColorSelectClick" />
+                                <Button
+                                    x:Name="TouchQuickColorPinkButton"
+                                    Width="24"
+                                    Height="24"
+                                    Padding="0"
+                                    CornerRadius="12"
+                                    Background="#FFFF80B4"
+                                    BorderThickness="1"
+                                    Tag="Pink"
+                                    Click="OnQuickBarColorSelectClick" />
+                                <Button
+                                    x:Name="TouchQuickColorOrangeButton"
+                                    Width="24"
+                                    Height="24"
+                                    Padding="0"
+                                    CornerRadius="12"
+                                    Background="#FFFFA53C"
+                                    BorderThickness="1"
+                                    Tag="Orange"
+                                    Click="OnQuickBarColorSelectClick" />
+                                <Button
+                                    x:Name="TouchQuickColorRedButton"
+                                    Width="24"
+                                    Height="24"
+                                    Padding="0"
+                                    CornerRadius="12"
+                                    Background="#FFF24C4C"
+                                    BorderThickness="1"
+                                    Tag="Red"
+                                    Click="OnQuickBarColorSelectClick" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                 </Canvas>
 
                 <!-- Inline direct-on-page text editor + coupled Acrylic formatting mini-bar -->

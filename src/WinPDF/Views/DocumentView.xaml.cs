@@ -365,6 +365,8 @@ public sealed partial class DocumentView : Page
     private WIN32_POINT _touchAnnotPanLastScreenPx;
     private bool _hasTouchAnnotPanLastScreenPx;
     private bool _isTouchAnnotPanPollingSubscribed;
+    private Point _touchAnnotPanLastRootPos;
+    private bool _hasTouchAnnotPanLastRootPos;
     private bool _isTouchSelectionFlyoutOpen;
     private bool _isLastPointerInputTouch;
     private long _lastTouchSelectionCompletedTick;
@@ -372,6 +374,19 @@ public sealed partial class DocumentView : Page
     private bool _isDraggingSelectionHandle;
     private bool _isDraggingStartSelectionHandle;
     private uint _handleDragPointerId;
+    private bool _isDraggingAnnotationMoveHandle;
+    private uint _annotMoveHandlePointerId;
+    private PdfPageCanvas? _annotMoveTargetCanvas;
+    private Point _touchMoveLastRootPos;
+    private bool _hasTouchMoveHandleMoved;
+    private bool _isDraggingAnnotationResizeHandle;
+    private uint _annotResizeHandlePointerId;
+    private UIElement? _annotResizeHandleElement;
+    private PdfPageCanvas? _annotResizeTargetCanvas;
+    private Point _touchResizeLastRootPos;
+    private bool _isReleasingOverlayCapture;
+    private int _touchQuickBarBoundAnnotPage = -1;
+    private int _touchQuickBarBoundAnnotIndex = -1;
     private PdfPageCanvas? _handleDragTargetCanvas;
     private UIElement? _handleDragElement;
     private Point _handleGrabOffsetRootDip;
@@ -736,6 +751,8 @@ public sealed partial class DocumentView : Page
         HideTouchSelectionFlyout();
         CancelInteractiveSlideSwipeImmediate();
         CancelTouchSelectionHandleDragImmediate();
+        CancelTouchAnnotationMoveHandleDragImmediate();
+        CancelTouchAnnotationResizeHandleDragImmediate();
         StopTouchAnnotPanPolling();
         _activeTouchSelectingCanvas = null;
         _activeTouchDraggingAnnotCanvas = null;
@@ -878,6 +895,8 @@ public sealed partial class DocumentView : Page
         {
             UpdateTouchSelectionHandlesLayout();
         }
+
+        UpdateTouchAnnotationResizeHandlesLayout();
 
         if (_isInlineTextEditorOpen)
         {
@@ -1430,6 +1449,8 @@ public sealed partial class DocumentView : Page
         }
 
         CancelTouchSelectionHandleDragImmediate();
+        CancelTouchAnnotationMoveHandleDragImmediate();
+        CancelTouchAnnotationResizeHandleDragImmediate();
         CancelInteractiveSlideSwipeImmediate();
         CloseInlineTextEditorImmediate();
         PdfPageCanvas.ClearSlideBuffer();
@@ -1561,6 +1582,11 @@ public sealed partial class DocumentView : Page
                 HideTouchSelectionFlyout();
             }
         }
+        else if (e.PropertyName == nameof(DocumentViewModel.SelectedAnnotation))
+        {
+            UpdateTouchAnnotationResizeHandlesLayout();
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => UpdateTouchAnnotationResizeHandlesLayout());
+        }
         else if (e.PropertyName == nameof(DocumentViewModel.IsNightMode))
         {
             if (_observedDocument is not null)
@@ -1631,12 +1657,14 @@ public sealed partial class DocumentView : Page
         if (!_isProgrammaticPageScroll &&
             _activeTouchSelectingCanvas is null &&
             _activeTouchDraggingAnnotCanvas is null &&
-            !_isDraggingSelectionHandle)
+            !_isDraggingSelectionHandle &&
+            !_isDraggingAnnotationMoveHandle &&
+            !_isDraggingAnnotationResizeHandle)
         {
             double dV = Math.Abs(e.NextView.VerticalOffset - ContinuousScrollViewer.VerticalOffset);
             double dH = Math.Abs(e.NextView.HorizontalOffset - ContinuousScrollViewer.HorizontalOffset);
             double dZ = Math.Abs(e.NextView.ZoomFactor - ContinuousScrollViewer.ZoomFactor);
-            if (dV > 5.0 || dH > 5.0 || dZ > 0.008)
+            if (dV > 12.0 || dH > 12.0 || dZ > 0.015)
             {
                 CancelTouchHoldOnAllCanvases();
             }
@@ -1645,6 +1673,15 @@ public sealed partial class DocumentView : Page
         if (_isTouchSelectionHandlesActive)
         {
             UpdateTouchSelectionHandlesLayout();
+        }
+
+        if (_isDraggingAnnotationMoveHandle || _isDraggingAnnotationResizeHandle)
+        {
+            SyncActiveTouchOverlayDragAfterViewportPan();
+        }
+        else
+        {
+            UpdateTouchAnnotationResizeHandlesLayout();
         }
 
         if (_isInlineTextEditorOpen)
@@ -1752,6 +1789,15 @@ public sealed partial class DocumentView : Page
             UpdateTouchSelectionHandlesLayout();
         }
 
+        if (_isDraggingAnnotationMoveHandle || _isDraggingAnnotationResizeHandle)
+        {
+            SyncActiveTouchOverlayDragAfterViewportPan();
+        }
+        else
+        {
+            UpdateTouchAnnotationResizeHandlesLayout();
+        }
+
         if (_isInlineTextEditorOpen)
         {
             RepositionInlineTextEditor();
@@ -1783,6 +1829,8 @@ public sealed partial class DocumentView : Page
             }
 
             if (!_isDraggingTouchScrollScrubber &&
+                !_isDraggingAnnotationMoveHandle &&
+                !_isDraggingAnnotationResizeHandle &&
                 _activeTouchDraggingAnnotCanvas is not { IsTouchDraggingAnnotation: true })
             {
                 SyncPagedScrollViewerModes();
@@ -5055,7 +5103,9 @@ public sealed partial class DocumentView : Page
 
         if (_activeTouchSelectingCanvas is { IsTouchSelecting: true } ||
             _activeTouchDraggingAnnotCanvas is { IsTouchDraggingAnnotation: true } ||
-            _isDraggingSelectionHandle)
+            _isDraggingSelectionHandle ||
+            _isDraggingAnnotationMoveHandle ||
+            _isDraggingAnnotationResizeHandle)
         {
             return;
         }
@@ -5244,6 +5294,13 @@ public sealed partial class DocumentView : Page
             }
 
             ContinuousScrollViewer.ChangeView(_interactiveOffsetX, _interactiveOffsetY, (float)_interactiveZoomFactor, disableAnimation: true);
+            if (_isDraggingAnnotationMoveHandle ||
+                _isDraggingAnnotationResizeHandle ||
+                _activeTouchDraggingAnnotCanvas is { IsTouchDraggingAnnotation: true })
+            {
+                LockScrollViewerForTouchAnnotationDrag();
+                SyncActiveTouchOverlayDragAfterViewportPan();
+            }
             ScheduleViewportUpdate();
         }
         finally
@@ -6095,6 +6152,13 @@ public sealed partial class DocumentView : Page
             ToolTipService.SetToolTip(TouchEmptyPasteButton, paste);
         }
 
+        if (TouchSelectionPasteButton is not null)
+        {
+            string paste = ResourceStrings.Get(ResourceKeys.TouchEmptyPasteLabel);
+            TouchSelectionPasteButton.Label = paste;
+            ToolTipService.SetToolTip(TouchSelectionPasteButton, paste);
+        }
+
         if (StatusBarSignedLabelText is not null)
         {
             StatusBarSignedLabelText.Text = ResourceStrings.Get(ResourceKeys.StatusBarSignedLabel);
@@ -6114,6 +6178,18 @@ public sealed partial class DocumentView : Page
         SetToolTip(QuickBarCutButton, ResourceKeys.AnnotCutToolTip);
         SetToolTip(QuickBarDeleteButton, ResourceKeys.AnnotDelete);
         SetToolTip(QuickBarCloseButton, ResourceKeys.AnnotClose);
+        SetToolTip(TouchQuickBarAddCommentButton, ResourceKeys.AnnotAddCommentToolTip);
+        SetToolTip(TouchQuickBarColorButton, ResourceKeys.AnnotColorToolTip);
+        SetToolTip(TouchQuickBarCopyButton, ResourceKeys.AnnotCopyToolTip);
+        SetToolTip(TouchQuickBarCutButton, ResourceKeys.AnnotCutToolTip);
+        SetToolTip(TouchQuickBarDeleteButton, ResourceKeys.AnnotDelete);
+        SetToolTip(TouchQuickBarCloseButton, ResourceKeys.AnnotClose);
+        SetToolTip(TouchQuickColorYellowButton, ResourceKeys.ColorYellow);
+        SetToolTip(TouchQuickColorGreenButton, ResourceKeys.ColorGreen);
+        SetToolTip(TouchQuickColorBlueButton, ResourceKeys.ColorBlue);
+        SetToolTip(TouchQuickColorPinkButton, ResourceKeys.ColorPink);
+        SetToolTip(TouchQuickColorOrangeButton, ResourceKeys.ColorOrange);
+        SetToolTip(TouchQuickColorRedButton, ResourceKeys.ColorRed);
         SetToolTip(AnnotationEditorCopyButton, ResourceKeys.AnnotCopyToolTip);
         SetToolTip(AnnotationEditorCutButton, ResourceKeys.AnnotCutToolTip);
         SetToolTip(AnnotationEditorCloseButton, ResourceKeys.AnnotClose);
@@ -6348,9 +6424,20 @@ public sealed partial class DocumentView : Page
 
     /// <summary>
     /// Opens the full editor when the annotation already carries text; otherwise opens the compact quick-bar.
+    /// On touch input, uses the non-modal floating QuickBar overlay so moving and resizing never hit a light-dismiss wall.
     /// </summary>
     private void OpenAnnotationUi(PdfAnnotationInfo annot, PdfPageCanvas? canvas, Point canvasDipPt)
     {
+        if (_isLastPointerInputTouch)
+        {
+            // Keep touch interaction 100% non-modal: selecting shows TouchAnnotationMoveBodyHandle + resize corners +
+            // TouchAnnotationQuickBarBorder above ScrollViewer so dragging/resizing works on the very first touch.
+            _touchQuickBarBoundAnnotPage = -1;
+            _touchQuickBarBoundAnnotIndex = -1;
+            UpdateTouchAnnotationResizeHandlesLayout();
+            return;
+        }
+
         if (annot.IsTextBox)
         {
             OpenAnnotationQuickBar(annot, canvas, canvasDipPt);
@@ -6483,6 +6570,9 @@ public sealed partial class DocumentView : Page
         _touchEmptyHoldCanvas = canvas;
         _touchEmptyHoldPdfPt = pdfPt;
         _touchEmptyHoldDipPt = canvasDipPt;
+        _lastMouseClickPageIndex = canvas.PageInfo.Index;
+        _lastMouseClickPdfPt = pdfPt;
+        _hasLastMouseClickPdfPt = true;
         SetVisible(TouchEmptyPasteButton, _copiedAnnotation is not null);
 
         try
@@ -6561,6 +6651,28 @@ public sealed partial class DocumentView : Page
             anchorCanvas,
             anchorDip,
             sel);
+    }
+
+    private void OnTouchSelectionPasteButtonClick(object sender, RoutedEventArgs e)
+    {
+        DocumentViewModel? doc = ViewModel.CurrentDocument;
+        HideTouchSelectionFlyout();
+        if (doc is null || _copiedAnnotation is null)
+        {
+            return;
+        }
+
+        doc.ClearSelection();
+        if (_hasLastMouseClickPdfPt &&
+            _lastMouseClickPageIndex >= 0 &&
+            _lastMouseClickPageIndex < doc.Pages.Count)
+        {
+            _ = PasteCopiedAnnotationAtAsync(doc, _lastMouseClickPageIndex, _lastMouseClickPdfPt.X, _lastMouseClickPdfPt.Y);
+        }
+        else
+        {
+            _ = PasteCopiedAnnotationFromKeyboardAsync(doc);
+        }
     }
 
     private void OnTouchSelectionSubtypeClick(object sender, RoutedEventArgs e)
@@ -6895,7 +7007,11 @@ public sealed partial class DocumentView : Page
         _pendingAfterQuickBarClosed = null;
         if (!wasProgrammatic && pending is null)
         {
-            TryRecordLastMouseClickFromCursor();
+            if (!_isLastPointerInputTouch)
+            {
+                TryRecordLastMouseClickFromCursor();
+            }
+
             bool isSpuriousTouchDismiss = _isLastPointerInputTouch &&
                 (Environment.TickCount64 - _quickBarOpenedTick) < 220;
             if (!isSpuriousTouchDismiss && ViewModel.CurrentDocument is { SelectedAnnotation: { } sel } doc)
@@ -6952,6 +7068,12 @@ public sealed partial class DocumentView : Page
 
     private void CloseQuickBarThen(Action? action)
     {
+        SetVisible(TouchQuickBarColorRow, false);
+        if (TouchAnnotationQuickBarBorder is not null && TouchAnnotationQuickBarBorder.Visibility == Visibility.Visible)
+        {
+            TouchAnnotationQuickBarBorder.Visibility = Visibility.Collapsed;
+        }
+
         if (AnnotationQuickBarFlyout?.IsOpen == true)
         {
             _quickBarClosedProgrammatically = true;
@@ -6988,6 +7110,15 @@ public sealed partial class DocumentView : Page
 
     private void OnQuickBarColorToggleClick(object sender, RoutedEventArgs e)
     {
+        if (TouchAnnotationQuickBarBorder?.Visibility == Visibility.Visible && TouchQuickBarColorRow is not null)
+        {
+            TouchQuickBarColorRow.Visibility = TouchQuickBarColorRow.Visibility == Visibility.Visible
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => UpdateTouchAnnotationResizeHandlesLayout());
+            return;
+        }
+
         if (QuickBarColorRow is not null)
         {
             QuickBarColorRow.Visibility = QuickBarColorRow.Visibility == Visibility.Visible
@@ -7588,6 +7719,8 @@ public sealed partial class DocumentView : Page
         {
             doc.SelectedAnnotation = null;
         }
+
+        UpdateTouchAnnotationResizeHandlesLayout();
     }
 
     private void HideAnnotationPopupsImmediate()
@@ -7631,6 +7764,12 @@ public sealed partial class DocumentView : Page
         finally
         {
             _isTouchEmptyHoldFlyoutOpen = false;
+        }
+
+        SetVisible(TouchQuickBarColorRow, false);
+        if (TouchAnnotationQuickBarBorder is not null)
+        {
+            TouchAnnotationQuickBarBorder.Visibility = Visibility.Collapsed;
         }
 
         try
@@ -7889,6 +8028,8 @@ public sealed partial class DocumentView : Page
         {
             InlineTextEditorOverlay.Visibility = Visibility.Collapsed;
         }
+
+        UpdateTouchAnnotationResizeHandlesLayout();
     }
 
     private void CancelInlineTextEditor()
@@ -8680,7 +8821,6 @@ public sealed partial class DocumentView : Page
         StopTouchAnnotPanPolling();
         _touchAnnotPanPointerId = 0;
 
-        _isManipulatingSlideSwipe = false;
         _isTouchSwipeTracking = false;
         _isTouchSwipeEngaged = false;
         if (_isSlideSwipeActive || _isSlideSwipeAnimating)
@@ -8810,6 +8950,670 @@ public sealed partial class DocumentView : Page
         {
             PanPagedScrollViewerBy(panDxDip, panDyDip);
         }
+    }
+
+    private PdfPageCanvas? FindCanvasWaitingOnMovableAnnotation()
+    {
+        foreach (PdfPageCanvas canvas in _activeCanvases)
+        {
+            if (canvas.IsTouchWaitingOnMovableAnnotation)
+            {
+                return canvas;
+            }
+        }
+
+        return null;
+    }
+
+    private bool IsDescendantOfTouchResizeHandle(DependencyObject? source)
+    {
+        for (DependencyObject? cur = source; cur is not null; cur = VisualTreeHelper.GetParent(cur))
+        {
+            if (ReferenceEquals(cur, TouchAnnotationResizeHandlesCanvas) ||
+                ReferenceEquals(cur, TouchAnnotationMoveBodyHandle) ||
+                ReferenceEquals(cur, TouchAnnotationQuickBarBorder) ||
+                ReferenceEquals(cur, TouchResizeTopLeftHandle) ||
+                ReferenceEquals(cur, TouchResizeTopRightHandle) ||
+                ReferenceEquals(cur, TouchResizeBottomLeftHandle) ||
+                ReferenceEquals(cur, TouchResizeBottomRightHandle))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void SyncTouchQuickBarForAnnotation(PdfAnnotationInfo annot, PdfPageCanvas canvas, Point anchorCanvasDipPt)
+    {
+        _quickBarAnnotation = annot;
+        _quickBarCanvas = canvas;
+        _quickBarAnchorDipPt = anchorCanvasDipPt;
+
+        bool changedTarget = _touchQuickBarBoundAnnotPage != annot.PageIndex ||
+                             _touchQuickBarBoundAnnotIndex != annot.AnnotIndex;
+        if (!changedTarget)
+        {
+            return;
+        }
+
+        _touchQuickBarBoundAnnotPage = annot.PageIndex;
+        _touchQuickBarBoundAnnotIndex = annot.AnnotIndex;
+
+        SetVisible(TouchQuickBarColorButton, annot.SupportsColorChange);
+        SetVisible(TouchQuickBarCopyButton, annot.CanCopyOrCut);
+        SetVisible(TouchQuickBarCutButton, annot.CanCopyOrCut);
+        if (TouchQuickBarAddCommentButton?.Content is FontIcon quickCommentIcon)
+        {
+            quickCommentIcon.Glyph = annot.IsTextBox ? "\uE70F" : "\uE90A";
+        }
+
+        SetToolTip(
+            TouchQuickBarAddCommentButton,
+            annot.IsTextBox ? ResourceKeys.AnnotEditTextToolTip : ResourceKeys.AnnotAddCommentToolTip);
+        SetVisible(TouchQuickBarColorRow, false);
+        ApplySwatchSelectedState(TouchQuickColorYellowButton, IsSameColor(annot.Color, PdfAnnotationColor.Yellow));
+        ApplySwatchSelectedState(TouchQuickColorGreenButton, IsSameColor(annot.Color, PdfAnnotationColor.Green));
+        ApplySwatchSelectedState(TouchQuickColorBlueButton, IsSameColor(annot.Color, PdfAnnotationColor.Blue));
+        ApplySwatchSelectedState(TouchQuickColorPinkButton, IsSameColor(annot.Color, PdfAnnotationColor.Pink));
+        ApplySwatchSelectedState(TouchQuickColorOrangeButton, IsSameColor(annot.Color, PdfAnnotationColor.Orange));
+        ApplySwatchSelectedState(TouchQuickColorRedButton, IsSameColor(annot.Color, PdfAnnotationColor.Red));
+    }
+
+    private void UpdateTouchAnnotationResizeHandlesLayout(Rect? livePreviewCanvasRect = null, PdfPageCanvas? liveCanvas = null)
+    {
+        if (TouchAnnotationResizeHandlesCanvas is null ||
+            TouchAnnotationMoveBodyHandle is null ||
+            TouchResizeTopLeftHandle is null ||
+            TouchResizeTopRightHandle is null ||
+            TouchResizeBottomLeftHandle is null ||
+            TouchResizeBottomRightHandle is null ||
+            ScrollViewerContentRoot is null)
+        {
+            return;
+        }
+
+        if ((!_isLastPointerInputTouch && !_isDraggingAnnotationMoveHandle && !_isDraggingAnnotationResizeHandle) ||
+            ViewModel?.IsPresentationMode == true ||
+            ViewModel?.CurrentDocument?.SelectedAnnotation is not { } selAnnot ||
+            selAnnot.IsSignatureWidget ||
+            selAnnot.Bounds.IsEmpty)
+        {
+            _touchQuickBarBoundAnnotPage = -1;
+            _touchQuickBarBoundAnnotIndex = -1;
+            if (TouchAnnotationQuickBarBorder is not null)
+            {
+                TouchAnnotationQuickBarBorder.Visibility = Visibility.Collapsed;
+            }
+
+            SetVisible(TouchQuickBarColorRow, false);
+            if (TouchAnnotationResizeHandlesCanvas.Visibility != Visibility.Collapsed)
+            {
+                TouchAnnotationResizeHandlesCanvas.Visibility = Visibility.Collapsed;
+            }
+
+            return;
+        }
+
+        PdfPageCanvas? canvas = liveCanvas ?? FindRealizedCanvasForPage(selAnnot.PageIndex);
+        if (canvas?.PageInfo is not { } pageInfo)
+        {
+            TouchAnnotationResizeHandlesCanvas.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        try
+        {
+            Rect pageRectDip = livePreviewCanvasRect ??
+                PageCoordinateTransform.FromPage(pageInfo, canvas.RotationAngle).ToPageRect(selAnnot.Bounds);
+            if (pageRectDip.Width < 1.0 || pageRectDip.Height < 1.0)
+            {
+                TouchAnnotationResizeHandlesCanvas.Visibility = Visibility.Collapsed;
+                return;
+            }
+
+            GeneralTransform toRoot = canvas.TransformToVisual(ScrollViewerContentRoot);
+            Rect rootRect = toRoot.TransformBounds(pageRectDip);
+
+            // 1. Movable body hit target (expanded to at least 52x52 DIP centered on small annotations like comments/text)
+            if (selAnnot.IsMovable && !_isInlineTextEditorOpen)
+            {
+                const double minMoveHitDip = 52.0;
+                double padX = rootRect.Width < 72.0 ? Math.Max(8.0, (minMoveHitDip - rootRect.Width) * 0.5) : 0.0;
+                double padY = rootRect.Height < 72.0 ? Math.Max(8.0, (minMoveHitDip - rootRect.Height) * 0.5) : 0.0;
+                TouchAnnotationMoveBodyHandle.Width = Math.Max(minMoveHitDip, rootRect.Width + (padX * 2.0));
+                TouchAnnotationMoveBodyHandle.Height = Math.Max(minMoveHitDip, rootRect.Height + (padY * 2.0));
+                Canvas.SetLeft(TouchAnnotationMoveBodyHandle, rootRect.Left - padX);
+                Canvas.SetTop(TouchAnnotationMoveBodyHandle, rootRect.Top - padY);
+                TouchAnnotationMoveBodyHandle.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                TouchAnnotationMoveBodyHandle.Visibility = Visibility.Collapsed;
+            }
+
+            // 2. Corner resize handles (for resizable stamps/images), shifted slightly outward on small images
+            // so the center interior remains wide open for drag-to-move.
+            if (selAnnot.IsResizable && !_isInlineTextEditorOpen)
+            {
+                double minSide = Math.Min(rootRect.Width, rootRect.Height);
+                double cornerSize = minSide < 84.0 ? 36.0 : 40.0;
+                double halfCorner = cornerSize * 0.5;
+                double outward = minSide < 96.0 ? Math.Clamp((96.0 - minSide) * 0.22, 0.0, 14.0) : 0.0;
+
+                TouchResizeTopLeftHandle.Width = cornerSize;
+                TouchResizeTopLeftHandle.Height = cornerSize;
+                TouchResizeTopRightHandle.Width = cornerSize;
+                TouchResizeTopRightHandle.Height = cornerSize;
+                TouchResizeBottomLeftHandle.Width = cornerSize;
+                TouchResizeBottomLeftHandle.Height = cornerSize;
+                TouchResizeBottomRightHandle.Width = cornerSize;
+                TouchResizeBottomRightHandle.Height = cornerSize;
+
+                Canvas.SetLeft(TouchResizeTopLeftHandle, rootRect.Left - outward - halfCorner);
+                Canvas.SetTop(TouchResizeTopLeftHandle, rootRect.Top - outward - halfCorner);
+
+                Canvas.SetLeft(TouchResizeTopRightHandle, rootRect.Right + outward - halfCorner);
+                Canvas.SetTop(TouchResizeTopRightHandle, rootRect.Top - outward - halfCorner);
+
+                Canvas.SetLeft(TouchResizeBottomLeftHandle, rootRect.Left - outward - halfCorner);
+                Canvas.SetTop(TouchResizeBottomLeftHandle, rootRect.Bottom + outward - halfCorner);
+
+                Canvas.SetLeft(TouchResizeBottomRightHandle, rootRect.Right + outward - halfCorner);
+                Canvas.SetTop(TouchResizeBottomRightHandle, rootRect.Bottom + outward - halfCorner);
+
+                TouchResizeTopLeftHandle.Visibility = Visibility.Visible;
+                TouchResizeTopRightHandle.Visibility = Visibility.Visible;
+                TouchResizeBottomLeftHandle.Visibility = Visibility.Visible;
+                TouchResizeBottomRightHandle.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                TouchResizeTopLeftHandle.Visibility = Visibility.Collapsed;
+                TouchResizeTopRightHandle.Visibility = Visibility.Collapsed;
+                TouchResizeBottomLeftHandle.Visibility = Visibility.Collapsed;
+                TouchResizeBottomRightHandle.Visibility = Visibility.Collapsed;
+            }
+
+            // 3. Non-modal floating Acrylic QuickBar (no WinUI Flyout light-dismiss wall to steal drag/resize touches)
+            if (TouchAnnotationQuickBarBorder is not null)
+            {
+                bool isActivelyDragging = _hasTouchMoveHandleMoved ||
+                                          _isDraggingAnnotationResizeHandle ||
+                                          (_activeTouchDraggingAnnotCanvas is { IsTouchDraggingAnnotation: true } && !_isDraggingAnnotationMoveHandle);
+                bool showTouchQuickBar = _isLastPointerInputTouch &&
+                                         !isActivelyDragging &&
+                                         !_isInlineTextEditorOpen &&
+                                         AnnotationEditorFlyout?.IsOpen != true;
+                if (showTouchQuickBar)
+                {
+                    Point centerCanvasDip = new(pageRectDip.Left + (pageRectDip.Width * 0.5), pageRectDip.Top + (pageRectDip.Height * 0.5));
+                    SyncTouchQuickBarForAnnotation(selAnnot, canvas, centerCanvasDip);
+                    bool wasCollapsed = TouchAnnotationQuickBarBorder.Visibility != Visibility.Visible;
+                    if (wasCollapsed)
+                    {
+                        TouchAnnotationQuickBarBorder.Visibility = Visibility.Visible;
+                        _quickBarOpenedTick = Environment.TickCount64;
+                    }
+
+                    TouchAnnotationQuickBarBorder.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+                    double barW = TouchAnnotationQuickBarBorder.ActualWidth > 1.0
+                        ? TouchAnnotationQuickBarBorder.ActualWidth
+                        : Math.Max(140.0, TouchAnnotationQuickBarBorder.DesiredSize.Width);
+                    double barH = TouchAnnotationQuickBarBorder.ActualHeight > 1.0
+                        ? TouchAnnotationQuickBarBorder.ActualHeight
+                        : Math.Max(44.0, TouchAnnotationQuickBarBorder.DesiredSize.Height);
+
+                    double rootW = Math.Max(64.0, ScrollViewerContentRoot.ActualWidth);
+                    double rootH = Math.Max(64.0, ScrollViewerContentRoot.ActualHeight);
+                    double topEdge = selAnnot.IsMovable && rootRect.Height < 52.0
+                        ? rootRect.Top - ((52.0 - rootRect.Height) * 0.5)
+                        : rootRect.Top;
+                    double bottomEdge = selAnnot.IsMovable && rootRect.Height < 52.0
+                        ? rootRect.Bottom + ((52.0 - rootRect.Height) * 0.5)
+                        : rootRect.Bottom;
+
+                    double barLeft = Math.Clamp((rootRect.Left + (rootRect.Width * 0.5)) - (barW * 0.5), 12.0, Math.Max(12.0, rootW - barW - 12.0));
+                    bool placeBelow = (topEdge - barH - 18.0) < 12.0;
+                    double barTop = placeBelow
+                        ? Math.Clamp(bottomEdge + 18.0, 12.0, Math.Max(12.0, rootH - barH - 12.0))
+                        : Math.Clamp(topEdge - barH - 18.0, 12.0, Math.Max(12.0, rootH - barH - 12.0));
+
+                    Canvas.SetLeft(TouchAnnotationQuickBarBorder, barLeft);
+                    Canvas.SetTop(TouchAnnotationQuickBarBorder, barTop);
+                }
+                else
+                {
+                    TouchAnnotationQuickBarBorder.Visibility = Visibility.Collapsed;
+                }
+            }
+
+            if (TouchAnnotationResizeHandlesCanvas.Visibility != Visibility.Visible)
+            {
+                TouchAnnotationResizeHandlesCanvas.Visibility = Visibility.Visible;
+            }
+        }
+        catch
+        {
+            TouchAnnotationResizeHandlesCanvas.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void SyncActiveTouchOverlayDragAfterViewportPan()
+    {
+        if (ScrollViewerContentRoot is null)
+        {
+            return;
+        }
+
+        if (_isDraggingAnnotationMoveHandle && _annotMoveTargetCanvas is { } moveCanvas)
+        {
+            try
+            {
+                Point ptInCanvas = ScrollViewerContentRoot.TransformToVisual(moveCanvas).TransformPoint(_touchMoveLastRootPos);
+                Rect previewDip = moveCanvas.UpdateExternalTouchAnnotationMove(ptInCanvas, out bool hasMoved);
+                if (hasMoved)
+                {
+                    _hasTouchMoveHandleMoved = true;
+                }
+
+                UpdateTouchAnnotationResizeHandlesLayout(previewDip, moveCanvas);
+            }
+            catch
+            {
+            }
+
+            return;
+        }
+
+        if (_isDraggingAnnotationResizeHandle && _annotResizeTargetCanvas is { } resizeCanvas)
+        {
+            try
+            {
+                Point ptInCanvas = ScrollViewerContentRoot.TransformToVisual(resizeCanvas).TransformPoint(_touchResizeLastRootPos);
+                Rect previewDip = resizeCanvas.UpdateExternalTouchAnnotationResize(ptInCanvas);
+                UpdateTouchAnnotationResizeHandlesLayout(previewDip, resizeCanvas);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private void OnTouchMoveHandlePointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (ScrollViewerContentRoot is null ||
+            TouchAnnotationMoveBodyHandle is null ||
+            ViewModel?.CurrentDocument?.SelectedAnnotation is not { IsMovable: true } selAnnot ||
+            FindRealizedCanvasForPage(selAnnot.PageIndex) is not { } canvas)
+        {
+            return;
+        }
+
+        if (_isDraggingAnnotationMoveHandle || _isDraggingAnnotationResizeHandle)
+        {
+            return;
+        }
+
+        Point ptInCanvas = e.GetCurrentPoint(canvas).Position;
+        if (!canvas.BeginExternalTouchAnnotationMove(selAnnot, ptInCanvas, out Rect origRectDip))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        _isLastPointerInputTouch = e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Touch;
+        _isDraggingAnnotationMoveHandle = true;
+        _annotMoveHandlePointerId = e.Pointer.PointerId;
+        _annotMoveTargetCanvas = canvas;
+        _activeTouchDraggingAnnotCanvas = canvas;
+        _touchDragAnnotPointerId = e.Pointer.PointerId;
+        _touchMoveLastRootPos = e.GetCurrentPoint(ScrollViewerContentRoot).Position;
+        _hasTouchMoveHandleMoved = false;
+
+        LockScrollViewerForTouchAnnotationDrag();
+        try
+        {
+            _ = TouchAnnotationMoveBodyHandle.CapturePointer(e.Pointer);
+        }
+        catch
+        {
+        }
+
+        UpdateTouchAnnotationResizeHandlesLayout(origRectDip, canvas);
+    }
+
+    private void OnTouchMoveHandlePointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isDraggingAnnotationMoveHandle ||
+            e.Pointer.PointerId != _annotMoveHandlePointerId ||
+            _annotMoveTargetCanvas is not { } canvas ||
+            ScrollViewerContentRoot is null)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        try
+        {
+            _touchMoveLastRootPos = e.GetCurrentPoint(ScrollViewerContentRoot).Position;
+            Point ptInCanvas = e.GetCurrentPoint(canvas).Position;
+            Rect previewDip = canvas.UpdateExternalTouchAnnotationMove(ptInCanvas, out bool hasMoved);
+            if (hasMoved)
+            {
+                _hasTouchMoveHandleMoved = true;
+            }
+
+            UpdateTouchAnnotationResizeHandlesLayout(previewDip, canvas);
+        }
+        catch
+        {
+        }
+    }
+
+    private void OnTouchMoveHandlePointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isDraggingAnnotationMoveHandle || e.Pointer.PointerId != _annotMoveHandlePointerId)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        Point? finalInCanvas = null;
+        if (_annotMoveTargetCanvas is { } canvas)
+        {
+            try
+            {
+                finalInCanvas = e.GetCurrentPoint(canvas).Position;
+            }
+            catch
+            {
+            }
+        }
+
+        FinishTouchAnnotationMoveHandleDrag(e.Pointer, commit: true, finalInCanvas);
+    }
+
+    private void OnTouchMoveHandlePointerCanceled(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isDraggingAnnotationMoveHandle && e.Pointer.PointerId == _annotMoveHandlePointerId)
+        {
+            FinishTouchAnnotationMoveHandleDrag(e.Pointer, commit: true, finalInCanvas: null);
+        }
+    }
+
+    private void OnTouchMoveHandlePointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isReleasingOverlayCapture)
+        {
+            return;
+        }
+
+        if (_isDraggingAnnotationMoveHandle && e.Pointer.PointerId == _annotMoveHandlePointerId)
+        {
+            FinishTouchAnnotationMoveHandleDrag(null, commit: true, finalInCanvas: null);
+        }
+    }
+
+    private void CancelTouchAnnotationMoveHandleDragImmediate()
+    {
+        if (_isDraggingAnnotationMoveHandle)
+        {
+            FinishTouchAnnotationMoveHandleDrag(null, commit: false, finalInCanvas: null);
+        }
+    }
+
+    private void FinishTouchAnnotationMoveHandleDrag(Pointer? pointerToRelease, bool commit, Point? finalInCanvas)
+    {
+        if (!_isDraggingAnnotationMoveHandle)
+        {
+            return;
+        }
+
+        PdfPageCanvas? canvas = _annotMoveTargetCanvas;
+        bool hadMoved = _hasTouchMoveHandleMoved;
+        PdfAnnotationInfo? selAnnot = ViewModel?.CurrentDocument?.SelectedAnnotation;
+
+        _isDraggingAnnotationMoveHandle = false;
+        _annotMoveHandlePointerId = 0;
+        _annotMoveTargetCanvas = null;
+        _hasTouchMoveHandleMoved = false;
+        StopTouchAnnotPanPolling();
+        _touchAnnotPanPointerId = 0;
+        _hasTouchAnnotPanLastRootPos = false;
+        if (ReferenceEquals(_activeTouchDraggingAnnotCanvas, canvas))
+        {
+            _activeTouchDraggingAnnotCanvas = null;
+            _touchDragAnnotPointerId = 0;
+        }
+
+        if (pointerToRelease is not null && TouchAnnotationMoveBodyHandle is not null)
+        {
+            _isReleasingOverlayCapture = true;
+            try
+            {
+                TouchAnnotationMoveBodyHandle.ReleasePointerCapture(pointerToRelease);
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _isReleasingOverlayCapture = false;
+            }
+        }
+
+        bool didMove = false;
+        if (canvas is not null)
+        {
+            if (commit)
+            {
+                didMove = canvas.CompleteExternalTouchAnnotationMove(finalInCanvas);
+            }
+            else
+            {
+                canvas.CancelExternalTouchAnnotationMove();
+            }
+        }
+
+        SyncPagedScrollViewerModes();
+
+        if (commit && !didMove && !hadMoved && selAnnot is not null && canvas is not null)
+        {
+            // Clean stationary tap on an already-selected TextBox or Comment opens its editor directly.
+            if (selAnnot.IsTextBox)
+            {
+                HideAnnotationPopupsImmediate();
+                OpenInlineTextEditorForExisting(selAnnot, canvas);
+                return;
+            }
+
+            if (selAnnot.HasComment)
+            {
+                HideAnnotationPopupsImmediate();
+                OpenExistingAnnotationEditor(selAnnot, canvas, finalInCanvas ?? default);
+                return;
+            }
+        }
+
+        UpdateTouchAnnotationResizeHandlesLayout();
+    }
+
+    private void OnTouchResizeHandlePointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement handleElem ||
+            ScrollViewerContentRoot is null ||
+            ViewModel?.CurrentDocument?.SelectedAnnotation is not { IsResizable: true } selAnnot ||
+            FindRealizedCanvasForPage(selAnnot.PageIndex) is not { } canvas)
+        {
+            return;
+        }
+
+        if (_isDraggingAnnotationMoveHandle || _isDraggingAnnotationResizeHandle)
+        {
+            return;
+        }
+
+        int cornerIndex = int.TryParse(handleElem.Tag as string, out int parsed) ? parsed : 3;
+        if (!canvas.BeginExternalTouchAnnotationResize(selAnnot, cornerIndex, out Rect initialPreviewDip))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        _isLastPointerInputTouch = e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Touch;
+        _isDraggingAnnotationResizeHandle = true;
+        _annotResizeHandlePointerId = e.Pointer.PointerId;
+        _annotResizeHandleElement = handleElem;
+        _annotResizeTargetCanvas = canvas;
+        _activeTouchDraggingAnnotCanvas = canvas;
+        _touchDragAnnotPointerId = e.Pointer.PointerId;
+        _touchResizeLastRootPos = e.GetCurrentPoint(ScrollViewerContentRoot).Position;
+
+        HideAnnotationPopupsImmediate();
+        LockScrollViewerForTouchAnnotationDrag();
+        try
+        {
+            _ = handleElem.CapturePointer(e.Pointer);
+        }
+        catch
+        {
+        }
+
+        UpdateTouchAnnotationResizeHandlesLayout(initialPreviewDip, canvas);
+    }
+
+    private void OnTouchResizeHandlePointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isDraggingAnnotationResizeHandle ||
+            e.Pointer.PointerId != _annotResizeHandlePointerId ||
+            _annotResizeTargetCanvas is not { } canvas)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        try
+        {
+            if (ScrollViewerContentRoot is not null)
+            {
+                _touchResizeLastRootPos = e.GetCurrentPoint(ScrollViewerContentRoot).Position;
+            }
+
+            Point ptInCanvas = e.GetCurrentPoint(canvas).Position;
+            Rect previewDip = canvas.UpdateExternalTouchAnnotationResize(ptInCanvas);
+            UpdateTouchAnnotationResizeHandlesLayout(previewDip, canvas);
+        }
+        catch
+        {
+        }
+    }
+
+    private void OnTouchResizeHandlePointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isDraggingAnnotationResizeHandle || e.Pointer.PointerId != _annotResizeHandlePointerId)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        Point? finalInCanvas = null;
+        if (_annotResizeTargetCanvas is { } canvas)
+        {
+            try
+            {
+                finalInCanvas = e.GetCurrentPoint(canvas).Position;
+            }
+            catch
+            {
+            }
+        }
+
+        FinishTouchAnnotationResizeHandleDrag(e.Pointer, commit: true, finalInCanvas);
+    }
+
+    private void OnTouchResizeHandlePointerCanceled(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isDraggingAnnotationResizeHandle && e.Pointer.PointerId == _annotResizeHandlePointerId)
+        {
+            FinishTouchAnnotationResizeHandleDrag(e.Pointer, commit: true, finalInCanvas: null);
+        }
+    }
+
+    private void OnTouchResizeHandlePointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isReleasingOverlayCapture)
+        {
+            return;
+        }
+
+        if (_isDraggingAnnotationResizeHandle && e.Pointer.PointerId == _annotResizeHandlePointerId)
+        {
+            FinishTouchAnnotationResizeHandleDrag(null, commit: true, finalInCanvas: null);
+        }
+    }
+
+    private void CancelTouchAnnotationResizeHandleDragImmediate()
+    {
+        if (_isDraggingAnnotationResizeHandle)
+        {
+            FinishTouchAnnotationResizeHandleDrag(null, commit: false, finalInCanvas: null);
+        }
+    }
+
+    private void FinishTouchAnnotationResizeHandleDrag(Pointer? pointerToRelease, bool commit, Point? finalInCanvas)
+    {
+        if (!_isDraggingAnnotationResizeHandle)
+        {
+            return;
+        }
+
+        PdfPageCanvas? canvas = _annotResizeTargetCanvas;
+        UIElement? handleElem = _annotResizeHandleElement;
+
+        _isDraggingAnnotationResizeHandle = false;
+        _annotResizeHandlePointerId = 0;
+        _annotResizeHandleElement = null;
+        _annotResizeTargetCanvas = null;
+        StopTouchAnnotPanPolling();
+        _touchAnnotPanPointerId = 0;
+        _hasTouchAnnotPanLastRootPos = false;
+        if (ReferenceEquals(_activeTouchDraggingAnnotCanvas, canvas))
+        {
+            _activeTouchDraggingAnnotCanvas = null;
+            _touchDragAnnotPointerId = 0;
+        }
+
+        if (pointerToRelease is not null && handleElem is not null)
+        {
+            _isReleasingOverlayCapture = true;
+            try
+            {
+                handleElem.ReleasePointerCapture(pointerToRelease);
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _isReleasingOverlayCapture = false;
+            }
+        }
+
+        if (canvas is not null)
+        {
+            if (commit)
+            {
+                canvas.CompleteExternalTouchAnnotationResize(finalInCanvas);
+            }
+            else
+            {
+                canvas.CancelExternalTouchAnnotationResize();
+            }
+        }
+
+        SyncPagedScrollViewerModes();
+        UpdateTouchAnnotationResizeHandlesLayout();
     }
 
     private PdfPageCanvas? FindRealizedCanvasForPage(int pageIndex)
@@ -10147,6 +10951,8 @@ public sealed partial class DocumentView : Page
             UpdateTouchSelectionHandlesLayout();
         }
 
+        UpdateTouchAnnotationResizeHandlesLayout();
+
         if (_isInlineTextEditorOpen)
         {
             RepositionInlineTextEditor();
@@ -10252,6 +11058,7 @@ public sealed partial class DocumentView : Page
                 ToolTipService.SetToolTip(TouchSelectionCopyButton, copyLabel);
             }
 
+            SetVisible(TouchSelectionPasteButton, _copiedAnnotation is not null);
             _lastTouchSelectionCompletedTick = Environment.TickCount64;
             HideTouchSelectionFlyout();
 
@@ -10353,15 +11160,41 @@ public sealed partial class DocumentView : Page
 
     private void OnSlideSwipePointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (_isDraggingSelectionHandle || _isDraggingTouchScrollScrubber || IsDescendantOfTouchSelectionHandle(e.OriginalSource as DependencyObject))
+        if (_isDraggingSelectionHandle ||
+            _isDraggingTouchScrollScrubber ||
+            IsDescendantOfTouchSelectionHandle(e.OriginalSource as DependencyObject) ||
+            IsDescendantOfTouchResizeHandle(e.OriginalSource as DependencyObject))
         {
             return;
         }
 
         var pt = e.GetCurrentPoint(ScrollViewerContentRoot);
+
+        // Native Finger 2 multitouch viewport panning while Finger 1 drags or resizes a selected annotation overlay handle.
+        if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Touch &&
+            (_isDraggingAnnotationMoveHandle || _isDraggingAnnotationResizeHandle))
+        {
+            if (e.Pointer.PointerId != _touchDragAnnotPointerId)
+            {
+                _touchAnnotPanPointerId = e.Pointer.PointerId;
+                _touchAnnotPanLastRootPos = pt.Position;
+                _hasTouchAnnotPanLastRootPos = true;
+                if (ContinuousScrollViewer is not null && ContinuousScrollViewer.ZoomFactor > 0.05)
+                {
+                    SetInteractiveViewportState(
+                        ContinuousScrollViewer.ZoomFactor,
+                        ContinuousScrollViewer.HorizontalOffset,
+                        ContinuousScrollViewer.VerticalOffset);
+                }
+            }
+
+            return;
+        }
+
         if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse)
         {
             _isLastPointerInputTouch = false;
+            UpdateTouchAnnotationResizeHandlesLayout();
             _isMouseButtonDown = pt.Properties.IsLeftButtonPressed || pt.Properties.IsRightButtonPressed || pt.Properties.IsMiddleButtonPressed;
             _lastMousePointerPosition = pt.Position;
             _hasLastMousePointerPosition = true;
@@ -10397,6 +11230,7 @@ public sealed partial class DocumentView : Page
         if (e.Pointer.PointerDeviceType != Microsoft.UI.Input.PointerDeviceType.Touch)
         {
             _isLastPointerInputTouch = false;
+            UpdateTouchAnnotationResizeHandlesLayout();
             return;
         }
 
@@ -10406,6 +11240,17 @@ public sealed partial class DocumentView : Page
         _isMouseButtonDown = false;
         PruneStaleTouchPointers(nowTick);
         _activeTouchPointers[e.Pointer.PointerId] = (nowTick, pt.Position);
+
+        // Record single-finger touch target on PDF page so Cut/Copy + Paste always lands at the touched spot.
+        if (_activeTouchPointers.Count == 1 &&
+            _activeTouchDraggingAnnotCanvas is not { IsTouchDraggingAnnotation: true } &&
+            TryFindCanvasAtRootPoint(pt.Position, out PdfPageCanvas? touchedCanvas, out Point touchedCanvasDip) &&
+            touchedCanvas?.PageInfo is { } touchedPageInfo)
+        {
+            _lastMouseClickPageIndex = touchedPageInfo.Index;
+            _lastMouseClickPdfPt = touchedCanvas.ToPdfPoint(touchedCanvasDip);
+            _hasLastMouseClickPdfPt = true;
+        }
 
         // Multitouch 2nd-finger viewport panning while Finger 1 holds/drags an annotation
         if (_activeTouchDraggingAnnotCanvas is { IsTouchDraggingAnnotation: true })
@@ -10421,6 +11266,8 @@ public sealed partial class DocumentView : Page
                 }
 
                 _touchAnnotPanPointerId = e.Pointer.PointerId;
+                _touchAnnotPanLastRootPos = pt.Position;
+                _hasTouchAnnotPanLastRootPos = true;
                 _hasTouchAnnotPanLastScreenPx = GetPointerInfo(_touchAnnotPanPointerId, out POINTER_INFO panStartPi);
                 _touchAnnotPanLastScreenPx = _hasTouchAnnotPanLastScreenPx ? panStartPi.ptPixelLocation : default;
                 if (ContinuousScrollViewer is not null && ContinuousScrollViewer.ZoomFactor > 0.05)
@@ -10529,21 +11376,41 @@ public sealed partial class DocumentView : Page
 
     private void OnSlideSwipePointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (_isDraggingSelectionHandle || _isDraggingTouchScrollScrubber || IsDescendantOfTouchScrubber(e.OriginalSource as DependencyObject))
+        if (_isDraggingSelectionHandle ||
+            _isDraggingTouchScrollScrubber ||
+            IsDescendantOfTouchScrubber(e.OriginalSource as DependencyObject))
+        {
+            return;
+        }
+
+        // Native Finger 2 multitouch viewport panning while Finger 1 drags/resizes a selected annotation overlay handle.
+        if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Touch &&
+            (_isDraggingAnnotationMoveHandle || _isDraggingAnnotationResizeHandle))
+        {
+            if (e.Pointer.PointerId == _touchAnnotPanPointerId &&
+                _hasTouchAnnotPanLastRootPos &&
+                ScrollViewerContentRoot is not null)
+            {
+                Point curPanRoot = e.GetCurrentPoint(ScrollViewerContentRoot).Position;
+                double panDx = curPanRoot.X - _touchAnnotPanLastRootPos.X;
+                double panDy = curPanRoot.Y - _touchAnnotPanLastRootPos.Y;
+                _touchAnnotPanLastRootPos = curPanRoot;
+                if (Math.Abs(panDx) > 0.2 || Math.Abs(panDy) > 0.2)
+                {
+                    PanPagedScrollViewerBy(panDx, panDy);
+                }
+            }
+
+            return;
+        }
+
+        if (IsDescendantOfTouchResizeHandle(e.OriginalSource as DependencyObject))
         {
             return;
         }
 
         if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Mouse)
         {
-            if (_isLastPointerInputTouch)
-            {
-                _isLastPointerInputTouch = false;
-                if (_isTouchScrollScrubberVisible && !_isDraggingTouchScrollScrubber)
-                {
-                    HideTouchScrollScrubberImmediate();
-                }
-            }
             var mousePt = e.GetCurrentPoint(ScrollViewerContentRoot);
             _isMouseButtonDown = mousePt.Properties.IsLeftButtonPressed || mousePt.Properties.IsRightButtonPressed || mousePt.Properties.IsMiddleButtonPressed;
             Point curMousePos = mousePt.Position;
@@ -10551,7 +11418,21 @@ public sealed partial class DocumentView : Page
             {
                 double mdx = curMousePos.X - _lastMousePointerPosition.X;
                 double mdy = curMousePos.Y - _lastMousePointerPosition.Y;
-                if (((mdx * mdx) + (mdy * mdy)) > 3.0 &&
+                double distSq = (mdx * mdx) + (mdy * mdy);
+
+                // Only exit touch mode on genuine mouse motion (> 3 DIPs) or button press,
+                // ignoring 0px synthetic cursor hover events fired by Windows touch / popup transitions.
+                if (_isLastPointerInputTouch && (distSq > 9.0 || _isMouseButtonDown))
+                {
+                    _isLastPointerInputTouch = false;
+                    UpdateTouchAnnotationResizeHandlesLayout();
+                    if (_isTouchScrollScrubberVisible && !_isDraggingTouchScrollScrubber)
+                    {
+                        HideTouchScrollScrubberImmediate();
+                    }
+                }
+
+                if (distSq > 3.0 &&
                     _isTouchpadWheelSwipeActive &&
                     _isSlideSwipeActive &&
                     !_isSlideSwipeAnimating &&
@@ -10581,6 +11462,22 @@ public sealed partial class DocumentView : Page
 
         if (_activeTouchDraggingAnnotCanvas is { IsTouchDraggingAnnotation: true } dragAnnotCanvas)
         {
+            if (e.Pointer.PointerId == _touchAnnotPanPointerId &&
+                _hasTouchAnnotPanLastRootPos &&
+                ScrollViewerContentRoot is not null)
+            {
+                Point curPanRoot = e.GetCurrentPoint(ScrollViewerContentRoot).Position;
+                double panDx = curPanRoot.X - _touchAnnotPanLastRootPos.X;
+                double panDy = curPanRoot.Y - _touchAnnotPanLastRootPos.Y;
+                _touchAnnotPanLastRootPos = curPanRoot;
+                if (Math.Abs(panDx) > 0.2 || Math.Abs(panDy) > 0.2)
+                {
+                    PanPagedScrollViewerBy(panDx, panDy);
+                }
+
+                return;
+            }
+
             if (e.Pointer.PointerId == _touchDragAnnotPointerId)
             {
                 try
@@ -10631,7 +11528,7 @@ public sealed partial class DocumentView : Page
         double totalDx = pos.X - _touchSwipeStartPoint.X;
         double totalDy = pos.Y - _touchSwipeStartPoint.Y;
 
-        if (((totalDx * totalDx) + (totalDy * totalDy)) > 64.0)
+        if (((totalDx * totalDx) + (totalDy * totalDy)) > 256.0)
         {
             CancelTouchHoldOnAllCanvases();
         }
@@ -10694,7 +11591,24 @@ public sealed partial class DocumentView : Page
 
     private void OnSlideSwipePointerReleased(object sender, PointerRoutedEventArgs e)
     {
-        if (_isDraggingSelectionHandle || _isDraggingTouchScrollScrubber || IsDescendantOfTouchSelectionHandle(e.OriginalSource as DependencyObject))
+        if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Touch &&
+            (_isDraggingAnnotationMoveHandle || _isDraggingAnnotationResizeHandle) &&
+            e.Pointer.PointerId == _touchAnnotPanPointerId)
+        {
+            _activeTouchPointers.Remove(e.Pointer.PointerId);
+            _touchAnnotPanPointerId = 0;
+            _hasTouchAnnotPanLastRootPos = false;
+            StopTouchAnnotPanPolling();
+            LockScrollViewerForTouchAnnotationDrag();
+            return;
+        }
+
+        if (_isDraggingSelectionHandle ||
+            _isDraggingAnnotationMoveHandle ||
+            _isDraggingAnnotationResizeHandle ||
+            _isDraggingTouchScrollScrubber ||
+            IsDescendantOfTouchSelectionHandle(e.OriginalSource as DependencyObject) ||
+            IsDescendantOfTouchResizeHandle(e.OriginalSource as DependencyObject))
         {
             return;
         }
@@ -10793,8 +11707,21 @@ public sealed partial class DocumentView : Page
         if (e.Pointer.PointerDeviceType == Microsoft.UI.Input.PointerDeviceType.Touch)
         {
             uint canceledId = e.Pointer.PointerId;
+            if ((_isDraggingAnnotationMoveHandle || _isDraggingAnnotationResizeHandle) &&
+                canceledId == _touchAnnotPanPointerId)
+            {
+                _activeTouchPointers.Remove(canceledId);
+                _touchAnnotPanPointerId = 0;
+                _hasTouchAnnotPanLastRootPos = false;
+                StopTouchAnnotPanPolling();
+                LockScrollViewerForTouchAnnotationDrag();
+                return;
+            }
+
             if (_activeTouchSelectingCanvas is { IsTouchSelecting: true } ||
-                _activeTouchDraggingAnnotCanvas is { IsTouchDraggingAnnotation: true })
+                _activeTouchDraggingAnnotCanvas is { IsTouchDraggingAnnotation: true } ||
+                _isDraggingAnnotationMoveHandle ||
+                _isDraggingAnnotationResizeHandle)
             {
                 return;
             }
@@ -10837,17 +11764,21 @@ public sealed partial class DocumentView : Page
     private void OnSlideSwipeManipulationStarting(object sender, ManipulationStartingRoutedEventArgs e)
     {
         if (_isDraggingSelectionHandle ||
-            _isDraggingTouchScrollScrubber ||
-            _activeTouchDraggingAnnotCanvas is { IsTouchDraggingAnnotation: true })
+            _isDraggingAnnotationMoveHandle ||
+            _isDraggingAnnotationResizeHandle ||
+            _isDraggingTouchScrollScrubber)
         {
             e.Mode = ManipulationModes.None;
             return;
         }
 
-        // In Continuous Mode (when not actively dragging a touch text selection), leave e.Mode untouched
+        bool waitingOrDraggingMovableAnnot = _activeTouchDraggingAnnotCanvas is not null ||
+                                             FindCanvasWaitingOnMovableAnnotation() is not null;
+
+        // In Continuous Mode (when not touching/dragging a movable annotation or touch text selection), leave e.Mode untouched
         // as ManipulationModes.System so ContinuousScrollViewer DirectManipulation handles 100% of vertical
         // scrolling, 2D zoomed panning, and pinch-to-zoom natively on the compositor thread.
-        if (!CanUseInteractiveSlideSwipe() && _activeTouchSelectingCanvas is null)
+        if (!CanUseInteractiveSlideSwipe() && _activeTouchSelectingCanvas is null && !waitingOrDraggingMovableAnnot)
         {
             return;
         }
@@ -10856,7 +11787,7 @@ public sealed partial class DocumentView : Page
         {
             e.Container = ScrollViewerContentRoot;
             bool allowPanInertia = CanPanHorizontallyInPagedMode() || CanPanVerticallyInPagedMode();
-            e.Mode = allowPanInertia && _activeTouchSelectingCanvas is null
+            e.Mode = allowPanInertia && _activeTouchSelectingCanvas is null && !waitingOrDraggingMovableAnnot
                 ? (PagedCustomManipulationMode | ManipulationModes.TranslateInertia)
                 : PagedCustomManipulationMode;
         }
@@ -10866,13 +11797,16 @@ public sealed partial class DocumentView : Page
     {
         if (_isMouseButtonDown ||
             _isDraggingSelectionHandle ||
-            _isDraggingTouchScrollScrubber ||
-            _activeTouchDraggingAnnotCanvas is { IsTouchDraggingAnnotation: true })
+            _isDraggingAnnotationMoveHandle ||
+            _isDraggingAnnotationResizeHandle ||
+            _isDraggingTouchScrollScrubber)
         {
             return;
         }
 
-        if (!CanUseInteractiveSlideSwipe() && _activeTouchSelectingCanvas is null)
+        bool waitingOrDraggingMovableAnnot = _activeTouchDraggingAnnotCanvas is not null ||
+                                             FindCanvasWaitingOnMovableAnnotation() is not null;
+        if (!CanUseInteractiveSlideSwipe() && _activeTouchSelectingCanvas is null && !waitingOrDraggingMovableAnnot)
         {
             return;
         }
@@ -10920,9 +11854,29 @@ public sealed partial class DocumentView : Page
     {
         if (!_isManipulatingSlideSwipe ||
             _isDraggingSelectionHandle ||
-            _isDraggingTouchScrollScrubber ||
-            _activeTouchDraggingAnnotCanvas is { IsTouchDraggingAnnotation: true })
+            _isDraggingAnnotationMoveHandle ||
+            _isDraggingAnnotationResizeHandle ||
+            _isDraggingTouchScrollScrubber)
         {
+            return;
+        }
+
+        if (_activeTouchDraggingAnnotCanvas is { IsTouchDraggingAnnotation: true } dragAnnotCanvas)
+        {
+            if (e.IsInertial || _touchAnnotPanPointerId != 0)
+            {
+                return;
+            }
+
+            try
+            {
+                Point ptInCanvas = ScrollViewerContentRoot.TransformToVisual(dragAnnotCanvas).TransformPoint(e.Position);
+                dragAnnotCanvas.UpdateTouchAnnotationDragPoint(ptInCanvas);
+            }
+            catch
+            {
+            }
+
             return;
         }
 
@@ -10971,10 +11925,16 @@ public sealed partial class DocumentView : Page
 
         if (!CanUseInteractiveSlideSwipe())
         {
+            if (totalDistSq > 256.0)
+            {
+                CancelTouchHoldOnAllCanvases();
+                PanPagedScrollViewerBy(deltaX, deltaY);
+            }
+
             return;
         }
 
-        if (totalDistSq > 36.0)
+        if (totalDistSq > 256.0)
         {
             CancelTouchHoldOnAllCanvases();
         }
@@ -10990,7 +11950,7 @@ public sealed partial class DocumentView : Page
                 // only start a horizontal slide-swipe if already at the horizontal scroll edge
                 // and the user makes a distinctly horizontal swipe.
                 if (CanStartSwipeInDirection(swipingRight: _manipCumulativeDx > 0) &&
-                    Math.Abs(_manipCumulativeDx) >= 14.0 &&
+                    Math.Abs(_manipCumulativeDx) >= 16.0 &&
                     Math.Abs(_manipCumulativeDx) > Math.Abs(_manipCumulativeDy) * 2.2)
                 {
                     CancelTouchHoldOnAllCanvases();
@@ -11002,7 +11962,7 @@ public sealed partial class DocumentView : Page
 
                     deltaX = _manipCumulativeDx;
                 }
-                else if (totalDistSq >= 16.0)
+                else if (totalDistSq >= 256.0)
                 {
                     CancelTouchHoldOnAllCanvases();
                     _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
@@ -11014,7 +11974,7 @@ public sealed partial class DocumentView : Page
                     return;
                 }
             }
-            else if (Math.Abs(_manipCumulativeDx) >= 4.0 &&
+            else if (Math.Abs(_manipCumulativeDx) >= 15.0 &&
                      Math.Abs(_manipCumulativeDx) >= Math.Abs(_manipCumulativeDy) * 0.9)
             {
                 CancelTouchHoldOnAllCanvases();
@@ -11056,8 +12016,25 @@ public sealed partial class DocumentView : Page
 
         _isManipulatingSlideSwipe = false;
 
-        if (_activeTouchDraggingAnnotCanvas is { IsTouchDraggingAnnotation: true })
+        if (_activeTouchDraggingAnnotCanvas is { IsTouchDraggingAnnotation: true } dragAnnotCanvas)
         {
+            if (IsAnyTouchPointerStillInContact())
+            {
+                return;
+            }
+
+            _activeTouchPointers.Clear();
+            _firstTouchPointer = null;
+            try
+            {
+                Point ptInCanvas = ScrollViewerContentRoot.TransformToVisual(dragAnnotCanvas).TransformPoint(e.Position);
+                dragAnnotCanvas.CompleteTouchAnnotationDragSession(ptInCanvas);
+            }
+            catch
+            {
+                dragAnnotCanvas.CompleteTouchAnnotationDragSession();
+            }
+
             return;
         }
 

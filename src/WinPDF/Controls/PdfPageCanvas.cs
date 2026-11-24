@@ -36,8 +36,8 @@ public sealed partial class PdfPageCanvas : Grid
     private const double DragMoveMinDeltaDip = 1.0;
     private const long MultiClickMaxIntervalMs = 450;
     private const double MultiClickMaxDistanceDip = 8.0;
-    private const int TouchHoldDurationMs = 260;
-    private const double TouchHoldMaxMoveDip = 14.0;
+    private const int TouchHoldDurationMs = 240;
+    private const double TouchHoldMaxMoveDip = 16.0;
     private const double TouchDragStartThresholdDip = 2.0;
     private const long TouchSingleTapMaxDurationMs = 340;
     private const double TouchSingleTapMaxMoveDip = 12.0;
@@ -320,11 +320,17 @@ public sealed partial class PdfPageCanvas : Grid
     private bool _isTouchWaitingForCanceledTap;
     private Point _lastTouchAnnotDragCanvasDip;
     private PdfAnnotationInfo? _pendingTouchHoldOpenAnnot;
+    private PdfAnnotationInfo? _touchHoldMovableCandidate;
 
     /// <summary>
-    /// Gets a value indicating whether this canvas is currently waiting for a 300ms touch hold threshold.
+    /// Gets a value indicating whether this canvas is currently waiting for a touch hold threshold.
     /// </summary>
     public bool IsTouchWaitingForHold => _isTouchWaitingForHold;
+
+    /// <summary>
+    /// Gets a value indicating whether a touch press on this canvas landed on a movable annotation and is waiting for the hold threshold.
+    /// </summary>
+    public bool IsTouchWaitingOnMovableAnnotation => _isTouchWaitingForHold && _touchHoldMovableCandidate is not null;
 
     /// <summary>
     /// Gets a value indicating whether an interactive touch text selection drag is currently active on this canvas.
@@ -1262,7 +1268,7 @@ public sealed partial class PdfPageCanvas : Grid
             if (!GetPointerInfo(_touchPointerId, out POINTER_INFO dragPi))
             {
                 _touchPollingMissingInfoCount++;
-                if (_touchPollingMissingInfoCount >= 2)
+                if (_touchPollingMissingInfoCount >= 12)
                 {
                     StopTouchSelectionPolling();
                     CompleteTouchAnnotationDragSession(_lastTouchAnnotDragCanvasDip);
@@ -1380,6 +1386,7 @@ public sealed partial class PdfPageCanvas : Grid
         _isTouchWaitingForHold = false;
         _isTouchWaitingForCanceledTap = false;
         _pendingTouchHoldOpenAnnot = null;
+        _touchHoldMovableCandidate = null;
         _touchHoldHitResult = default;
         _hasTouchHoldHitResult = false;
         if (!_isTouchSelecting && !_isTouchDraggingAnnotation && !_isTouchResizingAnnotation)
@@ -1402,6 +1409,7 @@ public sealed partial class PdfPageCanvas : Grid
         _isTouchWaitingForHold = false;
         _isTouchWaitingForCanceledTap = false;
         _pendingTouchHoldOpenAnnot = null;
+        _touchHoldMovableCandidate = null;
         _touchHoldHitResult = default;
         _hasTouchHoldHitResult = false;
         _pendingTouchReleaseSelection = null;
@@ -1493,14 +1501,35 @@ public sealed partial class PdfPageCanvas : Grid
         }
     }
 
+    private double GetTouchAnnotationTolerancePt(double minScreenDip = 24.0)
+    {
+        double zoom = _observedDocument?.ZoomFactor > 0.05 ? _observedDocument.ZoomFactor : 1.0;
+        return Math.Clamp(minScreenDip / (PageCoordinateTransform.DipsPerPoint * zoom), 14.0, 56.0);
+    }
+
     private void OnCanvasPointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (PageInfo is not null && e.Pointer.PointerDeviceType == PointerDeviceType.Mouse)
+        if (PageInfo is not null)
         {
-            PointerPoint mousePt = e.GetCurrentPoint(this);
-            if (mousePt.Properties.IsLeftButtonPressed || mousePt.Properties.IsRightButtonPressed)
+            PointerPoint rawPt = e.GetCurrentPoint(this);
+            PointerDeviceType devType = e.Pointer.PointerDeviceType;
+            if (devType == PointerDeviceType.Mouse)
             {
-                MouseClickedOnPage?.Invoke(this, ToPdfPoint(mousePt.Position));
+                if (rawPt.Properties.IsLeftButtonPressed || rawPt.Properties.IsRightButtonPressed)
+                {
+                    MouseClickedOnPage?.Invoke(this, ToPdfPoint(rawPt.Position));
+                }
+            }
+            else if (devType == PointerDeviceType.Pen)
+            {
+                MouseClickedOnPage?.Invoke(this, ToPdfPoint(rawPt.Position));
+            }
+            else if (devType == PointerDeviceType.Touch &&
+                     !_isTouchDraggingAnnotation &&
+                     !_isTouchResizingAnnotation &&
+                     _activeCanvasTouchPointerTicks.Count == 0)
+            {
+                MouseClickedOnPage?.Invoke(this, ToPdfPoint(rawPt.Position));
             }
         }
 
@@ -1535,43 +1564,19 @@ public sealed partial class PdfPageCanvas : Grid
 
         if (isTouch && _observedDocument?.SelectedAnnotation is { } currentSelected)
         {
-            Rect selectedOrigRectDip = default;
-            AnnotationResizeHandle hitHandle = currentSelected.IsResizable && currentSelected.PageIndex == PageInfo.Index
-                ? HitTestResizeHandle(currentSelected, pt.Position, out selectedOrigRectDip, hitRadiusDip: 22.0)
-                : AnnotationResizeHandle.None;
-            if (hitHandle != AnnotationResizeHandle.None && IsTouchSelectInteractionAllowed())
+            bool hitResizeCorner = currentSelected.IsResizable &&
+                                   currentSelected.PageIndex == PageInfo.Index &&
+                                   HitTestResizeHandle(currentSelected, pt.Position, out _, hitRadiusDip: 24.0) != AnnotationResizeHandle.None;
+            if (!hitResizeCorner)
             {
-                Point rootPt = XamlRoot?.Content is { } rootElem
-                    ? e.GetCurrentPoint(rootElem).Position
-                    : pt.Position;
-                BeginTouchAnnotationResize(currentSelected, hitHandle, selectedOrigRectDip, e.Pointer, pt.Position, rootPt);
-                e.Handled = true;
-                return;
-            }
-
-            Vector2 touchPdf = ToPdfPoint(pt.Position);
-            PdfAnnotationInfo? hitAtTouch = _observedDocument.HitTestAnnotation(PageInfo.Index, touchPdf.X, touchPdf.Y, tolerancePt: 14.0);
-            if (hitAtTouch is not null &&
-                hitAtTouch.PageIndex == currentSelected.PageIndex &&
-                hitAtTouch.AnnotIndex == currentSelected.AnnotIndex)
-            {
-                if (currentSelected.IsMovable &&
-                    IsTouchSelectInteractionAllowed() &&
-                    (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool is not (AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage))
+                Vector2 touchPdf = ToPdfPoint(pt.Position);
+                PdfAnnotationInfo? hitAtTouch = _observedDocument.HitTestAnnotation(PageInfo.Index, touchPdf.X, touchPdf.Y, tolerancePt: GetTouchAnnotationTolerancePt());
+                if (hitAtTouch is null ||
+                    hitAtTouch.PageIndex != currentSelected.PageIndex ||
+                    hitAtTouch.AnnotIndex != currentSelected.AnnotIndex)
                 {
-                    // Annotation is already selected: grab immediately on touch-down so the user can drag it without waiting 260ms
-                    // and without ScrollViewer DirectManipulation scrolling the page instead.
-                    Point rootPt = XamlRoot?.Content is { } rootElem
-                        ? e.GetCurrentPoint(rootElem).Position
-                        : pt.Position;
-                    BeginTouchAnnotationMove(currentSelected, e.Pointer, pt.Position, touchPdf, rootPt);
-                    e.Handled = true;
-                    return;
+                    _observedDocument.SelectedAnnotation = null;
                 }
-            }
-            else
-            {
-                _observedDocument.SelectedAnnotation = null;
             }
         }
 
@@ -1767,8 +1772,15 @@ public sealed partial class PdfPageCanvas : Grid
             bool isTouchPlacementTool = touchTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage;
             if (!isTouchPlacementTool)
             {
+                _touchHoldMovableCandidate = _observedDocument?.HitTestAnnotation(PageInfo.Index, _touchPressPdfPoint.X, _touchPressPdfPoint.Y, tolerancePt: GetTouchAnnotationTolerancePt()) is { IsMovable: true } cand
+                    ? cand
+                    : null;
                 _touchHoldTimer.Start();
                 _ = ResolveTouchHoldCandidateAsync(EffectiveDocumentId, PageInfo.Index, _touchPressPdfPoint, _touchHoldSessionId);
+            }
+            else
+            {
+                _touchHoldMovableCandidate = null;
             }
 
             return;
@@ -1893,10 +1905,11 @@ public sealed partial class PdfPageCanvas : Grid
             }
         }
 
-        // Priority 2: Hold on ANY movable annotation (Comment, TextBox, Image, Shape, Ink) -> touch drag-to-move
-        // Checked BEFORE text CharIndex so movable annotations placed over PDF text can always be grabbed and dragged,
-        // and without blocking on IsSingleTouchViewerManipulating (Paged Mode sets that on touch-down even while stationary).
-        if (_observedDocument?.HitTestAnnotation(pageIndex, pdfPt.X, pdfPt.Y, tolerancePt: 16.0) is { IsMovable: true } hitMovable)
+        // Priority 2: Hold on ANY movable annotation (Comment, TextBox, Image, Shape, Ink) -> select & touch drag-to-move
+        PdfAnnotationInfo? hitMovable = _touchHoldMovableCandidate ??
+            (_observedDocument?.HitTestAnnotation(pageIndex, pdfPt.X, pdfPt.Y, tolerancePt: GetTouchAnnotationTolerancePt()) is { IsMovable: true } m ? m : null);
+        _touchHoldMovableCandidate = null;
+        if (hitMovable is not null)
         {
             ActivateTouchAnnotationMoveFromHold(hitMovable);
             return;
@@ -1951,7 +1964,7 @@ public sealed partial class PdfPageCanvas : Grid
                 PageInfo.Index,
                 _touchPressPdfPoint.X,
                 _touchPressPdfPoint.Y,
-                tolerancePt: 14.0);
+                tolerancePt: GetTouchAnnotationTolerancePt());
             if (hitAnnot is not null)
             {
                 // Defer opening the modal annotation flyout until the finger lifts so touch-up never immediately light-dismisses it.
@@ -2269,53 +2282,219 @@ public sealed partial class PdfPageCanvas : Grid
         _ = FinalizeTouchDragSelectionAsync(finalTargetCharDipPoint, activeSession, -1, -1, -1);
     }
 
-    private void BeginTouchAnnotationMove(
-        PdfAnnotationInfo annot,
-        Pointer pointer,
-        Point pressDip,
-        Vector2 pressPdf,
-        Point rootDip)
+    internal bool BeginExternalTouchAnnotationResize(PdfAnnotationInfo annot, int cornerIndex, out Rect currentPreviewDip)
     {
-        StopTouchSelectionPolling();
-        _touchHoldTimer.Stop();
-        _touchPointerId = pointer.PointerId;
-        _touchPointerRef = pointer;
-        _touchPressTick = Environment.TickCount64;
-        _touchPressDipPoint = pressDip;
-        _touchCurrentDipPoint = pressDip;
-        _touchPressPdfPoint = pressPdf;
-        _touchPressRootDipPoint = rootDip;
-        _hasTouchStartScreenPx = GetPointerInfo(_touchPointerId, out POINTER_INFO startPi);
-        _touchStartScreenPx = _hasTouchStartScreenPx ? startPi.ptPixelLocation : default;
-        _activeCanvasTouchPointerTicks.Clear();
-        _activeCanvasTouchPointerTicks[_touchPointerId] = _touchPressTick;
+        currentPreviewDip = default;
+        if (!annot.IsResizable || PageInfo is null || annot.PageIndex != PageInfo.Index || annot.Bounds.IsEmpty)
+        {
+            return false;
+        }
 
-        ActivateTouchAnnotationMoveFromHold(annot);
+        AnnotationResizeHandle handle = cornerIndex switch
+        {
+            0 => AnnotationResizeHandle.TopLeft,
+            1 => AnnotationResizeHandle.TopRight,
+            2 => AnnotationResizeHandle.BottomLeft,
+            _ => AnnotationResizeHandle.BottomRight,
+        };
+
+        PageCoordinateTransform transform = PageCoordinateTransform.FromPage(PageInfo, RotationAngle);
+        Rect origRectDip = transform.ToPageRect(annot.Bounds);
+        if (origRectDip.Width < 4.0 || origRectDip.Height < 4.0)
+        {
+            return false;
+        }
+
+        CancelPendingTouchHold();
+        _isTouchResizingAnnotation = true;
+        _isResizingAnnotation = true;
+        _resizingAnnotation = annot;
+        _activeResizeHandle = handle;
+        _resizeOrigRectDip = origRectDip;
+        _annotationResizePreviewDip = origRectDip;
+        currentPreviewDip = origRectDip;
+        InvalidateOverlays();
+        return true;
     }
 
-    private void BeginTouchAnnotationResize(
-        PdfAnnotationInfo annot,
-        AnnotationResizeHandle handle,
-        Rect origRectDip,
-        Pointer pointer,
-        Point pressDip,
-        Point rootDip)
+    internal Rect UpdateExternalTouchAnnotationResize(Point posInCanvasDip)
     {
-        StopTouchSelectionPolling();
-        _touchHoldTimer.Stop();
-        _touchPointerId = pointer.PointerId;
-        _touchPointerRef = pointer;
-        _touchPressTick = Environment.TickCount64;
-        _touchPressDipPoint = pressDip;
-        _touchCurrentDipPoint = pressDip;
-        _touchPressPdfPoint = ToPdfPoint(pressDip);
-        _touchPressRootDipPoint = rootDip;
-        _hasTouchStartScreenPx = GetPointerInfo(_touchPointerId, out POINTER_INFO startPi);
-        _touchStartScreenPx = _hasTouchStartScreenPx ? startPi.ptPixelLocation : default;
-        _activeCanvasTouchPointerTicks.Clear();
-        _activeCanvasTouchPointerTicks[_touchPointerId] = _touchPressTick;
+        if (!_isTouchResizingAnnotation || _resizingAnnotation is null || PageInfo is null)
+        {
+            return _annotationResizePreviewDip;
+        }
 
-        ActivateTouchAnnotationResizeFromHold(annot, handle, origRectDip);
+        UpdateAnnotationResizePreview(posInCanvasDip);
+        InvalidateOverlays();
+        return _annotationResizePreviewDip;
+    }
+
+    internal void CompleteExternalTouchAnnotationResize(Point? finalInCanvasDip)
+    {
+        if (!_isTouchResizingAnnotation)
+        {
+            return;
+        }
+
+        if (finalInCanvasDip is { } finalPt && _resizingAnnotation is not null && PageInfo is not null)
+        {
+            UpdateAnnotationResizePreview(finalPt);
+        }
+
+        PdfAnnotationInfo? resizedAnnot = _resizingAnnotation;
+        Rect resizePreviewDip = _annotationResizePreviewDip;
+
+        _isTouchResizingAnnotation = false;
+        _isResizingAnnotation = false;
+        _resizingAnnotation = null;
+        _activeResizeHandle = AnnotationResizeHandle.None;
+        _annotationResizePreviewDip = default;
+        InvalidateOverlays();
+
+        if (resizedAnnot is not null && PageInfo is not null && resizePreviewDip.Width > 1.0 && resizePreviewDip.Height > 1.0)
+        {
+            PageCoordinateTransform transform = PageCoordinateTransform.FromPage(PageInfo, RotationAngle);
+            PdfRect newPdfBounds = transform.ToPdfRect(resizePreviewDip);
+            if (Math.Abs(newPdfBounds.Width - resizedAnnot.Bounds.Width) > 0.5f ||
+                Math.Abs(newPdfBounds.Height - resizedAnnot.Bounds.Height) > 0.5f ||
+                Math.Abs(newPdfBounds.Left - resizedAnnot.Bounds.Left) > 0.5f ||
+                Math.Abs(newPdfBounds.Bottom - resizedAnnot.Bounds.Bottom) > 0.5f)
+            {
+                AnnotationResized?.Invoke(this, resizedAnnot, newPdfBounds);
+            }
+        }
+    }
+
+    internal void CancelExternalTouchAnnotationResize()
+    {
+        if (!_isTouchResizingAnnotation && !_isResizingAnnotation)
+        {
+            return;
+        }
+
+        _isTouchResizingAnnotation = false;
+        _isResizingAnnotation = false;
+        _resizingAnnotation = null;
+        _activeResizeHandle = AnnotationResizeHandle.None;
+        _annotationResizePreviewDip = default;
+        InvalidateOverlays();
+    }
+
+    internal bool BeginExternalTouchAnnotationMove(PdfAnnotationInfo annot, Point pressInCanvasDip, out Rect origRectDip)
+    {
+        origRectDip = default;
+        if (!annot.IsMovable || PageInfo is null || annot.PageIndex != PageInfo.Index || annot.Bounds.IsEmpty)
+        {
+            return false;
+        }
+
+        PageCoordinateTransform transform = PageCoordinateTransform.FromPage(PageInfo, RotationAngle);
+        origRectDip = transform.ToPageRect(annot.Bounds);
+        if (origRectDip.Width < 1.0 || origRectDip.Height < 1.0)
+        {
+            return false;
+        }
+
+        CancelPendingTouchHold();
+        _isTouchDraggingAnnotation = true;
+        _hasTouchMovedAnnotation = false;
+        _isDraggingAnnotation = true;
+        _pressedMovableAnnotation = annot;
+        _annotationDragDeltaDip = default;
+        _pressDipPoint = pressInCanvasDip;
+        _pressPdfPoint = ToPdfPoint(pressInCanvasDip);
+        _lastTouchAnnotDragCanvasDip = pressInCanvasDip;
+        InvalidateOverlays();
+        return true;
+    }
+
+    internal Rect UpdateExternalTouchAnnotationMove(Point posInCanvasDip, out bool hasMoved)
+    {
+        hasMoved = _hasTouchMovedAnnotation;
+        if (!_isTouchDraggingAnnotation || _pressedMovableAnnotation is not { } dragged || PageInfo is null)
+        {
+            return default;
+        }
+
+        _lastTouchAnnotDragCanvasDip = posInCanvasDip;
+        double dx = posInCanvasDip.X - _pressDipPoint.X;
+        double dy = posInCanvasDip.Y - _pressDipPoint.Y;
+
+        PageCoordinateTransform transform = PageCoordinateTransform.FromPage(PageInfo, RotationAngle);
+        Rect origDip = transform.ToPageRect(dragged.Bounds);
+        bool swap = PageCoordinateTransform.NormalizeRotation(PageInfo.Rotation + RotationAngle) is 90 or 270;
+        double pageW = ActualWidth > 1.0 ? ActualWidth : (swap ? PageInfo.HeightPt : PageInfo.WidthPt) * PageCoordinateTransform.DipsPerPoint;
+        double pageH = ActualHeight > 1.0 ? ActualHeight : (swap ? PageInfo.WidthPt : PageInfo.HeightPt) * PageCoordinateTransform.DipsPerPoint;
+        double minDx = -origDip.Left;
+        double maxDx = Math.Max(minDx, pageW - origDip.Right);
+        double minDy = -origDip.Top;
+        double maxDy = Math.Max(minDy, pageH - origDip.Bottom);
+        dx = Math.Clamp(dx, minDx, maxDx);
+        dy = Math.Clamp(dy, minDy, maxDy);
+
+        if (!_hasTouchMovedAnnotation && ((dx * dx) + (dy * dy)) >= 16.0)
+        {
+            _hasTouchMovedAnnotation = true;
+        }
+
+        hasMoved = _hasTouchMovedAnnotation;
+        _annotationDragDeltaDip = new Point(dx, dy);
+        InvalidateOverlays();
+        return new Rect(origDip.Left + dx, origDip.Top + dy, origDip.Width, origDip.Height);
+    }
+
+    internal bool CompleteExternalTouchAnnotationMove(Point? finalInCanvasDip)
+    {
+        if (!_isTouchDraggingAnnotation)
+        {
+            return false;
+        }
+
+        if (finalInCanvasDip is { } finalPt && _pressedMovableAnnotation is not null && PageInfo is not null)
+        {
+            _ = UpdateExternalTouchAnnotationMove(finalPt, out _);
+        }
+
+        PdfAnnotationInfo? draggedAnnot = _pressedMovableAnnotation;
+        bool hadMoved = _hasTouchMovedAnnotation;
+        Point dragDeltaDip = _annotationDragDeltaDip;
+        Point pressDip = _pressDipPoint;
+        Vector2 pressPdf = _pressPdfPoint;
+
+        _isTouchDraggingAnnotation = false;
+        _hasTouchMovedAnnotation = false;
+        _isDraggingAnnotation = false;
+        _pressedMovableAnnotation = null;
+        _annotationDragDeltaDip = default;
+        InvalidateOverlays();
+
+        if (hadMoved && draggedAnnot is not null && PageInfo is not null)
+        {
+            Vector2 targetPdf = ToPdfPoint(new Point(pressDip.X + dragDeltaDip.X, pressDip.Y + dragDeltaDip.Y));
+            Vector2 deltaPdf = targetPdf - pressPdf;
+            if (MathF.Abs(deltaPdf.X) > 0.5f || MathF.Abs(deltaPdf.Y) > 0.5f)
+            {
+                AnnotationMoved?.Invoke(this, draggedAnnot, deltaPdf);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal void CancelExternalTouchAnnotationMove()
+    {
+        if (!_isTouchDraggingAnnotation && !_isDraggingAnnotation)
+        {
+            return;
+        }
+
+        _isTouchDraggingAnnotation = false;
+        _hasTouchMovedAnnotation = false;
+        _isDraggingAnnotation = false;
+        _pressedMovableAnnotation = null;
+        _annotationDragDeltaDip = default;
+        InvalidateOverlays();
     }
 
     private void ActivateTouchAnnotationMoveFromHold(PdfAnnotationInfo hitMovable)
@@ -2644,7 +2823,7 @@ public sealed partial class PdfPageCanvas : Grid
                 PageInfo.Index,
                 _touchPressPdfPoint.X,
                 _touchPressPdfPoint.Y,
-                tolerancePt: 14.0);
+                tolerancePt: GetTouchAnnotationTolerancePt());
             if (hitAnnot is not null)
             {
                 if (hitAnnot.IsSignatureWidget && tappedDoc.GetSignatureByIndex(hitAnnot.SignatureIndex) is { } sig)
@@ -2674,6 +2853,9 @@ public sealed partial class PdfPageCanvas : Grid
                 PlaceTextNoteRequested?.Invoke(this, _touchPressPdfPoint, releaseDip);
                 return true;
             }
+
+            // Record clean touch tap location on page so Cut/Copy + Paste (Ctrl+V) anchors right where the user touched.
+            MouseClickedOnPage?.Invoke(this, _touchPressPdfPoint);
         }
 
         Point curRootPt = new(_touchPressRootDipPoint.X + tdx, _touchPressRootDipPoint.Y + tdy);
@@ -4019,7 +4201,9 @@ public sealed partial class PdfPageCanvas : Grid
         }
 
         // 3. Focused annotation highlight border (drawn cleanly over bitmaps without extra UI elements)
-        if (hasSelectedAnnotOnPage && !hasResizedAnnotOnPage && selectedAnnot is not null && !selectedAnnot.Bounds.IsEmpty)
+        bool hideStationarySelectionForMove = hasDraggedAnnotOnPage &&
+            (Math.Abs(_annotationDragDeltaDip.X) > 1.0 || Math.Abs(_annotationDragDeltaDip.Y) > 1.0);
+        if (hasSelectedAnnotOnPage && !hasResizedAnnotOnPage && !hideStationarySelectionForMove && selectedAnnot is not null && !selectedAnnot.Bounds.IsEmpty)
         {
             Rect dipRect = transform.ToPageRect(selectedAnnot.Bounds);
             if (dipRect.Width > 0.1 && dipRect.Height > 0.1)
@@ -4067,8 +4251,17 @@ public sealed partial class PdfPageCanvas : Grid
                     ? Windows.UI.Color.FromArgb(245, 130, 205, 255)
                     : Windows.UI.Color.FromArgb(235, 0, 108, 200);
 
-                ds.FillRoundedRectangle(ghostRect, 3.0f, 3.0f, ghostFill);
-                ds.DrawRoundedRectangle(ghostRect, 3.0f, 3.0f, ghostStroke, 2.0f);
+                if (draggedAnnot.IsResizable)
+                {
+                    ds.FillRectangle(ghostRect, ghostFill);
+                    ds.DrawRectangle(ghostRect, ghostStroke, 2.0f);
+                    DrawCornerResizeHandles(ds, ghostRect, ghostStroke);
+                }
+                else
+                {
+                    ds.FillRoundedRectangle(ghostRect, 3.0f, 3.0f, ghostFill);
+                    ds.DrawRoundedRectangle(ghostRect, 3.0f, 3.0f, ghostStroke, 2.0f);
+                }
             }
         }
 
