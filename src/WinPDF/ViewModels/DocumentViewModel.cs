@@ -1102,9 +1102,11 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
             int priority = candidate.IsSignatureWidget
                 ? 300
-                : candidate.Subtype is PdfAnnotationSubtype.Text or PdfAnnotationSubtype.FreeText
+                : candidate.Subtype is PdfAnnotationSubtype.Text or PdfAnnotationSubtype.FreeText || candidate.IsTextBox
                     ? 200
-                    : 100;
+                    : candidate.IsMovable
+                        ? 150
+                        : 100;
 
             double area = Math.Max(1.0, candidate.Bounds.Width * candidate.Bounds.Height);
             if (priority > bestPriority || (priority == bestPriority && area < bestArea))
