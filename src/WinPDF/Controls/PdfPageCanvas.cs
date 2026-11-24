@@ -391,6 +391,11 @@ public sealed partial class PdfPageCanvas : Grid
     public static event Action<PdfPageCanvas, Vector2, Point>? PlaceImageRequested;
 
     /// <summary>
+    /// Event raised when the user taps or clicks a page while the Insert Text tool is active.
+    /// </summary>
+    public static event Action<PdfPageCanvas, Vector2, Point>? PlaceTextBoxRequested;
+
+    /// <summary>
     /// Event raised when the user finishes dragging a movable annotation to a new location on the page.
     /// </summary>
     public static event Action<PdfPageCanvas, PdfAnnotationInfo, Vector2>? AnnotationMoved;
@@ -996,7 +1001,7 @@ public sealed partial class PdfPageCanvas : Grid
             return false;
         }
 
-        return shell.ActiveTool is AnnotationTool.Select or AnnotationTool.Highlighter or AnnotationTool.TextNote or AnnotationTool.InsertImage;
+        return shell.ActiveTool is AnnotationTool.Select or AnnotationTool.Highlighter or AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage;
     }
 
     private void FocusParentViewerIfNeeded()
@@ -1312,13 +1317,20 @@ public sealed partial class PdfPageCanvas : Grid
         }
 
         if (!isTouch &&
-            (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertImage)
+            (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage)
         {
             AnnotationTool activeTool = _shellViewModel!.ActiveTool;
             Vector2 notePdfPt = ToPdfPoint(pt.Position);
             if (activeTool == AnnotationTool.InsertImage)
             {
                 PlaceImageRequested?.Invoke(this, notePdfPt, pt.Position);
+                e.Handled = true;
+                return;
+            }
+
+            if (activeTool == AnnotationTool.InsertText)
+            {
+                PlaceTextBoxRequested?.Invoke(this, notePdfPt, pt.Position);
                 e.Handled = true;
                 return;
             }
@@ -2079,6 +2091,13 @@ public sealed partial class PdfPageCanvas : Grid
                 PlaceImageRequested?.Invoke(this, _touchPressPdfPoint, releaseDip);
                 return;
             }
+
+            if (activeShell?.ActiveTool == AnnotationTool.InsertText)
+            {
+                _lastTouchTapTick = 0;
+                PlaceTextBoxRequested?.Invoke(this, _touchPressPdfPoint, releaseDip);
+                return;
+            }
         }
 
         Point curRootPt = new(_touchPressRootDipPoint.X + tdx, _touchPressRootDipPoint.Y + tdy);
@@ -2223,9 +2242,14 @@ public sealed partial class PdfPageCanvas : Grid
             if (!_hasDraggedSelection && _isPointerDown)
             {
                 _pressedLink = hit.Link;
-                if ((_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertImage)
+                AnnotationTool? pressTool = (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool;
+                if (pressTool is AnnotationTool.TextNote or AnnotationTool.InsertImage)
                 {
                     SetCursorShape(InputSystemCursorShape.Cross);
+                }
+                else if (pressTool == AnnotationTool.InsertText)
+                {
+                    SetCursorShape(InputSystemCursorShape.IBeam);
                 }
                 else if (hit.Link.IsValid)
                 {
@@ -2767,9 +2791,14 @@ public sealed partial class PdfPageCanvas : Grid
                     break;
                 }
 
-                if ((_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertImage)
+                AnnotationTool? hoverTool = (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool;
+                if (hoverTool is AnnotationTool.TextNote or AnnotationTool.InsertImage)
                 {
                     SetCursorShape(InputSystemCursorShape.Cross);
+                }
+                else if (hoverTool == AnnotationTool.InsertText)
+                {
+                    SetCursorShape(InputSystemCursorShape.IBeam);
                 }
                 else if (hit.Link.IsValid)
                 {

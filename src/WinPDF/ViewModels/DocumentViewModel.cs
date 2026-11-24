@@ -1468,7 +1468,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             : _pdfService.CaptureStampImageAsync(DocumentId, pageIndex, annotIndex, _lifetime.Token);
 
     /// <summary>
-    /// Creates a direct-on-page <c>/FreeText</c> text-box annotation on <paramref name="pageIndex"/>.
+    /// Creates a direct-on-page vector text-box annotation on <paramref name="pageIndex"/>.
     /// </summary>
     public async Task<PdfAnnotationInfo?> AddFreeTextAsync(
         int pageIndex,
@@ -1477,7 +1477,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         PdfAnnotationColor color,
         string contents,
         string author = "",
-        double maxWidthPt = 240.0,
+        double maxWidthPt = 280.0,
+        PdfFreeTextStyle? style = null,
         bool recordUndo = true)
     {
         if (_isDisposed)
@@ -1492,7 +1493,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             Color: color,
             Contents: contents ?? string.Empty,
             Author: string.IsNullOrWhiteSpace(author) ? Environment.UserName : author,
-            MaxWidthPt: maxWidthPt);
+            MaxWidthPt: maxWidthPt,
+            Style: style);
 
         PdfPageAnnotationMutationResult result = await _pdfService.AddFreeTextAnnotationAsync(DocumentId, req, _lifetime.Token);
         if (_isDisposed)
@@ -1513,13 +1515,14 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Updates the text contents and optional color of an existing annotation.
+    /// Updates the text contents, optional color, and optional text formatting style of an existing annotation.
     /// </summary>
     public async Task<PdfAnnotationInfo?> UpdateAnnotationAsync(
         int pageIndex,
         int annotIndex,
         string contents,
         PdfAnnotationColor? newColor = null,
+        PdfFreeTextStyle? newTextStyle = null,
         bool recordUndo = true)
     {
         if (_isDisposed)
@@ -1529,7 +1532,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
         PdfAnnotationInfo? before = recordUndo ? FindExactAnnotation(pageIndex, annotIndex) : null;
 
-        PdfUpdateAnnotationRequest req = new(pageIndex, annotIndex, contents ?? string.Empty, newColor);
+        PdfUpdateAnnotationRequest req = new(pageIndex, annotIndex, contents ?? string.Empty, newColor, newTextStyle);
         PdfPageAnnotationMutationResult result = await _pdfService.UpdateAnnotationAsync(DocumentId, req, _lifetime.Token);
         if (_isDisposed)
         {
@@ -1539,9 +1542,16 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
         PdfAnnotationInfo? updated = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
         if (recordUndo && before is not null && updated is not null &&
-            (!string.Equals(before.Contents, updated.Contents, StringComparison.Ordinal) || !before.Color.Equals(updated.Color)))
+            (!string.Equals(before.Contents, updated.Contents, StringComparison.Ordinal) ||
+             !before.Color.Equals(updated.Color) ||
+             !Equals(before.TextStyle, updated.TextStyle)))
         {
-            PushUndoEntry(new UndoUpdatedAnnotationEntry(updated.PageIndex, updated.AnnotIndex, before.Contents, before.Color));
+            PushUndoEntry(new UndoUpdatedAnnotationEntry(
+                updated.PageIndex,
+                updated.AnnotIndex,
+                before.Contents,
+                before.Color,
+                before.TextStyle));
         }
 
         HasUnsavedChanges = true;
@@ -1560,7 +1570,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         }
 
         PdfAnnotationInfo? before = recordUndo ? FindExactAnnotation(pageIndex, annotIndex) : null;
-        if (before is { Subtype: PdfAnnotationSubtype.Stamp, CapturedImage: null })
+        if (before is { Subtype: PdfAnnotationSubtype.Stamp, IsTextBox: false, CapturedImage: null })
         {
             PdfCapturedImage? captured = await CaptureStampImageAsync(pageIndex, annotIndex);
             if (_isDisposed)
@@ -1704,11 +1714,22 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             return null;
         }
 
-        if (source.Subtype == PdfAnnotationSubtype.FreeText)
+        if (source.IsTextBox)
         {
             string body = string.IsNullOrWhiteSpace(source.Contents) ? "Text" : source.Contents;
-            double maxW = source.Bounds.Width >= 110f ? source.Bounds.Width : 240.0;
-            PdfAnnotationInfo? ft = await AddFreeTextAsync(targetPageIndex, targetPdfX, targetPdfY, source.Color, body, source.Author, maxW, recordUndo: false);
+            double maxW = source.TextStyle?.MaxWidthPt is > 60.0 and double sw
+                ? sw
+                : (source.Bounds.Width >= 110f ? source.Bounds.Width : 280.0);
+            PdfAnnotationInfo? ft = await AddFreeTextAsync(
+                targetPageIndex,
+                targetPdfX,
+                targetPdfY,
+                source.TextStyle?.Color ?? source.Color,
+                body,
+                source.Author,
+                maxW,
+                style: source.TextStyle,
+                recordUndo: false);
             if (recordUndo && ft is not null)
             {
                 PushUndoEntry(new UndoCreatedAnnotationsEntry([new AnnotationLocation(ft.PageIndex, ft.AnnotIndex)]));
@@ -1784,6 +1805,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
                         updated.Location.AnnotIndex,
                         updated.PreviousContents,
                         updated.PreviousColor,
+                        newTextStyle: updated.PreviousTextStyle,
                         recordUndo: false);
                 }
 
@@ -1843,6 +1865,22 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
                     double cx = (snapshot.Bounds.Left + snapshot.Bounds.Right) * 0.5;
                     double cy = (snapshot.Bounds.Bottom + snapshot.Bounds.Top) * 0.5;
                     restored = await AddTextNoteAsync(snapshot.PageIndex, cx, cy, snapshot.Color, snapshot.Contents, snapshot.Author, recordUndo: false);
+                }
+                else if (snapshot.IsTextBox)
+                {
+                    double maxW = snapshot.TextStyle?.MaxWidthPt is > 60.0 and double sw
+                        ? sw
+                        : Math.Max(110.0, snapshot.Bounds.Width);
+                    restored = await AddFreeTextAsync(
+                        snapshot.PageIndex,
+                        snapshot.Bounds.Left,
+                        snapshot.Bounds.Top,
+                        snapshot.TextStyle?.Color ?? snapshot.Color,
+                        snapshot.Contents,
+                        snapshot.Author,
+                        maxW,
+                        style: snapshot.TextStyle,
+                        recordUndo: false);
                 }
                 else
                 {
@@ -1978,11 +2016,13 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         int pageIndex,
         int annotIndex,
         string previousContents,
-        PdfAnnotationColor previousColor) : AnnotationUndoEntry
+        PdfAnnotationColor previousColor,
+        PdfFreeTextStyle? previousTextStyle = null) : AnnotationUndoEntry
     {
         public AnnotationLocation Location { get; } = new(pageIndex, annotIndex);
         public string PreviousContents { get; } = previousContents;
         public PdfAnnotationColor PreviousColor { get; } = previousColor;
+        public PdfFreeTextStyle? PreviousTextStyle { get; } = previousTextStyle;
 
         public override void OnAnnotationDeleted(int pageIndex, int removedAnnotIndex) => Location.OnDeleted(pageIndex, removedAnnotIndex);
         public override void OnAnnotationRestored(int pageIndex, int originalAnnotIndex, int restoredAnnotIndex) => Location.OnRestored(pageIndex, originalAnnotIndex, restoredAnnotIndex);

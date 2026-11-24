@@ -52,13 +52,16 @@ Sections marked **(design)** describe the agreed target design not yet implement
 7. **Continuous Documentation & Progress Tracking:** Whenever you complete a feature, fix a bug,
    or refine the roadmap, update `AGENTS.md` and `TODO.md` before finishing your task so the next
    agent or conversation has an exact record of what is implemented and what remains.
-8. **Floating `<InfoBar>` Legibility Rule:** Any `<InfoBar>` floating over the PDF canvas MUST
-   explicitly set an opaque/Acrylic background (`SolidBackgroundFillColorBaseBrush` or
-   `AcrylicBackgroundFillColorDefaultBrush`), `BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"`,
-   `BorderThickness="1"`, `CornerRadius="8"`, `ThemeShadow`, and override `<InfoBar.Resources>`
-   (`InfoBarInformationalSeverityBackgroundBrush` and `InfoBarBackgroundFillColorDefaultBrush`),
-   because WinUI 3's default `InfoBar` informational fill is nearly transparent (~8% opacity) and
-   becomes unreadable over document pages.
+8. **Floating `<InfoBar>` Legibility Rule:** Any `<InfoBar>` floating over the PDF canvas MUST be
+   wrapped in a Fluent 2 Acrylic `<Border>` container (`Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"`,
+   `BackgroundSizing="InnerBorderEdge"`, `BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"`,
+   `BorderThickness="1"`, `CornerRadius="8"`, `Translation="0,0,32"`, `<Border.Shadow><ThemeShadow /></Border.Shadow>`,
+   with container `Visibility` synced to the `InfoBar`'s `IsOpen`), and the inner `<InfoBar>` MUST set
+   `Background="Transparent"`, `BorderThickness="0"`, and override `<InfoBar.Resources>`
+   (`InfoBarInformationalSeverityBackgroundBrush`, `InfoBarBackgroundFillColorDefaultBrush`, and
+   `InfoBarBorderBrush` = `Transparent`, `InfoBarBorderThickness` = `0`). Never put `BorderThickness` or
+   opaque fills directly on `<InfoBar>` itself because WinUI 3's `InfoBar` template renders a double border
+   and ~8% informational tint.
 
 ---
 
@@ -247,14 +250,13 @@ priority channels. Every public `IPdfService` method enqueues a job and returns 
 - **In-Place Save & Annotation Preferences (`local-todo.md`):**
   - Direct save (`Ctrl+S`) + unsaved-changes confirmation prompt (`HasUnsavedChanges`) on close, plus optional auto-save setting.
   - Settings toggles: *"Keep annotation tool active after creation"*, pen multi-stroke grouping timeout, ink smoothing, and Stylus mode (Pen vs. Hand).
-- **Insert Menu Phase 2 (`v0.6.1+` — completing grayed-out `InsertMenuBtn` items):**
-  - **Add Text (`FreeText` with inline formatting):** click-to-place transparent inline editor directly over the PDF page with a coupled Acrylic formatting bar `12 DIPs` above (`Font`, `Size`, `Bold`, `Italic`, `Underline`, `Color`, `Delete`, `Confirm`), writing vector `/AP` streams to `FPDF_ANNOT_FREETEXT` and re-editable via QuickBar.
+- **Insert Menu Phase 2 (`v0.6.1+` — completing remaining `InsertMenuBtn` item):**
   - **Insert Signature (visual rubric):** modal dialog to draw a signature with mouse/stylus or import a transparent `.png`, persist saved signatures locally (`%LOCALAPPDATA%\WinPDF\signatures\`), stamp them onto the page as `FPDF_ANNOT_STAMP`, and add interactive corner resize handles for inserted images and signatures.
 - **Completed in `v0.6.1`:**
   - Square active-page thumbnail border in `ThumbnailsTabPage.xaml` (`CornerRadius="0"`, `Margin="-1"`) matching exact page bounds without rounded corner bleed.
   - Full-titlebar drag & double-click maximize/restore (`SetTitleBar(AppTitleBar)` + `InputNonClientPointerSource` passthrough rects for interactive buttons only) so the WinPDF icon & title area supports native window drag and double-click.
   - Enlarged proportional search match highlight padding in `PdfPageCanvas.DrawTextOverlays`.
-  - Top-bar **Insert** menu (`InsertMenuBtn` in `MainWindow.xaml` between `AnnotationToolsToggleBtn` and `DocumentMenuBtn`) with **Add Comment** (moved out of the floating Pencil toolbar) and **Insert Image** (`FPDF_ANNOT_STAMP` via `FPDFPageObj_NewImageObj` + `FPDFImageObj_SetBitmap`, supporting PNG alpha, drag-to-move, interactive corner-handle resizing with aspect-ratio lock + `Shift` free-form override, Copy/Cut/Paste, Undo, 20 MB file size cap, and PDF persistence), plus disabled placeholders for **Add Text** and **Insert Signature**.
+  - Top-bar **Insert** menu (`InsertMenuBtn` in `MainWindow.xaml` between `AnnotationToolsToggleBtn` and `DocumentMenuBtn`) with **Add Comment**, **Add Text** (inline zoom-scaled transparent editor directly over the PDF page with coupled Acrylic formatting mini-bar `12 DIPs` above/below, universal PDF Standard-14 `Arial / Helvetica` family with Regular/Bold/Italic/BoldItalic via `FPDFText_LoadStandardFont`, font size `8–72 pt`, underline, and color, exact-union `FPDFPageObj_GetBounds` sizing + `FPDF_ANNOT_STAMP` persistence with `/WinPDFStyle`, drag-to-move, Copy/Cut/Paste, re-editing, and Undo), and **Insert Image** (`FPDF_ANNOT_STAMP` via `FPDFPageObj_NewImageObj` + `FPDFImageObj_SetBitmap`, supporting PNG alpha, drag-to-move, interactive corner-handle resizing with aspect-ratio lock + `Shift` free-form override, Copy/Cut/Paste, Undo, 20 MB file size cap, and PDF persistence), plus disabled placeholder for **Insert Signature**.
   - Split-screen sidebar re-open support (`SidebarManualMinWindowDip = 718.0`, `MinSidebarWidth = 218.0` in `MainWindow.xaml.cs`): the sidebar still auto-closes when the window shrinks below `950 DIPs`, but can be manually re-opened down to `718 DIPs` (e.g., half-screen on a `2880×1800` display at `200%` DPI), preserving at least `500 DIPs` for the document area and automatically collapsing the bottom status bar items (`ShellViewModel.IsDocumentAreaNarrow`) whenever the open sidebar leaves `< 720 DIPs` for the document viewport.
 
 #### Planned for `v0.7.x` (Multi-Document Tabbed Shell & Platform Integration)

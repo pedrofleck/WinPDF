@@ -165,6 +165,121 @@ public sealed record PdfCapturedPath(
     bool HasStroke);
 
 /// <summary>
+/// Formatting and layout metadata for an inline vector text box annotation (<c>/WinPDFStyle</c>),
+/// rendered using the universal PDF Standard-14 <c>Arial / Helvetica</c> family.
+/// </summary>
+/// <param name="FontFamily">Font family name (normalized to universal <c>Arial</c> / <c>Helvetica</c>).</param>
+/// <param name="FontSizePt">Font size in PDF points.</param>
+/// <param name="IsBold">Whether bold weight is enabled.</param>
+/// <param name="IsItalic">Whether italic style is enabled.</param>
+/// <param name="IsUnderline">Whether underline decoration is enabled.</param>
+/// <param name="Color">Text RGBA color.</param>
+/// <param name="MaxWidthPt">Maximum box width in PDF points before word-wrapping.</param>
+public sealed record PdfFreeTextStyle(
+    string FontFamily,
+    float FontSizePt,
+    bool IsBold,
+    bool IsItalic,
+    bool IsUnderline,
+    PdfAnnotationColor Color,
+    double MaxWidthPt = 280.0)
+{
+    /// <summary>Default dark text color (#FF141414) for new inline text boxes.</summary>
+    public static readonly PdfAnnotationColor DefaultTextColor = new(20, 20, 20, 255);
+
+    /// <summary>Default inline text box formatting style.</summary>
+    public static PdfFreeTextStyle Default => new("Arial", 12.0f, false, false, false, DefaultTextColor, 280.0);
+
+    /// <summary>
+    /// Serializes this style into a compact invariant string for storage in the PDF annotation dictionary.
+    /// </summary>
+    /// <returns>The serialized style string.</returns>
+    public string Serialize()
+    {
+        string safeFont = (FontFamily ?? string.Empty).Replace('|', ' ').Trim();
+        if (string.IsNullOrEmpty(safeFont))
+        {
+            safeFont = "Arial";
+        }
+
+        float size = Math.Clamp(FontSizePt, 6f, 144f);
+        double maxW = Math.Clamp(MaxWidthPt, 60.0, 1200.0);
+        return string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"v1|{safeFont}|{size:F2}|{(IsBold ? 1 : 0)}|{(IsItalic ? 1 : 0)}|{(IsUnderline ? 1 : 0)}|{Color.R},{Color.G},{Color.B},{Color.A}|{maxW:F2}");
+    }
+
+    /// <summary>
+    /// Parses a serialized <see cref="PdfFreeTextStyle"/> string from a PDF annotation dictionary.
+    /// </summary>
+    /// <param name="raw">Raw serialized string value.</param>
+    /// <param name="style">Parsed style when successful; otherwise <see langword="null"/>.</param>
+    /// <returns><see langword="true"/> if parsing succeeded; otherwise <see langword="false"/>.</returns>
+    public static bool TryParse(string? raw, out PdfFreeTextStyle? style)
+    {
+        style = null;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        string[] parts = raw.Split('|');
+        if (parts.Length < 7 || !string.Equals(parts[0], "v1", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        string fontFamily = parts[1].Trim();
+        if (string.IsNullOrEmpty(fontFamily))
+        {
+            fontFamily = "Arial";
+        }
+
+        if (!float.TryParse(parts[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float sizePt))
+        {
+            return false;
+        }
+
+        bool isBold = parts[3] == "1";
+        bool isItalic = parts[4] == "1";
+        bool isUnderline = parts[5] == "1";
+
+        string[] rgba = parts[6].Split(',');
+        if (rgba.Length < 3 ||
+            !byte.TryParse(rgba[0], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out byte r) ||
+            !byte.TryParse(rgba[1], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out byte g) ||
+            !byte.TryParse(rgba[2], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out byte b))
+        {
+            return false;
+        }
+
+        byte a = 255;
+        if (rgba.Length >= 4 && byte.TryParse(rgba[3], System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out byte parsedA))
+        {
+            a = parsedA;
+        }
+
+        double maxWidth = 280.0;
+        if (parts.Length >= 8 &&
+            double.TryParse(parts[7], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double parsedMaxW) &&
+            double.IsFinite(parsedMaxW))
+        {
+            maxWidth = Math.Clamp(parsedMaxW, 60.0, 1200.0);
+        }
+
+        style = new PdfFreeTextStyle(
+            fontFamily,
+            Math.Clamp(sizePt, 6f, 144f),
+            isBold,
+            isItalic,
+            isUnderline,
+            new PdfAnnotationColor(r, g, b, a),
+            maxWidth);
+        return true;
+    }
+}
+
+/// <summary>
 /// Immutable snapshot of a PDF annotation read from a page dictionary.
 /// </summary>
 /// <param name="PageIndex">Zero-based page index.</param>
@@ -187,6 +302,7 @@ public sealed record PdfCapturedPath(
 /// <param name="Strokes">Optional vector stroke paths for ink, line, polygon, or polyline annotations.</param>
 /// <param name="CapturedPaths">Optional captured vector paths from the annotation's appearance stream (<c>/AP</c>).</param>
 /// <param name="CapturedImage">Optional captured raster image payload for <c>/Stamp</c> annotations.</param>
+/// <param name="TextStyle">Optional inline text formatting metadata when this annotation is a WinPDF text box.</param>
 public sealed record PdfAnnotationInfo(
     int PageIndex,
     int AnnotIndex,
@@ -207,16 +323,20 @@ public sealed record PdfAnnotationInfo(
     float BorderWidthPt = 2.0f,
     IReadOnlyList<IReadOnlyList<System.Numerics.Vector2>>? Strokes = null,
     IReadOnlyList<PdfCapturedPath>? CapturedPaths = null,
-    PdfCapturedImage? CapturedImage = null)
+    PdfCapturedImage? CapturedImage = null,
+    PdfFreeTextStyle? TextStyle = null)
 {
     /// <summary>Gets a value indicating whether this annotation carries a non-empty comment or text body.</summary>
     public bool HasComment => !string.IsNullOrWhiteSpace(Contents);
+
+    /// <summary>Gets a value indicating whether this annotation represents a direct-on-page text box.</summary>
+    public bool IsTextBox => Subtype == PdfAnnotationSubtype.FreeText || TextStyle is not null;
 
     /// <summary>Gets a value indicating whether this annotation is a text markup type (highlight, underline, squiggly, strikeout).</summary>
     public bool IsTextMarkup => Subtype is PdfAnnotationSubtype.Highlight or PdfAnnotationSubtype.Underline or PdfAnnotationSubtype.Squiggly or PdfAnnotationSubtype.StrikeOut;
 
     /// <summary>Gets a value indicating whether the user can recolor this annotation directly.</summary>
-    public bool SupportsColorChange => IsTextMarkup || Subtype is PdfAnnotationSubtype.Text or PdfAnnotationSubtype.FreeText;
+    public bool SupportsColorChange => IsTextMarkup || Subtype is PdfAnnotationSubtype.Text or PdfAnnotationSubtype.FreeText || TextStyle is not null;
 
     /// <summary>Gets a value indicating whether this annotation can be dragged to a new position on the page.</summary>
     public bool IsMovable => !IsSignatureWidget && !IsTextMarkup;
@@ -225,7 +345,7 @@ public sealed record PdfAnnotationInfo(
     public bool CanCopyOrCut => !IsSignatureWidget && !IsTextMarkup;
 
     /// <summary>Gets a value indicating whether this annotation supports interactive corner-handle resizing.</summary>
-    public bool IsResizable => Subtype == PdfAnnotationSubtype.Stamp && !IsSignatureWidget;
+    public bool IsResizable => Subtype == PdfAnnotationSubtype.Stamp && !IsSignatureWidget && TextStyle is null;
 
     /// <summary>
     /// Determines whether the specified PDF user-space point lies inside this annotation's hit area.
@@ -365,6 +485,7 @@ public sealed record PdfCreateNoteRequest(
 /// <param name="Contents">Text box body.</param>
 /// <param name="Author">Author display name.</param>
 /// <param name="MaxWidthPt">Maximum box width in PDF points before word-wrapping.</param>
+/// <param name="Style">Optional explicit text formatting metadata.</param>
 public sealed record PdfCreateFreeTextRequest(
     int PageIndex,
     double PdfX,
@@ -372,7 +493,8 @@ public sealed record PdfCreateFreeTextRequest(
     PdfAnnotationColor Color,
     string Contents,
     string Author,
-    double MaxWidthPt = 240.0);
+    double MaxWidthPt = 240.0,
+    PdfFreeTextStyle? Style = null);
 
 /// <summary>
 /// Request to insert a raster image onto a PDF page as a <c>/Stamp</c> annotation.
@@ -406,11 +528,13 @@ public sealed record PdfCreateImageRequest(
 /// <param name="AnnotIndex">Zero-based index in the page's annotation list.</param>
 /// <param name="Contents">Updated text body.</param>
 /// <param name="NewColor">Optional updated RGBA color.</param>
+/// <param name="NewTextStyle">Optional updated inline text formatting metadata.</param>
 public sealed record PdfUpdateAnnotationRequest(
     int PageIndex,
     int AnnotIndex,
     string Contents,
-    PdfAnnotationColor? NewColor = null);
+    PdfAnnotationColor? NewColor = null,
+    PdfFreeTextStyle? NewTextStyle = null);
 
 /// <summary>
 /// Request to translate a movable annotation (<c>FreeText</c>, <c>Text</c>, <c>Ink</c>, shapes, etc.) by a PDF-space delta.

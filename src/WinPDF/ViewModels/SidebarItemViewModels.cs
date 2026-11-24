@@ -219,6 +219,11 @@ public sealed partial class AnnotationItemViewModel : ObservableObject
             return ResourceStrings.Get(ResourceKeys.AnnotSubtypeSignature);
         }
 
+        if (info.IsTextBox)
+        {
+            return ResourceStrings.Get(ResourceKeys.AnnotSubtypeFreeText);
+        }
+
         string key = info.Subtype switch
         {
             PdfAnnotationSubtype.Highlight => ResourceKeys.AnnotSubtypeHighlight,
@@ -248,6 +253,11 @@ public sealed partial class AnnotationItemViewModel : ObservableObject
         if (info.IsSignatureWidget)
         {
             return "\uE72E";
+        }
+
+        if (info.IsTextBox)
+        {
+            return "\uE8D2";
         }
 
         return info.Subtype switch

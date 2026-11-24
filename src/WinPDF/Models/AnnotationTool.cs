@@ -33,5 +33,10 @@ public enum AnnotationTool
     /// <summary>
     /// Positions a selected image stamp annotation onto the page.
     /// </summary>
-    InsertImage
+    InsertImage,
+
+    /// <summary>
+    /// Places an inline formatted text box annotation onto the page.
+    /// </summary>
+    InsertText
 }

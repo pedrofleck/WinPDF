@@ -390,4 +390,13 @@
   <data name="Insert_CommentHint" xml:space="preserve"><value>Click on the page to add a comment</value></data>
   <data name="Insert_ImageHint" xml:space="preserve"><value>Click on the page to position the image</value></data>
   <data name="Insert_ImageTooLarge" xml:space="preserve"><value>The selected image exceeds the 20 MB maximum file size limit.</value></data>
+  <data name="Insert_TextHint" xml:space="preserve"><value>Click on the page to add text</value></data>
+  <data name="Annot_EditText_ToolTip" xml:space="preserve"><value>Edit text</value></data>
+  <data name="TextBar_Size_ToolTip" xml:space="preserve"><value>Font size</value></data>
+  <data name="TextBar_Bold_ToolTip" xml:space="preserve"><value>Bold (Ctrl+B)</value></data>
+  <data name="TextBar_Italic_ToolTip" xml:space="preserve"><value>Italic (Ctrl+I)</value></data>
+  <data name="TextBar_Underline_ToolTip" xml:space="preserve"><value>Underline (Ctrl+U)</value></data>
+  <data name="TextBar_Color_ToolTip" xml:space="preserve"><value>Text color</value></data>
+  <data name="TextBar_Delete_ToolTip" xml:space="preserve"><value>Discard / Delete</value></data>
+  <data name="TextBar_Confirm_ToolTip" xml:space="preserve"><value>Confirm (Ctrl+Enter)</value></data>
 </root>

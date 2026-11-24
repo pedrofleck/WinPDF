@@ -728,6 +728,74 @@ internal static unsafe partial class PdfiumNative
 
     [LibraryImport(Lib)]
     [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFAnnot_RemoveObject(PdfiumAnnotationHandle annot, int index);
+
+    [LibraryImport(Lib, StringMarshalling = StringMarshalling.Utf8)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial nint FPDFText_LoadStandardFont(
+        PdfiumDocumentHandle document,
+        string font);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial void FPDFFont_Close(nint font);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial nint FPDFPageObj_CreateTextObj(
+        PdfiumDocumentHandle document,
+        nint font,
+        float fontSize);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFText_SetText(nint textObject, char* text);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPageObj_SetFillColor(
+        nint pageObject,
+        uint r,
+        uint g,
+        uint b,
+        uint a);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPageObj_SetStrokeColor(
+        nint pageObject,
+        uint r,
+        uint g,
+        uint b,
+        uint a);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPageObj_SetStrokeWidth(nint pageObject, float width);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPageObj_GetBounds(
+        nint pageObject,
+        out float left,
+        out float bottom,
+        out float right,
+        out float top);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial nint FPDFPageObj_CreateNewPath(float x, float y);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPath_LineTo(nint path, float x, float y);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
+    internal static partial int FPDFPath_SetDrawMode(nint path, int fillMode, int stroke);
+
+    [LibraryImport(Lib)]
+    [UnmanagedCallConv(CallConvs = [typeof(CallConvCdecl)])]
     internal static partial nint FPDFDOC_InitFormFillEnvironment(PdfiumDocumentHandle document, void* formInfo);
 
     [LibraryImport(Lib)]

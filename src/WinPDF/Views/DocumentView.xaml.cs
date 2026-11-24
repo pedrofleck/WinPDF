@@ -566,6 +566,7 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.SignatureClicked += OnCanvasSignatureClicked;
         PdfPageCanvas.TouchEmptyHoldRequested += OnCanvasTouchEmptyHoldRequested;
         PdfPageCanvas.PlaceTextNoteRequested += OnCanvasPlaceTextNoteRequested;
+        PdfPageCanvas.PlaceTextBoxRequested += OnCanvasPlaceTextBoxRequested;
         PdfPageCanvas.PlaceImageRequested += OnCanvasPlaceImageRequested;
         PdfPageCanvas.AnnotationMoved += OnCanvasAnnotationMoved;
         PdfPageCanvas.AnnotationResized += OnCanvasAnnotationResized;
@@ -623,6 +624,8 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.TouchEmptyHoldRequested += OnCanvasTouchEmptyHoldRequested;
         PdfPageCanvas.PlaceTextNoteRequested -= OnCanvasPlaceTextNoteRequested;
         PdfPageCanvas.PlaceTextNoteRequested += OnCanvasPlaceTextNoteRequested;
+        PdfPageCanvas.PlaceTextBoxRequested -= OnCanvasPlaceTextBoxRequested;
+        PdfPageCanvas.PlaceTextBoxRequested += OnCanvasPlaceTextBoxRequested;
         PdfPageCanvas.PlaceImageRequested -= OnCanvasPlaceImageRequested;
         PdfPageCanvas.PlaceImageRequested += OnCanvasPlaceImageRequested;
         PdfPageCanvas.AnnotationMoved -= OnCanvasAnnotationMoved;
@@ -734,6 +737,7 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.SignatureClicked -= OnCanvasSignatureClicked;
         PdfPageCanvas.TouchEmptyHoldRequested -= OnCanvasTouchEmptyHoldRequested;
         PdfPageCanvas.PlaceTextNoteRequested -= OnCanvasPlaceTextNoteRequested;
+        PdfPageCanvas.PlaceTextBoxRequested -= OnCanvasPlaceTextBoxRequested;
         PdfPageCanvas.PlaceImageRequested -= OnCanvasPlaceImageRequested;
         PdfPageCanvas.AnnotationMoved -= OnCanvasAnnotationMoved;
         PdfPageCanvas.AnnotationResized -= OnCanvasAnnotationResized;
@@ -852,6 +856,11 @@ public sealed partial class DocumentView : Page
         if (_isTouchSelectionHandlesActive)
         {
             UpdateTouchSelectionHandlesLayout();
+        }
+
+        if (_isInlineTextEditorOpen)
+        {
+            RepositionInlineTextEditor();
         }
     }
 
@@ -1030,9 +1039,14 @@ public sealed partial class DocumentView : Page
         else if (e.PropertyName == nameof(ShellViewModel.IsNightMode))
         {
             ApplyNightModeToAllCanvases(ViewModel.IsNightMode);
+            if (_isInlineTextEditorOpen)
+            {
+                ApplyInlineTextStyleToUi();
+            }
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsPresentationMode))
         {
+            CloseInlineTextEditorImmediate();
             HideTouchScrollScrubberImmediate();
             CancelInteractiveSlideSwipeImmediate();
             if (ViewModel.IsPresentationMode)
@@ -1047,7 +1061,7 @@ public sealed partial class DocumentView : Page
                 }
 
                 _isRestoringFromPresentation = false;
-                FullScreenInfoBar.IsOpen = true;
+                SetFullScreenInfoBarOpen(true);
                 _presentationHideTimer.Stop();
                 _presentationHideTimer.Start();
 
@@ -1063,7 +1077,7 @@ public sealed partial class DocumentView : Page
                 if (!ViewModel.IsFullScreen)
                 {
                     _presentationHideTimer.Stop();
-                    FullScreenInfoBar.IsOpen = false;
+                    SetFullScreenInfoBarOpen(false);
                 }
 
                 PdfPageCanvas.ClearSlideBuffer();
@@ -1100,14 +1114,14 @@ public sealed partial class DocumentView : Page
         {
             if (ViewModel.IsFullScreen || ViewModel.IsPresentationMode)
             {
-                FullScreenInfoBar.IsOpen = true;
+                SetFullScreenInfoBarOpen(true);
                 _presentationHideTimer.Stop();
                 _presentationHideTimer.Start();
             }
             else
             {
                 _presentationHideTimer.Stop();
-                FullScreenInfoBar.IsOpen = false;
+                SetFullScreenInfoBarOpen(false);
             }
         }
         else if (e.PropertyName is nameof(ShellViewModel.IsCompactChrome) or nameof(ShellViewModel.IsDocumentAreaNarrow))
@@ -1396,6 +1410,7 @@ public sealed partial class DocumentView : Page
 
         CancelTouchSelectionHandleDragImmediate();
         CancelInteractiveSlideSwipeImmediate();
+        CloseInlineTextEditorImmediate();
         PdfPageCanvas.ClearSlideBuffer();
         if (_isRestoringFromPresentation || ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
         {
@@ -1608,6 +1623,11 @@ public sealed partial class DocumentView : Page
             UpdateTouchSelectionHandlesLayout();
         }
 
+        if (_isInlineTextEditorOpen)
+        {
+            RepositionInlineTextEditor();
+        }
+
         if (_isLastPointerInputTouch && !_isProgrammaticPageScroll && CanShowTouchScrollScrubber())
         {
             ShowAndSyncTouchScrollScrubber(resetAutoHideTimer: true);
@@ -1630,6 +1650,11 @@ public sealed partial class DocumentView : Page
         if (!_isHorizontalPushAnimating && FloatingTopTransform is not null)
         {
             FloatingTopTransform.TranslateX = GetTargetFloatingTopOffsetDip();
+        }
+
+        if (_isInlineTextEditorOpen)
+        {
+            RepositionInlineTextEditor();
         }
 
         if (!_isProgrammaticPageScroll && ViewModel.CurrentDocument is { IsContinuous: true })
@@ -1701,6 +1726,11 @@ public sealed partial class DocumentView : Page
         if (_isTouchSelectionHandlesActive)
         {
             UpdateTouchSelectionHandlesLayout();
+        }
+
+        if (_isInlineTextEditorOpen)
+        {
+            RepositionInlineTextEditor();
         }
 
         if (_isTouchScrollScrubberVisible)
@@ -2733,6 +2763,11 @@ public sealed partial class DocumentView : Page
         TopNotificationInfoBar.Title = title;
         TopNotificationInfoBar.Message = message;
         TopNotificationInfoBar.IsOpen = true;
+        if (TopNotificationContainer is not null)
+        {
+            TopNotificationContainer.Visibility = Visibility.Visible;
+        }
+
         _topNotificationTimer.Start();
     }
 
@@ -2742,6 +2777,11 @@ public sealed partial class DocumentView : Page
         if (TopNotificationInfoBar is not null)
         {
             TopNotificationInfoBar.IsOpen = false;
+        }
+
+        if (TopNotificationContainer is not null)
+        {
+            TopNotificationContainer.Visibility = Visibility.Collapsed;
         }
     }
 
@@ -2757,18 +2797,36 @@ public sealed partial class DocumentView : Page
         {
             TopNotificationInfoBar.IsOpen = false;
         }
+
+        if (TopNotificationContainer is not null)
+        {
+            TopNotificationContainer.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void SetFullScreenInfoBarOpen(bool isOpen)
+    {
+        if (FullScreenInfoBar is not null)
+        {
+            FullScreenInfoBar.IsOpen = isOpen;
+        }
+
+        if (FullScreenInfoBarContainer is not null)
+        {
+            FullScreenInfoBarContainer.Visibility = isOpen ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     private void OnPresentationHideTimerTick(object? sender, object e)
     {
         _presentationHideTimer.Stop();
-        FullScreenInfoBar.IsOpen = false;
+        SetFullScreenInfoBarOpen(false);
     }
 
     private void OnFullScreenInfoBarCloseButtonClick(InfoBar sender, object args)
     {
         _presentationHideTimer.Stop();
-        FullScreenInfoBar.IsOpen = false;
+        SetFullScreenInfoBarOpen(false);
     }
 
     private void OnAnnotationNoticeCloseButtonClick(InfoBar sender, object args)
@@ -2966,7 +3024,7 @@ public sealed partial class DocumentView : Page
 
         if (!isCtrl && !isAlt && e.Key == Windows.System.VirtualKey.Escape)
         {
-            if (ViewModel.ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertImage)
+            if (ViewModel.ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage)
             {
                 e.Handled = true;
                 DismissTopNotification();
@@ -4355,6 +4413,11 @@ public sealed partial class DocumentView : Page
         if (!_isHorizontalPushAnimating && FloatingTopTransform is not null)
         {
             FloatingTopTransform.TranslateX = GetTargetFloatingTopOffsetDip();
+        }
+
+        if (_isInlineTextEditorOpen)
+        {
+            RepositionInlineTextEditor();
         }
 
         _searchBarStoryboard?.Stop();
@@ -6032,6 +6095,17 @@ public sealed partial class DocumentView : Page
         SetToolTip(AnnotationEditorCopyButton, ResourceKeys.AnnotCopyToolTip);
         SetToolTip(AnnotationEditorCutButton, ResourceKeys.AnnotCutToolTip);
         SetToolTip(AnnotationEditorCloseButton, ResourceKeys.AnnotClose);
+        SetToolTip(InlineTextSizeButton, ResourceKeys.TextBarSizeToolTip);
+        SetToolTip(InlineTextBoldToggle, ResourceKeys.TextBarBoldToolTip);
+        SetToolTip(InlineTextItalicToggle, ResourceKeys.TextBarItalicToolTip);
+        SetToolTip(InlineTextUnderlineToggle, ResourceKeys.TextBarUnderlineToolTip);
+        SetToolTip(InlineTextColorButton, ResourceKeys.TextBarColorToolTip);
+        SetToolTip(InlineTextDeleteButton, ResourceKeys.TextBarDeleteToolTip);
+        SetToolTip(InlineTextConfirmButton, ResourceKeys.TextBarConfirmToolTip);
+        if (InlineTextEditorTextBox is not null)
+        {
+            InlineTextEditorTextBox.PlaceholderText = ResourceStrings.Get(ResourceKeys.AnnotTextBoxPlaceholder);
+        }
 
         if (AnnotationEditorDeleteButton is not null)
         {
@@ -6255,6 +6329,12 @@ public sealed partial class DocumentView : Page
     /// </summary>
     private void OpenAnnotationUi(PdfAnnotationInfo annot, PdfPageCanvas? canvas, Point canvasDipPt)
     {
+        if (annot.IsTextBox)
+        {
+            OpenAnnotationQuickBar(annot, canvas, canvasDipPt);
+            return;
+        }
+
         if (annot.HasComment)
         {
             OpenExistingAnnotationEditor(annot, canvas, canvasDipPt);
@@ -6334,6 +6414,19 @@ public sealed partial class DocumentView : Page
 
         HideAnnotationPopupsImmediate();
         await doc.AddImageAnnotationAsync(pageInfo.Index, pdfPt.X, pdfPt.Y, pending);
+    }
+
+    private void OnCanvasPlaceTextBoxRequested(PdfPageCanvas canvas, Vector2 pdfPt, Point canvasDipPt)
+    {
+        if (canvas.PageInfo is null || ViewModel.CurrentDocument is null)
+        {
+            return;
+        }
+
+        DismissTopNotification();
+        ViewModel.CancelActiveInsertTool();
+        HideAnnotationPopupsImmediate();
+        OpenInlineTextEditorForCreate(canvas, pdfPt);
     }
 
     private void OnCanvasTouchEmptyHoldRequested(PdfPageCanvas canvas, Vector2 pdfPt, Point canvasDipPt)
@@ -6678,6 +6771,13 @@ public sealed partial class DocumentView : Page
         SetVisible(QuickBarColorButton, annot.SupportsColorChange);
         SetVisible(QuickBarCopyButton, annot.CanCopyOrCut);
         SetVisible(QuickBarCutButton, annot.CanCopyOrCut);
+        if (QuickBarAddCommentButton?.Content is FontIcon quickCommentIcon)
+        {
+            quickCommentIcon.Glyph = annot.IsTextBox ? "\uE70F" : "\uE90A";
+        }
+        SetToolTip(
+            QuickBarAddCommentButton,
+            annot.IsTextBox ? ResourceKeys.AnnotEditTextToolTip : ResourceKeys.AnnotAddCommentToolTip);
         SetVisible(QuickBarColorRow, false);
         ApplySwatchSelectedState(QuickColorYellowButton, IsSameColor(annot.Color, PdfAnnotationColor.Yellow));
         ApplySwatchSelectedState(QuickColorGreenButton, IsSameColor(annot.Color, PdfAnnotationColor.Green));
@@ -6789,6 +6889,12 @@ public sealed partial class DocumentView : Page
 
         PdfPageCanvas? canvas = _quickBarCanvas;
         Point dipPt = _quickBarAnchorDipPt;
+        if (annot.IsTextBox)
+        {
+            CloseQuickBarThen(() => OpenInlineTextEditorForExisting(annot, canvas));
+            return;
+        }
+
         CloseQuickBarThen(() => OpenExistingAnnotationEditor(annot, canvas, dipPt));
     }
 
@@ -6815,7 +6921,8 @@ public sealed partial class DocumentView : Page
 
         PdfAnnotationColor color = ParseAnnotationColorTag(fe.Tag as string, annot.Color);
         SetDefaultAnnotationColor(color);
-        _ = doc.UpdateAnnotationAsync(annot.PageIndex, annot.AnnotIndex, annot.Contents ?? string.Empty, color);
+        PdfFreeTextStyle? updatedTextStyle = annot.TextStyle is { } ts ? ts with { Color = color } : null;
+        _ = doc.UpdateAnnotationAsync(annot.PageIndex, annot.AnnotIndex, annot.Contents ?? string.Empty, color, newTextStyle: updatedTextStyle);
     }
 
     private void OnQuickBarCopyClick(object sender, RoutedEventArgs e)
@@ -6903,7 +7010,7 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        if (annot is { Subtype: PdfAnnotationSubtype.Stamp, CapturedImage: null } &&
+        if (annot is { Subtype: PdfAnnotationSubtype.Stamp, IsTextBox: false, CapturedImage: null } &&
             ViewModel.CurrentDocument is { } doc)
         {
             PdfCapturedImage? captured = await doc.CaptureStampImageAsync(annot.PageIndex, annot.AnnotIndex);
@@ -6924,7 +7031,7 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        if (annot is { Subtype: PdfAnnotationSubtype.Stamp, CapturedImage: null })
+        if (annot is { Subtype: PdfAnnotationSubtype.Stamp, IsTextBox: false, CapturedImage: null })
         {
             PdfCapturedImage? captured = await doc.CaptureStampImageAsync(annot.PageIndex, annot.AnnotIndex);
             if (captured is not null)
@@ -7417,6 +7524,821 @@ public sealed partial class DocumentView : Page
         }
         catch
         {
+        }
+
+        CloseInlineTextEditorImmediate();
+    }
+
+    // =========================================================================
+    // Inline direct-on-page text editor + coupled Acrylic formatting mini-bar
+    // =========================================================================
+
+    private static readonly float[] s_inlineTextFontSizes =
+        [8f, 9f, 10f, 11f, 12f, 14f, 16f, 18f, 20f, 24f, 28f, 36f, 48f, 72f];
+
+    private bool _isInlineTextEditorOpen;
+    private bool _isCommittingInlineText;
+    private bool _isSyncingInlineRichEdit;
+    private int _inlineTextPageIndex = -1;
+    private Vector2 _inlineTextAnchorPdfPt;
+    private PdfAnnotationInfo? _inlineTextEditingAnnot;
+    private PdfFreeTextStyle _inlineTextStyle = PdfFreeTextStyle.Default;
+    private double _lastInlineRichEditFontSizeDip;
+    private TextBlock? _inlineTextMeasureBlock;
+
+    private string GetInlineEditorPlainText()
+    {
+        if (InlineTextEditorTextBox is null)
+        {
+            return string.Empty;
+        }
+
+        InlineTextEditorTextBox.Document.GetText(Microsoft.UI.Text.TextGetOptions.UseLf, out string raw);
+        if (string.IsNullOrEmpty(raw))
+        {
+            return string.Empty;
+        }
+
+        if (raw.EndsWith('\n') || raw.EndsWith('\r'))
+        {
+            return raw[..^1];
+        }
+
+        return raw;
+    }
+
+    private void SetInlineEditorPlainText(string text)
+    {
+        if (InlineTextEditorTextBox is null)
+        {
+            return;
+        }
+
+        _isSyncingInlineRichEdit = true;
+        try
+        {
+            InlineTextEditorTextBox.Document.SetText(Microsoft.UI.Text.TextSetOptions.None, text ?? string.Empty);
+        }
+        finally
+        {
+            _isSyncingInlineRichEdit = false;
+        }
+    }
+
+    private void GetInlineEditorDisplayColors(
+        out Windows.UI.Color textColor,
+        out Windows.UI.Color placeholderColor,
+        out Windows.UI.Color paperColor)
+    {
+        PdfAnnotationColor c = _inlineTextStyle.Color;
+        if (ViewModel.IsNightMode)
+        {
+            textColor = Windows.UI.Color.FromArgb(255, (byte)(255 - c.R), (byte)(255 - c.G), (byte)(255 - c.B));
+            placeholderColor = Windows.UI.Color.FromArgb(140, 195, 195, 195);
+            paperColor = Windows.UI.Color.FromArgb(255, 30, 30, 30);
+        }
+        else
+        {
+            textColor = Windows.UI.Color.FromArgb(255, c.R, c.G, c.B);
+            placeholderColor = Windows.UI.Color.FromArgb(140, 102, 102, 102);
+            paperColor = Windows.UI.Color.FromArgb(255, 255, 255, 255);
+        }
+    }
+
+    private void ApplyInlineRichEditCharacterFormat(double fontSizeDip)
+    {
+        if (InlineTextEditorTextBox is null)
+        {
+            return;
+        }
+
+        _isSyncingInlineRichEdit = true;
+        try
+        {
+            float sizePt = (float)Math.Clamp(fontSizeDip * 72.0 / 96.0, 4.5, 195.0);
+            GetInlineEditorDisplayColors(out Windows.UI.Color textColor, out _, out _);
+
+            void ConfigureChar(Microsoft.UI.Text.ITextCharacterFormat fmt)
+            {
+                fmt.Name = "Arial";
+                fmt.FontStretch = Windows.UI.Text.FontStretch.Normal;
+                fmt.Size = sizePt;
+                fmt.Bold = _inlineTextStyle.IsBold ? Microsoft.UI.Text.FormatEffect.On : Microsoft.UI.Text.FormatEffect.Off;
+                fmt.Italic = _inlineTextStyle.IsItalic ? Microsoft.UI.Text.FormatEffect.On : Microsoft.UI.Text.FormatEffect.Off;
+                fmt.Underline = _inlineTextStyle.IsUnderline ? Microsoft.UI.Text.UnderlineType.Single : Microsoft.UI.Text.UnderlineType.None;
+                fmt.ForegroundColor = textColor;
+            }
+
+            Microsoft.UI.Text.RichEditTextDocument doc = InlineTextEditorTextBox.Document;
+            Microsoft.UI.Text.ITextCharacterFormat defChar = doc.GetDefaultCharacterFormat();
+            ConfigureChar(defChar);
+            doc.SetDefaultCharacterFormat(defChar);
+
+            Microsoft.UI.Text.ITextParagraphFormat defPara = doc.GetDefaultParagraphFormat();
+            defPara.SpaceBefore = 0f;
+            defPara.SpaceAfter = 0f;
+            doc.SetDefaultParagraphFormat(defPara);
+
+            Microsoft.UI.Text.ITextRange allRange = doc.GetRange(0, Microsoft.UI.Text.TextConstants.MaxUnitCount);
+            ConfigureChar(allRange.CharacterFormat);
+            allRange.ParagraphFormat.SpaceBefore = 0f;
+            allRange.ParagraphFormat.SpaceAfter = 0f;
+
+            ConfigureChar(doc.Selection.CharacterFormat);
+            _lastInlineRichEditFontSizeDip = fontSizeDip;
+        }
+        finally
+        {
+            _isSyncingInlineRichEdit = false;
+        }
+    }
+
+    private void OpenInlineTextEditorForCreate(PdfPageCanvas canvas, Vector2 pdfPt)
+    {
+        if (canvas.PageInfo is not { } pageInfo || InlineTextEditorOverlay is null || InlineTextEditorTextBox is null)
+        {
+            return;
+        }
+
+        double pageRightPt = pageInfo.OriginXPt + pageInfo.WidthPt;
+        double maxWidthPt = Math.Clamp(pageRightPt - pdfPt.X - 6.0, 110.0, Math.Max(110.0, pageInfo.WidthPt));
+
+        _inlineTextEditingAnnot = null;
+        _inlineTextPageIndex = pageInfo.Index;
+        _inlineTextAnchorPdfPt = pdfPt;
+        _inlineTextStyle = ViewModel.DefaultTextStyle with { FontFamily = "Arial", MaxWidthPt = maxWidthPt };
+
+        SetInlineEditorPlainText(string.Empty);
+        ShowInlineTextEditorCore(moveCaretToEnd: false);
+    }
+
+    private void OpenInlineTextEditorForExisting(PdfAnnotationInfo annot, PdfPageCanvas? canvas)
+    {
+        if (InlineTextEditorOverlay is null || InlineTextEditorTextBox is null || ViewModel.CurrentDocument is not { Pages.Count: > 0 } doc)
+        {
+            return;
+        }
+
+        int pageIndex = Math.Clamp(annot.PageIndex, 0, doc.Pages.Count - 1);
+        PdfPageInfo pageInfo = canvas?.PageInfo ?? doc.Pages[pageIndex];
+        double pageRightPt = pageInfo.OriginXPt + pageInfo.WidthPt;
+        PdfFreeTextStyle baseStyle = annot.TextStyle ?? (ViewModel.DefaultTextStyle with
+        {
+            FontFamily = "Arial",
+            Color = annot.Color
+        });
+
+        float marginPt = Math.Max(3.0f, baseStyle.FontSizePt * 0.12f);
+        float anchorX = annot.Bounds.Left + marginPt;
+        float anchorY = annot.Bounds.Top - marginPt;
+        double defaultMaxW = Math.Clamp(pageRightPt - anchorX - 6.0, 110.0, Math.Max(110.0, pageInfo.WidthPt));
+
+        _inlineTextEditingAnnot = annot;
+        _inlineTextPageIndex = pageIndex;
+        _inlineTextAnchorPdfPt = new Vector2(anchorX, anchorY);
+        _inlineTextStyle = baseStyle with
+        {
+            FontFamily = "Arial",
+            MaxWidthPt = Math.Max(defaultMaxW, baseStyle.MaxWidthPt)
+        };
+
+        SetInlineEditorPlainText(annot.Contents ?? string.Empty);
+        ShowInlineTextEditorCore(moveCaretToEnd: true);
+    }
+
+    private void ShowInlineTextEditorCore(bool moveCaretToEnd)
+    {
+        if (InlineTextEditorOverlay is null || InlineTextEditorTextBox is null)
+        {
+            return;
+        }
+
+        _isInlineTextEditorOpen = true;
+        _isCommittingInlineText = false;
+        ApplyInlineTextStyleToUi();
+        InlineTextEditorOverlay.Visibility = Visibility.Visible;
+        RepositionInlineTextEditor();
+
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Normal, () =>
+        {
+            if (!_isInlineTextEditorOpen || InlineTextEditorTextBox is null)
+            {
+                return;
+            }
+
+            RepositionInlineTextEditor();
+            _ = InlineTextEditorTextBox.Focus(FocusState.Programmatic);
+            if (moveCaretToEnd)
+            {
+                int endPos = GetInlineEditorPlainText().Length;
+                InlineTextEditorTextBox.Document.Selection.SetRange(endPos, endPos);
+            }
+        });
+    }
+
+    private void CloseInlineTextEditorImmediate()
+    {
+        _isInlineTextEditorOpen = false;
+        _inlineTextEditingAnnot = null;
+        _inlineTextPageIndex = -1;
+
+        try
+        {
+            if (InlineTextColorFlyout?.IsOpen == true)
+            {
+                InlineTextColorFlyout.Hide();
+            }
+        }
+        catch
+        {
+        }
+
+        if (InlineTextEditorOverlay is not null)
+        {
+            InlineTextEditorOverlay.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void CancelInlineTextEditor()
+    {
+        CloseInlineTextEditorImmediate();
+        ReturnFocusToViewer();
+    }
+
+    private void ApplyInlineTextStyleToUi()
+    {
+        if (InlineTextSizeLabel is not null)
+        {
+            InlineTextSizeLabel.Text = ((int)Math.Round(_inlineTextStyle.FontSizePt)).ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        if (InlineTextBoldToggle is not null)
+        {
+            InlineTextBoldToggle.IsChecked = _inlineTextStyle.IsBold;
+        }
+
+        if (InlineTextItalicToggle is not null)
+        {
+            InlineTextItalicToggle.IsChecked = _inlineTextStyle.IsItalic;
+        }
+
+        if (InlineTextUnderlineToggle is not null)
+        {
+            InlineTextUnderlineToggle.IsChecked = _inlineTextStyle.IsUnderline;
+        }
+
+        PdfAnnotationColor c = _inlineTextStyle.Color;
+        if (InlineTextColorDot is not null)
+        {
+            InlineTextColorDot.Fill = new SolidColorBrush(Windows.UI.Color.FromArgb(255, c.R, c.G, c.B));
+        }
+
+        GetInlineEditorDisplayColors(
+            out Windows.UI.Color displayColor,
+            out Windows.UI.Color placeholderColor,
+            out Windows.UI.Color paperColor);
+
+        if (InlineTextEditorBoxContainer is not null)
+        {
+            InlineTextEditorBoxContainer.Opacity = _inlineTextEditingAnnot is not null ? 1.0 : 0.92;
+        }
+
+        if (InlineTextEditorMaskBorder is not null)
+        {
+            InlineTextEditorMaskBorder.Background = new SolidColorBrush(paperColor);
+        }
+
+        if (InlineTextEditorTextBox is not null)
+        {
+            InlineTextEditorTextBox.RequestedTheme = ViewModel.IsNightMode ? ElementTheme.Dark : ElementTheme.Light;
+            InlineTextEditorTextBox.FontFamily = new FontFamily("Arial");
+            InlineTextEditorTextBox.FontStretch = Windows.UI.Text.FontStretch.Normal;
+            InlineTextEditorTextBox.IsTextScaleFactorEnabled = false;
+            InlineTextEditorTextBox.FontWeight = _inlineTextStyle.IsBold
+                ? Microsoft.UI.Text.FontWeights.Bold
+                : Microsoft.UI.Text.FontWeights.Normal;
+            InlineTextEditorTextBox.FontStyle = _inlineTextStyle.IsItalic
+                ? Windows.UI.Text.FontStyle.Italic
+                : Windows.UI.Text.FontStyle.Normal;
+
+            SetResourceBrushColor(InlineTextEditorTextBox.Resources, "TextControlBackground", paperColor);
+            SetResourceBrushColor(InlineTextEditorTextBox.Resources, "TextControlBackgroundPointerOver", paperColor);
+            SetResourceBrushColor(InlineTextEditorTextBox.Resources, "TextControlBackgroundFocused", paperColor);
+            SetResourceBrushColor(InlineTextEditorTextBox.Resources, "TextControlForeground", displayColor);
+            SetResourceBrushColor(InlineTextEditorTextBox.Resources, "TextControlForegroundPointerOver", displayColor);
+            SetResourceBrushColor(InlineTextEditorTextBox.Resources, "TextControlForegroundFocused", displayColor);
+            SetResourceBrushColor(InlineTextEditorTextBox.Resources, "TextControlPlaceholderForeground", placeholderColor);
+            SetResourceBrushColor(InlineTextEditorTextBox.Resources, "TextControlPlaceholderForegroundPointerOver", placeholderColor);
+            SetResourceBrushColor(InlineTextEditorTextBox.Resources, "TextControlPlaceholderForegroundFocused", placeholderColor);
+
+            if (InlineTextEditorTextBox.Background is SolidColorBrush bgBrush)
+            {
+                bgBrush.Color = paperColor;
+            }
+            else
+            {
+                InlineTextEditorTextBox.Background = new SolidColorBrush(paperColor);
+            }
+
+            if (InlineTextEditorTextBox.Foreground is SolidColorBrush fgBrush)
+            {
+                fgBrush.Color = displayColor;
+            }
+            else
+            {
+                InlineTextEditorTextBox.Foreground = new SolidColorBrush(displayColor);
+            }
+
+            double fontSizeDip = InlineTextEditorTextBox.FontSize > 1.0
+                ? InlineTextEditorTextBox.FontSize
+                : _inlineTextStyle.FontSizePt * PageCoordinateTransform.DipsPerPoint;
+            if (_inlineTextPageIndex >= 0 && FindRealizedCanvasForPage(_inlineTextPageIndex) is { } realizedCanvas)
+            {
+                fontSizeDip = Math.Clamp(_inlineTextStyle.FontSizePt * ComputeDipsPerPoint(realizedCanvas), 6.0, 260.0);
+                InlineTextEditorTextBox.FontSize = fontSizeDip;
+            }
+
+            ApplyInlineRichEditCharacterFormat(fontSizeDip);
+        }
+    }
+
+    private static void SetResourceBrushColor(ResourceDictionary resources, string key, Windows.UI.Color color)
+    {
+        if (resources.TryGetValue(key, out object? existing) && existing is SolidColorBrush brush)
+        {
+            brush.Color = color;
+        }
+        else
+        {
+            resources[key] = new SolidColorBrush(color);
+        }
+    }
+
+    private double ComputeDipsPerPoint(PdfPageCanvas canvas)
+    {
+        if (ScrollViewerContentRoot is null)
+        {
+            double fallbackZoom = Math.Max(0.25, ContinuousScrollViewer?.ZoomFactor ?? ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
+            return PageCoordinateTransform.DipsPerPoint * fallbackZoom;
+        }
+
+        try
+        {
+            Microsoft.UI.Xaml.Media.GeneralTransform gt = canvas.TransformToVisual(ScrollViewerContentRoot);
+            Point p0 = gt.TransformPoint(new Point(0.0, 0.0));
+            Point p1 = gt.TransformPoint(new Point(72.0 * PageCoordinateTransform.DipsPerPoint, 0.0));
+            double dx = p1.X - p0.X;
+            double dy = p1.Y - p0.Y;
+            double span = Math.Sqrt((dx * dx) + (dy * dy));
+            if (double.IsFinite(span) && span > 4.0)
+            {
+                return span / 72.0;
+            }
+        }
+        catch
+        {
+        }
+
+        double zoom = Math.Max(0.25, ContinuousScrollViewer?.ZoomFactor ?? ViewModel.CurrentDocument?.ZoomFactor ?? 1.0);
+        return PageCoordinateTransform.DipsPerPoint * zoom;
+    }
+
+    private double MeasureInlineEditorDesiredWidthDip(
+        string text,
+        string placeholderText,
+        double fontSizeDip,
+        bool isBold,
+        bool isItalic,
+        double minWidthDip,
+        double maxWidthDip)
+    {
+        _inlineTextMeasureBlock ??= new TextBlock
+        {
+            FontFamily = new FontFamily("Arial"),
+            FontStretch = Windows.UI.Text.FontStretch.Normal,
+            IsTextScaleFactorEnabled = false,
+            TextWrapping = TextWrapping.NoWrap
+        };
+
+        _inlineTextMeasureBlock.FontFamily = new FontFamily("Arial");
+        _inlineTextMeasureBlock.FontStretch = Windows.UI.Text.FontStretch.Normal;
+        _inlineTextMeasureBlock.IsTextScaleFactorEnabled = false;
+        _inlineTextMeasureBlock.FontSize = fontSizeDip;
+
+        double caretPad = Math.Clamp(fontSizeDip * 0.22, 10.0, 18.0);
+
+        if (string.IsNullOrEmpty(text))
+        {
+            if (string.IsNullOrEmpty(placeholderText))
+            {
+                return minWidthDip;
+            }
+
+            _inlineTextMeasureBlock.FontWeight = Microsoft.UI.Text.FontWeights.Normal;
+            _inlineTextMeasureBlock.FontStyle = Windows.UI.Text.FontStyle.Normal;
+            _inlineTextMeasureBlock.Text = placeholderText;
+            _inlineTextMeasureBlock.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            return Math.Clamp(_inlineTextMeasureBlock.DesiredSize.Width + caretPad, minWidthDip, maxWidthDip);
+        }
+
+        _inlineTextMeasureBlock.FontWeight = isBold
+            ? Microsoft.UI.Text.FontWeights.Bold
+            : Microsoft.UI.Text.FontWeights.Normal;
+        _inlineTextMeasureBlock.FontStyle = isItalic
+            ? Windows.UI.Text.FontStyle.Italic
+            : Windows.UI.Text.FontStyle.Normal;
+
+        double maxTextW = 0.0;
+        string normalized = text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
+        string[] lines = normalized.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            if (lines[i].Length == 0)
+            {
+                continue;
+            }
+
+            _inlineTextMeasureBlock.Text = lines[i];
+            _inlineTextMeasureBlock.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
+            maxTextW = Math.Max(maxTextW, _inlineTextMeasureBlock.DesiredSize.Width);
+        }
+
+        return Math.Clamp(maxTextW + caretPad, minWidthDip, maxWidthDip);
+    }
+
+    private void RepositionInlineTextEditor()
+    {
+        if (!_isInlineTextEditorOpen ||
+            ScrollViewerContentRoot is null ||
+            InlineTextEditorBoxContainer is null ||
+            InlineTextFormatBar is null ||
+            InlineTextEditorTextBox is null ||
+            _inlineTextPageIndex < 0)
+        {
+            return;
+        }
+
+        PdfPageCanvas? canvas = FindRealizedCanvasForPage(_inlineTextPageIndex);
+        if (canvas?.PageInfo is not { } pageInfo)
+        {
+            return;
+        }
+
+        try
+        {
+            PageCoordinateTransform transform = PageCoordinateTransform.FromPage(pageInfo, canvas.RotationAngle);
+            Vector2 pageDipPt = transform.ToPage(_inlineTextAnchorPdfPt);
+            Point boxRootPt = canvas.TransformToVisual(ScrollViewerContentRoot)
+                .TransformPoint(new Point(pageDipPt.X, pageDipPt.Y));
+
+            Vector2 pageRightDipPt = transform.ToPage(new Vector2(
+                (float)(pageInfo.OriginXPt + pageInfo.WidthPt),
+                _inlineTextAnchorPdfPt.Y));
+            Point rightRootPt = canvas.TransformToVisual(ScrollViewerContentRoot)
+                .TransformPoint(new Point(pageRightDipPt.X, pageRightDipPt.Y));
+
+            double dipsPerPt = ComputeDipsPerPoint(canvas);
+            double fontSizeDip = Math.Clamp(_inlineTextStyle.FontSizePt * dipsPerPt, 6.0, 260.0);
+            InlineTextEditorTextBox.FontSize = fontSizeDip;
+            if (Math.Abs(_lastInlineRichEditFontSizeDip - fontSizeDip) > 0.05)
+            {
+                ApplyInlineRichEditCharacterFormat(fontSizeDip);
+            }
+
+            string currentText = GetInlineEditorPlainText();
+            double maxBoxW = Math.Max(120.0, rightRootPt.X - boxRootPt.X - 6.0);
+            double minBoxW = string.IsNullOrEmpty(currentText)
+                ? Math.Min(maxBoxW, Math.Max(80.0, 64.0 * dipsPerPt))
+                : Math.Min(maxBoxW, Math.Max(36.0, fontSizeDip * 0.95));
+            double desiredW = MeasureInlineEditorDesiredWidthDip(
+                currentText,
+                InlineTextEditorTextBox.PlaceholderText ?? string.Empty,
+                fontSizeDip,
+                _inlineTextStyle.IsBold,
+                _inlineTextStyle.IsItalic,
+                minBoxW,
+                maxBoxW);
+
+            InlineTextEditorBoxContainer.Width = desiredW;
+            InlineTextEditorBoxContainer.MaxWidth = maxBoxW;
+            InlineTextEditorTextBox.Width = desiredW;
+
+            double rootW = Math.Max(120.0, ScrollViewerContentRoot.ActualWidth);
+            double rootH = Math.Max(120.0, ScrollViewerContentRoot.ActualHeight);
+            double boxLeft = Math.Round(Math.Clamp(boxRootPt.X, 4.0, Math.Max(4.0, rootW - 48.0)));
+            double boxTop = Math.Round(Math.Clamp(boxRootPt.Y, 4.0, Math.Max(4.0, rootH - 36.0)));
+
+            Canvas.SetLeft(InlineTextEditorBoxContainer, boxLeft);
+            Canvas.SetTop(InlineTextEditorBoxContainer, boxTop);
+
+            double boxH = InlineTextEditorBoxContainer.ActualHeight > 1.0
+                ? InlineTextEditorBoxContainer.ActualHeight
+                : Math.Max(24.0, fontSizeDip * 1.25);
+            double barW = InlineTextFormatBar.ActualWidth > 1.0 ? InlineTextFormatBar.ActualWidth : 260.0;
+            double barH = InlineTextFormatBar.ActualHeight > 1.0 ? InlineTextFormatBar.ActualHeight : 40.0;
+
+            double barY = boxTop - barH - 12.0;
+            if (barY < 8.0)
+            {
+                barY = boxTop + boxH + 12.0;
+            }
+
+            double barX = Math.Round(Math.Clamp(boxLeft, 8.0, Math.Max(8.0, rootW - barW - 8.0)));
+            barY = Math.Round(Math.Clamp(barY, 8.0, Math.Max(8.0, rootH - barH - 8.0)));
+
+            Canvas.SetLeft(InlineTextFormatBar, barX);
+            Canvas.SetTop(InlineTextFormatBar, barY);
+        }
+        catch
+        {
+        }
+    }
+
+    private void OnInlineTextSizeFlyoutOpening(object? sender, object e)
+    {
+        if (InlineTextSizeMenuFlyout is null)
+        {
+            return;
+        }
+
+        InlineTextSizeMenuFlyout.Items.Clear();
+        foreach (float sizePt in s_inlineTextFontSizes)
+        {
+            var item = new ToggleMenuFlyoutItem
+            {
+                Text = ((int)sizePt).ToString(System.Globalization.CultureInfo.InvariantCulture),
+                IsChecked = Math.Abs(_inlineTextStyle.FontSizePt - sizePt) < 0.25f
+            };
+            item.Click += (_, _) =>
+            {
+                _inlineTextStyle = _inlineTextStyle with { FontSizePt = sizePt };
+                ApplyInlineTextStyleToUi();
+                RepositionInlineTextEditor();
+                RefocusInlineTextEditor();
+            };
+            InlineTextSizeMenuFlyout.Items.Add(item);
+        }
+    }
+
+    private void OnInlineTextBoldClick(object sender, RoutedEventArgs e)
+    {
+        _inlineTextStyle = _inlineTextStyle with { IsBold = InlineTextBoldToggle?.IsChecked == true };
+        ApplyInlineTextStyleToUi();
+        RepositionInlineTextEditor();
+        RefocusInlineTextEditor();
+    }
+
+    private void OnInlineTextItalicClick(object sender, RoutedEventArgs e)
+    {
+        _inlineTextStyle = _inlineTextStyle with { IsItalic = InlineTextItalicToggle?.IsChecked == true };
+        ApplyInlineTextStyleToUi();
+        RepositionInlineTextEditor();
+        RefocusInlineTextEditor();
+    }
+
+    private void OnInlineTextUnderlineClick(object sender, RoutedEventArgs e)
+    {
+        _inlineTextStyle = _inlineTextStyle with { IsUnderline = InlineTextUnderlineToggle?.IsChecked == true };
+        ApplyInlineTextStyleToUi();
+        RepositionInlineTextEditor();
+        RefocusInlineTextEditor();
+    }
+
+    private void OnInlineTextColorSwatchClick(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            InlineTextColorFlyout?.Hide();
+        }
+        catch
+        {
+        }
+
+        if (sender is FrameworkElement fe && fe.Tag is string tag)
+        {
+            string[] rgb = tag.Split(',');
+            if (rgb.Length == 3 &&
+                byte.TryParse(rgb[0], out byte r) &&
+                byte.TryParse(rgb[1], out byte g) &&
+                byte.TryParse(rgb[2], out byte b))
+            {
+                _inlineTextStyle = _inlineTextStyle with { Color = new PdfAnnotationColor(r, g, b, 255) };
+                ApplyInlineTextStyleToUi();
+            }
+        }
+
+        RefocusInlineTextEditor();
+    }
+
+    private void OnInlineTextDeleteClick(object sender, RoutedEventArgs e)
+    {
+        if (_inlineTextEditingAnnot is { } existing && ViewModel.CurrentDocument is { } doc)
+        {
+            CloseInlineTextEditorImmediate();
+            _ = doc.DeleteAnnotationAsync(existing.PageIndex, existing.AnnotIndex);
+            ReturnFocusToViewer();
+            return;
+        }
+
+        CancelInlineTextEditor();
+    }
+
+    private void OnInlineTextConfirmClick(object sender, RoutedEventArgs e)
+        => _ = CommitInlineTextEditorAsync();
+
+    private void OnInlineTextEditorBackdropPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        e.Handled = true;
+        _ = CommitInlineTextEditorAsync();
+    }
+
+    private void OnInlineTextEditorTextChanged(object sender, RoutedEventArgs e)
+    {
+        if (_isSyncingInlineRichEdit || !_isInlineTextEditorOpen)
+        {
+            return;
+        }
+
+        RepositionInlineTextEditor();
+    }
+
+    private async void OnInlineTextEditorPaste(object sender, TextControlPasteEventArgs e)
+    {
+        e.Handled = true;
+        if (!_isInlineTextEditorOpen || InlineTextEditorTextBox is null)
+        {
+            return;
+        }
+
+        try
+        {
+            DataPackageView content = Clipboard.GetContent();
+            if (!content.Contains(StandardDataFormats.Text))
+            {
+                return;
+            }
+
+            string plainText = await content.GetTextAsync();
+            if (string.IsNullOrEmpty(plainText) || !_isInlineTextEditorOpen || InlineTextEditorTextBox is null)
+            {
+                return;
+            }
+
+            InlineTextEditorTextBox.Document.Selection.SetText(Microsoft.UI.Text.TextSetOptions.None, plainText);
+            ApplyInlineTextStyleToUi();
+            RepositionInlineTextEditor();
+        }
+        catch
+        {
+        }
+    }
+
+    private void OnInlineTextEditorBoxSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_isInlineTextEditorOpen)
+        {
+            RepositionInlineTextEditor();
+        }
+    }
+
+    private void OnInlineTextFormatBarSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_isInlineTextEditorOpen)
+        {
+            RepositionInlineTextEditor();
+        }
+    }
+
+    private void OnInlineTextEditorPreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (!_isInlineTextEditorOpen)
+        {
+            return;
+        }
+
+        bool isCtrl = Microsoft.UI.Input.InputKeyboardSource
+            .GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+
+        if (e.Key == Windows.System.VirtualKey.Escape)
+        {
+            e.Handled = true;
+            CancelInlineTextEditor();
+            return;
+        }
+
+        if (isCtrl && e.Key == Windows.System.VirtualKey.Enter)
+        {
+            e.Handled = true;
+            _ = CommitInlineTextEditorAsync();
+            return;
+        }
+
+        if (isCtrl && e.Key == Windows.System.VirtualKey.B)
+        {
+            e.Handled = true;
+            _inlineTextStyle = _inlineTextStyle with { IsBold = !_inlineTextStyle.IsBold };
+            ApplyInlineTextStyleToUi();
+            RepositionInlineTextEditor();
+            return;
+        }
+
+        if (isCtrl && e.Key == Windows.System.VirtualKey.I)
+        {
+            e.Handled = true;
+            _inlineTextStyle = _inlineTextStyle with { IsItalic = !_inlineTextStyle.IsItalic };
+            ApplyInlineTextStyleToUi();
+            RepositionInlineTextEditor();
+            return;
+        }
+
+        if (isCtrl && e.Key == Windows.System.VirtualKey.U)
+        {
+            e.Handled = true;
+            _inlineTextStyle = _inlineTextStyle with { IsUnderline = !_inlineTextStyle.IsUnderline };
+            ApplyInlineTextStyleToUi();
+            RepositionInlineTextEditor();
+        }
+    }
+
+    private void RefocusInlineTextEditor()
+    {
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (_isInlineTextEditorOpen && InlineTextEditorTextBox is not null)
+            {
+                _ = InlineTextEditorTextBox.Focus(FocusState.Programmatic);
+            }
+        });
+    }
+
+    private async Task CommitInlineTextEditorAsync()
+    {
+        if (!_isInlineTextEditorOpen || _isCommittingInlineText)
+        {
+            return;
+        }
+
+        _isCommittingInlineText = true;
+        try
+        {
+            DocumentViewModel? doc = ViewModel.CurrentDocument;
+            int pageIndex = _inlineTextPageIndex;
+            Vector2 anchorPt = _inlineTextAnchorPdfPt;
+            PdfAnnotationInfo? editingAnnot = _inlineTextEditingAnnot;
+            PdfFreeTextStyle style = _inlineTextStyle;
+            string rawText = GetInlineEditorPlainText();
+            string text = rawText.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n').TrimEnd();
+
+            CloseInlineTextEditorImmediate();
+            ReturnFocusToViewer();
+
+            if (doc is null || pageIndex < 0 || pageIndex >= doc.Pages.Count)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                if (editingAnnot is not null)
+                {
+                    await doc.DeleteAnnotationAsync(editingAnnot.PageIndex, editingAnnot.AnnotIndex);
+                }
+
+                return;
+            }
+
+            PdfPageInfo pageInfo = doc.Pages[pageIndex];
+            double pageRightPt = pageInfo.OriginXPt + pageInfo.WidthPt;
+            double maxWidthPt = Math.Clamp(pageRightPt - anchorPt.X - 6.0, 110.0, Math.Max(110.0, pageInfo.WidthPt));
+            style = style with { FontFamily = "Arial", MaxWidthPt = maxWidthPt };
+
+            ViewModel.DefaultTextStyle = style;
+
+            if (editingAnnot is not null)
+            {
+                _ = await doc.UpdateAnnotationAsync(
+                    editingAnnot.PageIndex,
+                    editingAnnot.AnnotIndex,
+                    text,
+                    style.Color,
+                    newTextStyle: style);
+            }
+            else
+            {
+                _ = await doc.AddFreeTextAsync(
+                    pageIndex,
+                    anchorPt.X,
+                    anchorPt.Y,
+                    style.Color,
+                    text,
+                    maxWidthPt: style.MaxWidthPt,
+                    style: style);
+            }
+        }
+        finally
+        {
+            _isCommittingInlineText = false;
         }
     }
 
@@ -8939,6 +9861,11 @@ public sealed partial class DocumentView : Page
         if (_isTouchSelectionHandlesActive)
         {
             UpdateTouchSelectionHandlesLayout();
+        }
+
+        if (_isInlineTextEditorOpen)
+        {
+            RepositionInlineTextEditor();
         }
     }
 

@@ -319,7 +319,7 @@
                             </MenuFlyoutItem>
                             <MenuFlyoutItem
                                 x:Uid="InsertMenu_Text"
-                                IsEnabled="False">
+                                Command="{x:Bind ViewModel.StartInsertTextCommand}">
                                 <MenuFlyoutItem.Icon>
                                     <FontIcon Glyph="&#xE8D2;" />
                                 </MenuFlyoutItem.Icon>

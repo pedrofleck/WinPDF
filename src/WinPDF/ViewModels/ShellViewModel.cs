@@ -163,6 +163,11 @@ public sealed partial class ShellViewModel : ObservableObject
     public PdfAnnotationColor DefaultAnnotationColor { get; set; } = PdfAnnotationColor.Yellow;
 
     /// <summary>
+    /// Gets or sets the default text formatting style applied when creating new inline text boxes.
+    /// </summary>
+    public PdfFreeTextStyle DefaultTextStyle { get; set; } = PdfFreeTextStyle.Default;
+
+    /// <summary>
     /// Gets a value indicating whether at least one annotation edit, move, creation, or deletion in the active document can be undone.
     /// </summary>
     public bool CanUndoAnnotation => CurrentDocument?.CanUndoAnnotation == true;
@@ -1533,7 +1538,7 @@ public sealed partial class ShellViewModel : ObservableObject
         if (IsAnnotationToolbarOpen)
         {
             PendingImageToInsert = null;
-            if (ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertImage)
+            if (ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage)
             {
                 ActiveTool = AnnotationTool.Select;
             }
@@ -1564,6 +1569,24 @@ public sealed partial class ShellViewModel : ObservableObject
         PendingImageToInsert = null;
         ActiveTool = AnnotationTool.TextNote;
         NotificationRequested?.Invoke(string.Empty, ResourceStrings.Get(ResourceKeys.InsertCommentHint));
+    }
+
+    /// <summary>
+    /// Activates the Add Text placement tool from the top-bar Insert menu.
+    /// </summary>
+    [RelayCommand]
+    public void StartInsertText()
+    {
+        if (CurrentDocument is null)
+        {
+            return;
+        }
+
+        IsAnnotationToolbarOpen = false;
+        IsAnnotationNoticeOpen = false;
+        PendingImageToInsert = null;
+        ActiveTool = AnnotationTool.InsertText;
+        NotificationRequested?.Invoke(string.Empty, ResourceStrings.Get(ResourceKeys.InsertTextHint));
     }
 
     /// <summary>
@@ -1645,7 +1668,7 @@ public sealed partial class ShellViewModel : ObservableObject
     public void CancelActiveInsertTool()
     {
         PendingImageToInsert = null;
-        if (ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertImage)
+        if (ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage)
         {
             ActiveTool = AnnotationTool.Select;
         }

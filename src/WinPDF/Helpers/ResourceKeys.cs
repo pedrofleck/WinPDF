@@ -438,4 +438,31 @@ public static class ResourceKeys
 
     /// <summary>Toast message shown when the selected image exceeds the 20 MB limit.</summary>
     public const string InsertImageTooLarge = "Insert_ImageTooLarge";
+
+    /// <summary>Toast hint shown after choosing Add Text from the Insert menu.</summary>
+    public const string InsertTextHint = "Insert_TextHint";
+
+    /// <summary>Compact annotation quick-bar tooltip: edit text box.</summary>
+    public const string AnnotEditTextToolTip = "Annot_EditText_ToolTip";
+
+    /// <summary>Inline text formatting bar tooltip: font size.</summary>
+    public const string TextBarSizeToolTip = "TextBar_Size_ToolTip";
+
+    /// <summary>Inline text formatting bar tooltip: bold.</summary>
+    public const string TextBarBoldToolTip = "TextBar_Bold_ToolTip";
+
+    /// <summary>Inline text formatting bar tooltip: italic.</summary>
+    public const string TextBarItalicToolTip = "TextBar_Italic_ToolTip";
+
+    /// <summary>Inline text formatting bar tooltip: underline.</summary>
+    public const string TextBarUnderlineToolTip = "TextBar_Underline_ToolTip";
+
+    /// <summary>Inline text formatting bar tooltip: text color.</summary>
+    public const string TextBarColorToolTip = "TextBar_Color_ToolTip";
+
+    /// <summary>Inline text formatting bar tooltip: discard or delete text box.</summary>
+    public const string TextBarDeleteToolTip = "TextBar_Delete_ToolTip";
+
+    /// <summary>Inline text formatting bar tooltip: confirm text box.</summary>
+    public const string TextBarConfirmToolTip = "TextBar_Confirm_ToolTip";
 }

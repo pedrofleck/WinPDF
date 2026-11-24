@@ -93,6 +93,9 @@ internal static class PdfiumConstants
 
     /// <summary><c>FPDF_OBJECT_REFERENCE</c>.</summary>
     internal const int ObjectReference = 9;
+
+    /// <summary><c>FPDF_FILLMODE_NONE</c>.</summary>
+    internal const int FillModeNone = 0;
 }
 
 /// <summary>Managed mirror of <c>FS_POINTF</c> (coordinates in points).</summary>

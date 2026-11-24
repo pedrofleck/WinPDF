@@ -880,27 +880,40 @@
         </StackPanel>
 
         <!-- Standard non-intrusive notification at the top of the screen (e.g. Last document not found - 5s) -->
-        <InfoBar
-            x:Name="TopNotificationInfoBar"
-            Severity="Informational"
-            IsOpen="False"
-            IsIconVisible="False"
-            IsClosable="True"
+        <Border
+            x:Name="TopNotificationContainer"
             HorizontalAlignment="Center"
             VerticalAlignment="Top"
             MaxWidth="600"
             Margin="0,24,0,0"
             Canvas.ZIndex="110"
-            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+            Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+            BackgroundSizing="InnerBorderEdge"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="1"
             CornerRadius="8"
-            CloseButtonClick="OnTopNotificationInfoBarCloseButtonClick">
-            <InfoBar.Resources>
-                <StaticResource x:Key="InfoBarInformationalSeverityBackgroundBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
-                <StaticResource x:Key="InfoBarBackgroundFillColorDefaultBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
-            </InfoBar.Resources>
-        </InfoBar>
+            Translation="0,0,32"
+            Visibility="Collapsed">
+            <Border.Shadow>
+                <ThemeShadow />
+            </Border.Shadow>
+            <InfoBar
+                x:Name="TopNotificationInfoBar"
+                Severity="Informational"
+                IsOpen="False"
+                IsIconVisible="False"
+                IsClosable="True"
+                Background="Transparent"
+                BorderThickness="0"
+                CloseButtonClick="OnTopNotificationInfoBarCloseButtonClick">
+                <InfoBar.Resources>
+                    <SolidColorBrush x:Key="InfoBarInformationalSeverityBackgroundBrush" Color="Transparent" />
+                    <SolidColorBrush x:Key="InfoBarBackgroundFillColorDefaultBrush" Color="Transparent" />
+                    <SolidColorBrush x:Key="InfoBarBorderBrush" Color="Transparent" />
+                    <Thickness x:Key="InfoBarBorderThickness">0</Thickness>
+                </InfoBar.Resources>
+            </InfoBar>
+        </Border>
 
         <!-- Document display area -->
         <Grid
@@ -1234,6 +1247,288 @@
                     </Grid>
                 </Canvas>
 
+                <!-- Inline direct-on-page text editor + coupled Acrylic formatting mini-bar -->
+                <Grid
+                    x:Name="InlineTextEditorOverlay"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    Canvas.ZIndex="98"
+                    Visibility="Collapsed">
+                    <Border
+                        x:Name="InlineTextEditorBackdrop"
+                        Background="Transparent"
+                        PointerPressed="OnInlineTextEditorBackdropPointerPressed" />
+                    <Canvas x:Name="InlineTextEditorCanvas">
+                        <Grid x:Name="InlineTextEditorBoxContainer">
+                            <Border
+                                x:Name="InlineTextEditorMaskBorder"
+                                Margin="-2,-1,-2,-1"
+                                Background="Transparent"
+                                CornerRadius="3"
+                                IsHitTestVisible="False" />
+                            <Rectangle
+                                Margin="-2,-1,-2,-1"
+                                Stroke="{ThemeResource AccentFillColorDefaultBrush}"
+                                StrokeThickness="1.25"
+                                StrokeDashArray="4,3"
+                                RadiusX="3"
+                                RadiusY="3"
+                                IsHitTestVisible="False" />
+                            <RichEditBox
+                                x:Name="InlineTextEditorTextBox"
+                                TextWrapping="Wrap"
+                                FontFamily="Arial"
+                                FontStretch="Normal"
+                                IsTextScaleFactorEnabled="False"
+                                IsSpellCheckEnabled="False"
+                                IsColorFontEnabled="False"
+                                ClipboardCopyFormat="PlainText"
+                                MinWidth="24"
+                                MinHeight="18"
+                                Padding="0"
+                                RequestedTheme="Light"
+                                Background="#FFFFFFFF"
+                                BorderThickness="0"
+                                PreviewKeyDown="OnInlineTextEditorPreviewKeyDown"
+                                TextChanged="OnInlineTextEditorTextChanged"
+                                SizeChanged="OnInlineTextEditorBoxSizeChanged"
+                                Paste="OnInlineTextEditorPaste">
+                                <RichEditBox.Resources>
+                                    <SolidColorBrush x:Key="TextControlBackground" Color="#FFFFFFFF" />
+                                    <SolidColorBrush x:Key="TextControlBackgroundPointerOver" Color="#FFFFFFFF" />
+                                    <SolidColorBrush x:Key="TextControlBackgroundFocused" Color="#FFFFFFFF" />
+                                    <SolidColorBrush x:Key="TextControlBorderBrush" Color="Transparent" />
+                                    <SolidColorBrush x:Key="TextControlBorderBrushPointerOver" Color="Transparent" />
+                                    <SolidColorBrush x:Key="TextControlBorderBrushFocused" Color="Transparent" />
+                                    <SolidColorBrush x:Key="TextControlForeground" Color="#FF141414" />
+                                    <SolidColorBrush x:Key="TextControlForegroundPointerOver" Color="#FF141414" />
+                                    <SolidColorBrush x:Key="TextControlForegroundFocused" Color="#FF141414" />
+                                    <SolidColorBrush x:Key="TextControlPlaceholderForeground" Color="#80666666" />
+                                    <SolidColorBrush x:Key="TextControlPlaceholderForegroundPointerOver" Color="#80666666" />
+                                    <SolidColorBrush x:Key="TextControlPlaceholderForegroundFocused" Color="#80666666" />
+                                    <Thickness x:Key="TextControlBorderThemeThickness">0</Thickness>
+                                    <Thickness x:Key="TextControlBorderThemeThicknessFocused">0</Thickness>
+                                    <Thickness x:Key="TextControlThemePadding">0</Thickness>
+                                    <x:Double x:Key="TextControlThemeMinHeight">18</x:Double>
+                                    <x:Double x:Key="TextControlThemeMinWidth">24</x:Double>
+                                </RichEditBox.Resources>
+                            </RichEditBox>
+                        </Grid>
+
+                        <Border
+                            x:Name="InlineTextFormatBar"
+                            Padding="6,4"
+                            Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+                            BackgroundSizing="InnerBorderEdge"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Translation="0,0,32"
+                            SizeChanged="OnInlineTextFormatBarSizeChanged">
+                            <Border.Shadow>
+                                <ThemeShadow />
+                            </Border.Shadow>
+                            <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                <DropDownButton
+                                    x:Name="InlineTextSizeButton"
+                                    Height="30"
+                                    MinWidth="52"
+                                    Padding="8,0,6,0"
+                                    IsTabStop="False">
+                                    <DropDownButton.Content>
+                                        <TextBlock
+                                            x:Name="InlineTextSizeLabel"
+                                            FontSize="12"
+                                            VerticalAlignment="Center" />
+                                    </DropDownButton.Content>
+                                    <DropDownButton.Flyout>
+                                        <MenuFlyout
+                                            x:Name="InlineTextSizeMenuFlyout"
+                                            Placement="Bottom"
+                                            Opening="OnInlineTextSizeFlyoutOpening" />
+                                    </DropDownButton.Flyout>
+                                </DropDownButton>
+
+                                <Border
+                                    Width="1"
+                                    Height="18"
+                                    Margin="2,0"
+                                    VerticalAlignment="Center"
+                                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                                <ToggleButton
+                                    x:Name="InlineTextBoldToggle"
+                                    Width="30"
+                                    Height="30"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    IsTabStop="False"
+                                    Click="OnInlineTextBoldClick">
+                                    <FontIcon FontSize="14" Glyph="&#xE8DD;" />
+                                </ToggleButton>
+
+                                <ToggleButton
+                                    x:Name="InlineTextItalicToggle"
+                                    Width="30"
+                                    Height="30"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    IsTabStop="False"
+                                    Click="OnInlineTextItalicClick">
+                                    <FontIcon FontSize="14" Glyph="&#xE8DB;" />
+                                </ToggleButton>
+
+                                <ToggleButton
+                                    x:Name="InlineTextUnderlineToggle"
+                                    Width="30"
+                                    Height="30"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    IsTabStop="False"
+                                    Click="OnInlineTextUnderlineClick">
+                                    <FontIcon FontSize="14" Glyph="&#xE8DC;" />
+                                </ToggleButton>
+
+                                <Border
+                                    Width="1"
+                                    Height="18"
+                                    Margin="2,0"
+                                    VerticalAlignment="Center"
+                                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                                <Button
+                                    x:Name="InlineTextColorButton"
+                                    Width="30"
+                                    Height="30"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    IsTabStop="False"
+                                    Style="{StaticResource SubtleButtonStyle}">
+                                    <Ellipse
+                                        x:Name="InlineTextColorDot"
+                                        Width="14"
+                                        Height="14"
+                                        Stroke="{ThemeResource CardStrokeColorDefaultBrush}"
+                                        StrokeThickness="1"
+                                        Fill="#FF141414" />
+                                    <Button.Flyout>
+                                        <Flyout
+                                            x:Name="InlineTextColorFlyout"
+                                            Placement="Bottom"
+                                            FlyoutPresenterStyle="{StaticResource AcrylicFlyoutPresenterStyle}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6" Padding="2">
+                                                <Button
+                                                    Width="22"
+                                                    Height="22"
+                                                    Padding="0"
+                                                    CornerRadius="11"
+                                                    Background="#FF141414"
+                                                    BorderThickness="1"
+                                                    Tag="20,20,20"
+                                                    Click="OnInlineTextColorSwatchClick" />
+                                                <Button
+                                                    Width="22"
+                                                    Height="22"
+                                                    Padding="0"
+                                                    CornerRadius="11"
+                                                    Background="#FF595959"
+                                                    BorderThickness="1"
+                                                    Tag="89,89,89"
+                                                    Click="OnInlineTextColorSwatchClick" />
+                                                <Button
+                                                    Width="22"
+                                                    Height="22"
+                                                    Padding="0"
+                                                    CornerRadius="11"
+                                                    Background="#FFD93025"
+                                                    BorderThickness="1"
+                                                    Tag="217,48,37"
+                                                    Click="OnInlineTextColorSwatchClick" />
+                                                <Button
+                                                    Width="22"
+                                                    Height="22"
+                                                    Padding="0"
+                                                    CornerRadius="11"
+                                                    Background="#FF1A73E8"
+                                                    BorderThickness="1"
+                                                    Tag="26,115,232"
+                                                    Click="OnInlineTextColorSwatchClick" />
+                                                <Button
+                                                    Width="22"
+                                                    Height="22"
+                                                    Padding="0"
+                                                    CornerRadius="11"
+                                                    Background="#FF188038"
+                                                    BorderThickness="1"
+                                                    Tag="24,128,56"
+                                                    Click="OnInlineTextColorSwatchClick" />
+                                                <Button
+                                                    Width="22"
+                                                    Height="22"
+                                                    Padding="0"
+                                                    CornerRadius="11"
+                                                    Background="#FFE37400"
+                                                    BorderThickness="1"
+                                                    Tag="227,116,0"
+                                                    Click="OnInlineTextColorSwatchClick" />
+                                                <Button
+                                                    Width="22"
+                                                    Height="22"
+                                                    Padding="0"
+                                                    CornerRadius="11"
+                                                    Background="#FF8430CE"
+                                                    BorderThickness="1"
+                                                    Tag="132,48,206"
+                                                    Click="OnInlineTextColorSwatchClick" />
+                                                <Button
+                                                    Width="22"
+                                                    Height="22"
+                                                    Padding="0"
+                                                    CornerRadius="11"
+                                                    Background="#FFFFFFFF"
+                                                    BorderThickness="1"
+                                                    Tag="255,255,255"
+                                                    Click="OnInlineTextColorSwatchClick" />
+                                            </StackPanel>
+                                        </Flyout>
+                                    </Button.Flyout>
+                                </Button>
+
+                                <Border
+                                    Width="1"
+                                    Height="18"
+                                    Margin="2,0"
+                                    VerticalAlignment="Center"
+                                    Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                                <Button
+                                    x:Name="InlineTextDeleteButton"
+                                    Width="30"
+                                    Height="30"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    IsTabStop="False"
+                                    Style="{StaticResource SubtleButtonStyle}"
+                                    Click="OnInlineTextDeleteClick">
+                                    <FontIcon FontSize="14" Glyph="&#xE74D;" />
+                                </Button>
+
+                                <Button
+                                    x:Name="InlineTextConfirmButton"
+                                    Width="30"
+                                    Height="30"
+                                    Padding="0"
+                                    CornerRadius="4"
+                                    IsTabStop="False"
+                                    Style="{StaticResource AccentButtonStyle}"
+                                    Click="OnInlineTextConfirmClick">
+                                    <FontIcon FontSize="13" Glyph="&#xE73E;" />
+                                </Button>
+                            </StackPanel>
+                        </Border>
+                    </Canvas>
+                </Grid>
+
                 <!-- Stage 3: Touch-Exclusive Assisted Vertical Scroll Scrubber ("Touch Scroll Pill / Scrubber") -->
                 <Grid
                     x:Name="TouchScrollScrubberContainer"
@@ -1400,29 +1695,42 @@
                 </Grid>
 
                 <!-- Full screen / presentation banner (WinUI Gallery pattern) -->
-                <InfoBar
-                    x:Name="FullScreenInfoBar"
-                    x:Uid="FullScreenInfoBar"
-                    Severity="Informational"
-                    IsOpen="False"
-                    IsIconVisible="False"
-                    IsClosable="True"
-                    Title="Full screen"
-                    Message="Press Esc to exit full screen"
+                <Border
+                    x:Name="FullScreenInfoBarContainer"
                     HorizontalAlignment="Center"
                     VerticalAlignment="Top"
                     Margin="0,24,0,0"
                     Canvas.ZIndex="100"
-                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                    Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+                    BackgroundSizing="InnerBorderEdge"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1"
                     CornerRadius="8"
-                    CloseButtonClick="OnFullScreenInfoBarCloseButtonClick">
-                    <InfoBar.Resources>
-                        <StaticResource x:Key="InfoBarInformationalSeverityBackgroundBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
-                        <StaticResource x:Key="InfoBarBackgroundFillColorDefaultBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
-                    </InfoBar.Resources>
-                </InfoBar>
+                    Translation="0,0,32"
+                    Visibility="Collapsed">
+                    <Border.Shadow>
+                        <ThemeShadow />
+                    </Border.Shadow>
+                    <InfoBar
+                        x:Name="FullScreenInfoBar"
+                        x:Uid="FullScreenInfoBar"
+                        Severity="Informational"
+                        IsOpen="False"
+                        IsIconVisible="False"
+                        IsClosable="True"
+                        Title="Full screen"
+                        Message="Press Esc to exit full screen"
+                        Background="Transparent"
+                        BorderThickness="0"
+                        CloseButtonClick="OnFullScreenInfoBarCloseButtonClick">
+                        <InfoBar.Resources>
+                            <SolidColorBrush x:Key="InfoBarInformationalSeverityBackgroundBrush" Color="Transparent" />
+                            <SolidColorBrush x:Key="InfoBarBackgroundFillColorDefaultBrush" Color="Transparent" />
+                            <SolidColorBrush x:Key="InfoBarBorderBrush" Color="Transparent" />
+                            <Thickness x:Key="InfoBarBorderThickness">0</Thickness>
+                        </InfoBar.Resources>
+                    </InfoBar>
+                </Border>
 
                 <!-- 80 DIPs top clickable zone to exit presentation with subtle hover button -->
                 <Grid
@@ -1467,27 +1775,40 @@
                     </StackPanel.RenderTransform>
 
                     <!-- Native Informational InfoBar for unimplemented annotation feature (closes only via X button) -->
-                    <InfoBar
-                        x:Name="AnnotationNotImplementedInfoBar"
-                        x:Uid="AnnotationNotImplementedInfoBar"
-                        Severity="Informational"
-                        IsOpen="{x:Bind ViewModel.IsAnnotationNoticeOpen, Mode=TwoWay}"
-                        IsIconVisible="True"
-                        IsClosable="True"
-                        Title="Annotations"
-                        Message="This feature has not been implemented yet."
+                    <Border
+                        x:Name="AnnotationNotImplementedContainer"
                         HorizontalAlignment="Center"
                         MaxWidth="600"
-                        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                        Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+                        BackgroundSizing="InnerBorderEdge"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1"
                         CornerRadius="8"
-                        CloseButtonClick="OnAnnotationNoticeCloseButtonClick">
-                        <InfoBar.Resources>
-                            <StaticResource x:Key="InfoBarInformationalSeverityBackgroundBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
-                            <StaticResource x:Key="InfoBarBackgroundFillColorDefaultBrush" ResourceKey="SolidBackgroundFillColorBaseBrush" />
-                        </InfoBar.Resources>
-                    </InfoBar>
+                        Translation="0,0,32"
+                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsAnnotationNoticeOpen), Mode=OneWay}">
+                        <Border.Shadow>
+                            <ThemeShadow />
+                        </Border.Shadow>
+                        <InfoBar
+                            x:Name="AnnotationNotImplementedInfoBar"
+                            x:Uid="AnnotationNotImplementedInfoBar"
+                            Severity="Informational"
+                            IsOpen="{x:Bind ViewModel.IsAnnotationNoticeOpen, Mode=TwoWay}"
+                            IsIconVisible="True"
+                            IsClosable="True"
+                            Title="Annotations"
+                            Message="This feature has not been implemented yet."
+                            Background="Transparent"
+                            BorderThickness="0"
+                            CloseButtonClick="OnAnnotationNoticeCloseButtonClick">
+                            <InfoBar.Resources>
+                                <SolidColorBrush x:Key="InfoBarInformationalSeverityBackgroundBrush" Color="Transparent" />
+                                <SolidColorBrush x:Key="InfoBarBackgroundFillColorDefaultBrush" Color="Transparent" />
+                                <SolidColorBrush x:Key="InfoBarBorderBrush" Color="Transparent" />
+                                <Thickness x:Key="InfoBarBorderThickness">0</Thickness>
+                            </InfoBar.Resources>
+                        </InfoBar>
+                    </Border>
 
                     <!-- Floating search bar in Acrylic (Windows 11 Notepad style) -->
                     <Border
