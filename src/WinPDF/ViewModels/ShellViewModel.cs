@@ -1706,12 +1706,12 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Cancels any active Insert-menu or Shape placement mode and restores <see cref="AnnotationTool.Select"/>.
+    /// Cancels any active drawing, markup, shape, or Insert-menu placement mode and restores <see cref="AnnotationTool.Select"/>.
     /// </summary>
     public void CancelActiveInsertTool()
     {
         PendingImageToInsert = null;
-        if (ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage or AnnotationTool.Shape)
+        if (ActiveTool != AnnotationTool.Select)
         {
             ActiveTool = AnnotationTool.Select;
         }

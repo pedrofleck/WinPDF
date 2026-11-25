@@ -2336,12 +2336,6 @@
                             <AppBarSeparator Margin="4,4,4,4" />
 
                             <ToggleButton
-                                x:Uid="ToolSelectButton"
-                                Click="OnToolSelectClicked"
-                                IsChecked="{x:Bind converters:UiHelpers.IsSelectTool(ViewModel.ActiveTool), Mode=OneWay}">
-                                <FontIcon FontSize="14" Glyph="&#xEF20;" />
-                            </ToggleButton>
-                            <ToggleButton
                                 x:Uid="ToolPenButton"
                                 Click="OnToolPenClicked"
                                 IsChecked="{x:Bind converters:UiHelpers.IsPenTool(ViewModel.ActiveTool), Mode=OneWay}">

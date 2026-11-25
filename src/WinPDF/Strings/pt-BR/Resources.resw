@@ -93,8 +93,6 @@
   <data name="Zoom_PercentFormat" xml:space="preserve"><value>{0}%</value></data>
 
   <!-- ===================== Annotation tools ===================== -->
-  <data name="ToolSelectButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Selecionar</value></data>
-  <data name="ToolSelectButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Selecionar e mover (V)</value></data>
   <data name="ToolPenButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Caneta</value></data>
   <data name="ToolPenButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Desenho livre (P)</value></data>
   <data name="ToolHighlighterButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Marca-texto</value></data>

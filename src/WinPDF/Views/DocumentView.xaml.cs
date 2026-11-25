@@ -3019,6 +3019,21 @@ public sealed partial class DocumentView : Page
             return;
         }
 
+        if (ViewModel.ActiveTool == AnnotationTool.Shape && CancelShapeDrawingOnAllCanvases())
+        {
+            args.Handled = true;
+            return;
+        }
+
+        if (ViewModel.ActiveTool != AnnotationTool.Select)
+        {
+            args.Handled = true;
+            DismissTopNotification();
+            ViewModel.CancelActiveInsertTool();
+            ReturnFocusToViewer();
+            return;
+        }
+
         if (ViewModel.IsSearchOpen)
         {
             args.Handled = true;
@@ -3180,11 +3195,12 @@ public sealed partial class DocumentView : Page
                 return;
             }
 
-            if (ViewModel.ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage or AnnotationTool.Shape)
+            if (ViewModel.ActiveTool != AnnotationTool.Select)
             {
                 e.Handled = true;
                 DismissTopNotification();
                 ViewModel.CancelActiveInsertTool();
+                ReturnFocusToViewer();
                 return;
             }
 
@@ -4680,14 +4696,14 @@ public sealed partial class DocumentView : Page
         ExecuteFitVertical();
     }
 
-    private void OnToolSelectClicked(object sender, RoutedEventArgs e)
+    private void ToggleOrSelectTool(AnnotationTool tool)
     {
-        ViewModel.SetTool(AnnotationTool.Select);
+        ViewModel.SetTool(ViewModel.ActiveTool == tool ? AnnotationTool.Select : tool);
     }
 
     private void OnToolPenClicked(object sender, RoutedEventArgs e)
     {
-        ViewModel.SetTool(AnnotationTool.Pen);
+        ToggleOrSelectTool(AnnotationTool.Pen);
     }
 
     private void OnToolHighlighterClicked(object sender, RoutedEventArgs e)
@@ -4700,7 +4716,7 @@ public sealed partial class DocumentView : Page
             return;
         }
 
-        ViewModel.SetTool(AnnotationTool.Highlighter);
+        ToggleOrSelectTool(AnnotationTool.Highlighter);
     }
 
     private void OnToolHighlighterButtonSizeChanged(object sender, SizeChangedEventArgs e)
@@ -4723,14 +4739,7 @@ public sealed partial class DocumentView : Page
 
     private void OnToolShapeClicked(object sender, RoutedEventArgs e)
     {
-        if (ViewModel.ActiveTool == AnnotationTool.Shape)
-        {
-            ViewModel.SetTool(AnnotationTool.Select);
-        }
-        else
-        {
-            ViewModel.SetTool(AnnotationTool.Shape);
-        }
+        ToggleOrSelectTool(AnnotationTool.Shape);
     }
 
     private void OnShapeKindMenuItemClick(object sender, RoutedEventArgs e)
@@ -4825,7 +4834,7 @@ public sealed partial class DocumentView : Page
 
     private void OnToolEraserClicked(object sender, RoutedEventArgs e)
     {
-        ViewModel.SetTool(AnnotationTool.Eraser);
+        ToggleOrSelectTool(AnnotationTool.Eraser);
     }
 
     private void OnDocumentDragOver(object sender, DragEventArgs e)

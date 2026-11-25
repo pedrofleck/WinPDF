@@ -303,7 +303,11 @@ public sealed class ThumbnailPresenter : Grid
         WriteableBitmap? bmp = PopulateWriteableBitmap(entry);
         if (bmp is not null)
         {
-            _image.Source = bmp;
+            if (!ReferenceEquals(_image.Source, bmp))
+            {
+                _image.Source = bmp;
+            }
+
             _image.Visibility = Visibility.Visible;
         }
     }

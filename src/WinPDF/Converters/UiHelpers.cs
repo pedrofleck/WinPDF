@@ -77,9 +77,6 @@ public static class UiHelpers
     public static Visibility AttachmentsVisibility(SidebarTab tab) =>
         tab == SidebarTab.Attachments ? Visibility.Visible : Visibility.Collapsed;
 
-    /// <summary>Checks if the active tool matches Select.</summary>
-    public static bool IsSelectTool(AnnotationTool tool) => tool == AnnotationTool.Select;
-
     /// <summary>Checks if the active tool matches Pen.</summary>
     public static bool IsPenTool(AnnotationTool tool) => tool == AnnotationTool.Pen;
 

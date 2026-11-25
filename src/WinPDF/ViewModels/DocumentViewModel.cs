@@ -2332,10 +2332,14 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             item.LoadCancellation = null;
         }
 
-        item.ClearImage();
         if (_thumbnailsActive && item.IsRealized)
         {
-            RequestThumbnail(item, _thumbnailScale);
+            // Keep the previous bitmap visible while re-rendering in the background so editing annotations never flickers.
+            RequestThumbnail(item, _thumbnailScale, forceRefresh: true);
+        }
+        else
+        {
+            item.ClearImage();
         }
     }
 
@@ -3140,14 +3144,14 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         item.ClearImage();
     }
 
-    private void RequestThumbnail(ThumbnailItemViewModel item, double scale)
+    private void RequestThumbnail(ThumbnailItemViewModel item, double scale, bool forceRefresh = false)
     {
-        if (item.Image is { IsDisposed: true })
+        if (!forceRefresh && item.Image is { IsDisposed: true })
         {
             item.ClearImage();
         }
 
-        if (item.Image is { IsDisposed: false } || item.LoadCancellation is not null || _isDisposed)
+        if ((!forceRefresh && item.Image is { IsDisposed: false }) || item.LoadCancellation is not null || _isDisposed)
         {
             return;
         }
@@ -3165,7 +3169,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
             Rotation: effectiveRot,
             ScalePercent: (int)Math.Round(scale * 100));
 
-        if (_tileCache.TryGet(in key, out TileCacheEntry? cachedEntry))
+        if (!forceRefresh && _tileCache.TryGet(in key, out TileCacheEntry? cachedEntry))
         {
             if (cachedEntry is PdfBitmapEntry { IsDisposed: false } bitmapEntry)
             {
@@ -3191,20 +3195,24 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         int heightPx = Math.Max(1, (int)Math.Round(renderDipH * scale));
         PdfRenderRequest request = PdfRenderRequest.ForThumbnail(DocumentId, item.PageIndex, widthPx, heightPx, effectiveRot);
 
-        _ = LoadThumbnailAsync(item, key, request, cts);
+        _ = LoadThumbnailAsync(item, key, request, cts, delayMs: forceRefresh ? 0 : 25);
     }
 
     private async Task LoadThumbnailAsync(
         ThumbnailItemViewModel item,
         TileKey key,
         PdfRenderRequest request,
-        CancellationTokenSource cts)
+        CancellationTokenSource cts,
+        int delayMs)
     {
         try
         {
-            // Yield briefly so thumbnails that fly past the sidebar viewport during high-speed scrubbing
-            // are cancelled on recycle before ever enqueuing native PDFium rasterization jobs.
-            await Task.Delay(25, cts.Token);
+            if (delayMs > 0)
+            {
+                // Yield briefly so thumbnails that fly past the sidebar viewport during high-speed scrubbing
+                // are cancelled on recycle before ever enqueuing native PDFium rasterization jobs.
+                await Task.Delay(delayMs, cts.Token);
+            }
 
             if (_isDisposed || cts.IsCancellationRequested || item.LoadCancellation != cts || !item.IsRealized || !_thumbnailsActive)
             {
