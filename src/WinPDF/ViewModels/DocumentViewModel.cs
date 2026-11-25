@@ -1022,9 +1022,24 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     };
 
     /// <summary>
+    /// Gets a value indicating whether the document currently has at least one non-signature annotation.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool HasAnyAnnotations { get; private set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the annotations sidebar shows only text boxes, sticky comments,
+    /// and annotations that contain a text comment.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool FilterCommentsOnly { get; set; }
+
+    partial void OnFilterCommentsOnlyChanged(bool oldValue, bool newValue) => RebuildAnnotationsSummary();
+
+    /// <summary>
     /// Gets a value indicating whether the document currently has at least one annotation or digital signature.
     /// </summary>
-    public bool HasAnnotationsOrSignatures => AnnotationsSummary.Count > 0 || Signatures.Count > 0;
+    public bool HasAnnotationsOrSignatures => HasAnyAnnotations || Signatures.Count > 0;
 
     /// <summary>
     /// Gets or sets the currently focused annotation (drawn with a subtle accent focus outline on its page).
@@ -1513,6 +1528,61 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
         HasUnsavedChanges = true;
         SelectedAnnotation = created;
+        return created;
+    }
+
+    /// <summary>
+    /// Creates a geometric shape annotation (Line, Arrow, Rectangle, or Ellipse) on <paramref name="pageIndex"/>.
+    /// </summary>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="shapeKind">Shape variant to create.</param>
+    /// <param name="startPdf">Start point in PDF user space (points).</param>
+    /// <param name="endPdf">End point in PDF user space (points).</param>
+    /// <param name="color">Stroke RGBA color.</param>
+    /// <param name="strokeWidthPt">Stroke thickness in PDF points.</param>
+    /// <param name="author">Optional author display name.</param>
+    /// <param name="recordUndo">Whether to push an entry onto the annotation undo stack.</param>
+    /// <returns>The newly created <see cref="PdfAnnotationInfo"/>, or <see langword="null"/> if disposed.</returns>
+    public async Task<PdfAnnotationInfo?> AddShapeAsync(
+        int pageIndex,
+        PdfAnnotationShapeKind shapeKind,
+        System.Numerics.Vector2 startPdf,
+        System.Numerics.Vector2 endPdf,
+        PdfAnnotationColor color,
+        double strokeWidthPt,
+        string author = "",
+        bool recordUndo = true)
+    {
+        if (_isDisposed)
+        {
+            return null;
+        }
+
+        PdfCreateShapeRequest req = new(
+            PageIndex: pageIndex,
+            ShapeKind: shapeKind,
+            StartPdfX: startPdf.X,
+            StartPdfY: startPdf.Y,
+            EndPdfX: endPdf.X,
+            EndPdfY: endPdf.Y,
+            Color: color,
+            StrokeWidthPt: (float)Math.Clamp(strokeWidthPt, 0.75, 24.0),
+            Author: string.IsNullOrWhiteSpace(author) ? Environment.UserName : author);
+
+        PdfPageAnnotationMutationResult result = await _pdfService.AddShapeAnnotationAsync(DocumentId, req, _lifetime.Token);
+        if (_isDisposed)
+        {
+            return null;
+        }
+
+        ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
+        PdfAnnotationInfo? created = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
+        if (recordUndo && created is not null)
+        {
+            PushUndoEntry(new UndoCreatedAnnotationsEntry([new AnnotationLocation(created.PageIndex, created.AnnotIndex)]));
+        }
+
+        HasUnsavedChanges = true;
         return created;
     }
 
@@ -2104,14 +2174,53 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         PageContentInvalidated?.Invoke(pageIndex);
     }
 
+    private bool ShouldShowInAnnotationsSidebar(PdfAnnotationInfo annot)
+    {
+        if (annot.IsSignatureWidget)
+        {
+            return false;
+        }
+
+        if (!FilterCommentsOnly)
+        {
+            return true;
+        }
+
+        return annot.IsTextBox || annot.Subtype == PdfAnnotationSubtype.Text || annot.HasComment;
+    }
+
+    private void UpdateHasAnyAnnotations()
+    {
+        bool any = false;
+        foreach (List<PdfAnnotationInfo> list in _annotationsByPage.Values)
+        {
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (!list[i].IsSignatureWidget)
+                {
+                    any = true;
+                    break;
+                }
+            }
+
+            if (any)
+            {
+                break;
+            }
+        }
+
+        HasAnyAnnotations = any;
+    }
+
     private void SyncPageAnnotationsSummary(int pageIndex, IReadOnlyList<PdfAnnotationInfo> pageAnnotations, int deletedAnnotIndex)
     {
         bool hadAny = HasAnnotationsOrSignatures;
+        UpdateHasAnyAnnotations();
 
         List<PdfAnnotationInfo> visibleNew = new(pageAnnotations.Count);
         for (int i = 0; i < pageAnnotations.Count; i++)
         {
-            if (!pageAnnotations[i].IsSignatureWidget)
+            if (ShouldShowInAnnotationsSidebar(pageAnnotations[i]))
             {
                 visibleNew.Add(pageAnnotations[i]);
             }
@@ -2232,6 +2341,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
     private void RebuildAnnotationsSummary()
     {
+        UpdateHasAnyAnnotations();
         AnnotationsSummary.Clear();
         if (_annotationsByPage.Count > 0)
         {
@@ -2242,8 +2352,8 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
                 List<PdfAnnotationInfo> list = _annotationsByPage[pageKeys[k]];
                 for (int i = 0; i < list.Count; i++)
                 {
-                    // Skip duplicate signature widgets in AnnotationsSummary when already displayed in Signatures section
-                    if (!list[i].IsSignatureWidget)
+                    // Skip duplicate signature widgets and any items filtered out by the sidebar comment filter.
+                    if (ShouldShowInAnnotationsSidebar(list[i]))
                     {
                         AnnotationsSummary.Add(new AnnotationItemViewModel(list[i]));
                     }

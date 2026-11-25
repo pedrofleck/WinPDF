@@ -26,6 +26,16 @@ public sealed class AppSettings
     public bool DefaultTouchDrawing { get; set; }
 
     /// <summary>
+    /// Gets or sets the last geometric shape kind selected by the user on the annotation toolbar.
+    /// </summary>
+    public PdfAnnotationShapeKind LastUsedShape { get; set; } = PdfAnnotationShapeKind.Line;
+
+    /// <summary>
+    /// Gets or sets the preferred line/border thickness in PDF points for shapes and ink strokes.
+    /// </summary>
+    public double DefaultStrokeWidthPt { get; set; } = 2.0;
+
+    /// <summary>
     /// Gets or sets a value indicating whether the last open document should be reopened on startup.
     /// </summary>
     public bool ReopenLastDocument { get; set; }

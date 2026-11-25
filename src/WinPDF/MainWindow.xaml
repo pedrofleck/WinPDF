@@ -162,17 +162,28 @@
                         </StackPanel>
                     </Button>
 
-                    <Button
+                    <ToggleButton
                         x:Name="SearchBtn"
                         x:Uid="SearchButton"
                         Width="36"
                         Height="32"
+                        MinWidth="36"
+                        MinHeight="32"
                         Padding="0"
+                        BorderThickness="0"
                         Command="{x:Bind ViewModel.ToggleSearchCommand}"
                         CornerRadius="4"
+                        IsChecked="{x:Bind ViewModel.IsSearchOpen, Mode=OneWay}"
                         IsEnabled="{x:Bind ViewModel.HasDocument, Mode=OneWay}"
-                        IsTabStop="False"
-                        Style="{StaticResource SubtleButtonStyle}">
+                        IsTabStop="False">
+                        <ToggleButton.Resources>
+                            <StaticResource x:Key="ToggleButtonBackground" ResourceKey="SubtleFillColorTransparentBrush" />
+                            <StaticResource x:Key="ToggleButtonBackgroundPointerOver" ResourceKey="SubtleFillColorSecondaryBrush" />
+                            <StaticResource x:Key="ToggleButtonBackgroundPressed" ResourceKey="SubtleFillColorTertiaryBrush" />
+                            <StaticResource x:Key="ToggleButtonBorderBrush" ResourceKey="SubtleFillColorTransparentBrush" />
+                            <StaticResource x:Key="ToggleButtonBorderBrushPointerOver" ResourceKey="SubtleFillColorTransparentBrush" />
+                            <StaticResource x:Key="ToggleButtonBorderBrushPressed" ResourceKey="SubtleFillColorTransparentBrush" />
+                        </ToggleButton.Resources>
                         <AnimatedIcon
                             x:Name="SearchAnimatedIcon"
                             Width="16"
@@ -185,7 +196,7 @@
                                 <FontIconSource FontSize="16" Glyph="&#xE721;" />
                             </AnimatedIcon.FallbackIconSource>
                         </AnimatedIcon>
-                    </Button>
+                    </ToggleButton>
                 </StackPanel>
             </StackPanel>
 
@@ -284,20 +295,60 @@
                     Spacing="4"
                     Visibility="{x:Bind converters:UiHelpers.CollapsedIf(ViewModel.IsSettingsOpen), Mode=OneWay}">
 
-                <!-- Floating annotation toolbar toggle -->
-                <Button
-                    x:Name="AnnotationToolsToggleBtn"
-                    x:Uid="AnnotationToolsToggle"
-                    Width="36"
-                    Height="32"
-                    Padding="0"
-                    Command="{x:Bind ViewModel.ToggleAnnotationToolbarCommand}"
-                    CornerRadius="4"
-                    IsTabStop="False"
-                    Style="{StaticResource SubtleButtonStyle}"
-                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
-                    <FontIcon FontSize="16" Glyph="&#xED63;" />
-                </Button>
+                <!-- Undo (animated width/fade) + Floating annotation toolbar toggle -->
+                <StackPanel Orientation="Horizontal" Spacing="0">
+                    <Grid
+                        x:Name="TitleBarUndoClipContainer"
+                        Width="0"
+                        VerticalAlignment="Center"
+                        Visibility="Collapsed">
+                        <Grid.Clip>
+                            <RectangleGeometry x:Name="TitleBarUndoClip" Rect="0,0,40,36" />
+                        </Grid.Clip>
+                        <Button
+                            x:Name="TitleBarUndoBtn"
+                            x:Uid="TitleBarUndoButton"
+                            Width="36"
+                            Height="32"
+                            Margin="0,0,4,0"
+                            Padding="0"
+                            CornerRadius="4"
+                            IsTabStop="False"
+                            RenderTransformOrigin="0.5,0.5"
+                            Style="{StaticResource SubtleButtonStyle}"
+                            Command="{x:Bind ViewModel.UndoAnnotationCommand}">
+                            <Button.RenderTransform>
+                                <CompositeTransform x:Name="TitleBarUndoTransform" />
+                            </Button.RenderTransform>
+                            <FontIcon FontSize="16" Glyph="&#xE7A7;" />
+                        </Button>
+                    </Grid>
+
+                    <!-- Floating annotation toolbar toggle -->
+                    <ToggleButton
+                        x:Name="AnnotationToolsToggleBtn"
+                        x:Uid="AnnotationToolsToggle"
+                        Width="36"
+                        Height="32"
+                        MinWidth="36"
+                        MinHeight="32"
+                        Padding="0"
+                        BorderThickness="0"
+                        CornerRadius="4"
+                        IsTabStop="False"
+                        IsChecked="{x:Bind ViewModel.IsAnnotationToolbarOpen, Mode=TwoWay}"
+                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasDocument), Mode=OneWay}">
+                        <ToggleButton.Resources>
+                            <StaticResource x:Key="ToggleButtonBackground" ResourceKey="SubtleFillColorTransparentBrush" />
+                            <StaticResource x:Key="ToggleButtonBackgroundPointerOver" ResourceKey="SubtleFillColorSecondaryBrush" />
+                            <StaticResource x:Key="ToggleButtonBackgroundPressed" ResourceKey="SubtleFillColorTertiaryBrush" />
+                            <StaticResource x:Key="ToggleButtonBorderBrush" ResourceKey="SubtleFillColorTransparentBrush" />
+                            <StaticResource x:Key="ToggleButtonBorderBrushPointerOver" ResourceKey="SubtleFillColorTransparentBrush" />
+                            <StaticResource x:Key="ToggleButtonBorderBrushPressed" ResourceKey="SubtleFillColorTransparentBrush" />
+                        </ToggleButton.Resources>
+                        <FontIcon FontSize="16" Glyph="&#xED63;" />
+                    </ToggleButton>
+                </StackPanel>
 
                 <!-- Insert elements menu (Comment, Text, Image, Signature) -->
                 <Button

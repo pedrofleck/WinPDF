@@ -2039,7 +2039,7 @@
                         CornerRadius="8"
                         RenderTransformOrigin="0.5,0.0"
                         Translation="0,0,32"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsSearchOpen), Mode=OneWay}">
+                        Visibility="Collapsed">
                         <Border.Shadow>
                             <ThemeShadow />
                         </Border.Shadow>
@@ -2166,14 +2166,24 @@
 
                     <!-- Floating annotation toolbar (Centered top) -->
                     <Border
+                        x:Name="FloatingAnnotationToolbar"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Top"
                         Padding="8,4,8,4"
                         Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+                        BackgroundSizing="InnerBorderEdge"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1"
                         CornerRadius="8"
-                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.IsAnnotationToolbarOpen), Mode=OneWay}">
+                        RenderTransformOrigin="0.5,0.0"
+                        Translation="0,0,32"
+                        Visibility="Collapsed">
+                        <Border.Shadow>
+                            <ThemeShadow />
+                        </Border.Shadow>
+                        <Border.RenderTransform>
+                            <CompositeTransform x:Name="FloatingAnnotationToolbarTransform" />
+                        </Border.RenderTransform>
                         <StackPanel Orientation="Horizontal" Spacing="4">
                             <Button
                                 x:Name="ToolbarColorPickerButton"
@@ -2261,6 +2271,68 @@
                                 </Button.Flyout>
                             </Button>
 
+                            <Button
+                                x:Name="ToolbarStrokeThicknessButton"
+                                x:Uid="ToolbarThicknessButton"
+                                Width="34"
+                                Height="32"
+                                Padding="0"
+                                CornerRadius="4"
+                                IsTabStop="False"
+                                Style="{StaticResource SubtleButtonStyle}">
+                                <StackPanel Spacing="2.5" VerticalAlignment="Center" HorizontalAlignment="Center">
+                                    <Border Width="14" Height="1" CornerRadius="0.5" Background="{ThemeResource TextFillColorPrimaryBrush}" />
+                                    <Border Width="14" Height="2" CornerRadius="1" Background="{ThemeResource TextFillColorPrimaryBrush}" />
+                                    <Border Width="14" Height="3.5" CornerRadius="1.5" Background="{ThemeResource TextFillColorPrimaryBrush}" />
+                                </StackPanel>
+                                <Button.Flyout>
+                                    <Flyout
+                                        x:Name="ToolbarStrokeThicknessFlyout"
+                                        Placement="Bottom"
+                                        FlyoutPresenterStyle="{StaticResource AcrylicFlyoutPresenterStyle}">
+                                        <StackPanel Width="216" Padding="4" Spacing="8">
+                                            <Grid ColumnDefinitions="*,Auto">
+                                                <TextBlock
+                                                    x:Uid="ToolbarThicknessHeader"
+                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                                    VerticalAlignment="Center" />
+                                                <TextBlock
+                                                    x:Name="ToolbarThicknessValueText"
+                                                    Grid.Column="1"
+                                                    FontSize="12"
+                                                    FontWeight="SemiBold"
+                                                    VerticalAlignment="Center" />
+                                            </Grid>
+                                            <Border
+                                                Height="36"
+                                                Padding="14,0"
+                                                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="6">
+                                                <Border
+                                                    x:Name="ToolbarThicknessPreviewLine"
+                                                    Height="3"
+                                                    CornerRadius="1.5"
+                                                    HorizontalAlignment="Stretch"
+                                                    VerticalAlignment="Center" />
+                                            </Border>
+                                            <Slider
+                                                x:Name="ToolbarStrokeThicknessSlider"
+                                                Minimum="1"
+                                                Maximum="12"
+                                                StepFrequency="0.5"
+                                                SmallChange="0.5"
+                                                LargeChange="2"
+                                                IsThumbToolTipEnabled="False"
+                                                Value="{x:Bind ViewModel.StrokeThicknessPt, Mode=TwoWay}"
+                                                ValueChanged="OnToolbarStrokeThicknessChanged" />
+                                        </StackPanel>
+                                    </Flyout>
+                                </Button.Flyout>
+                            </Button>
+
                             <AppBarSeparator Margin="4,4,4,4" />
 
                             <ToggleButton
@@ -2277,28 +2349,107 @@
                             </ToggleButton>
                             <ToggleButton
                                 x:Uid="ToolHighlighterButton"
+                                SizeChanged="OnToolHighlighterButtonSizeChanged"
                                 Click="OnToolHighlighterClicked"
                                 IsChecked="{x:Bind converters:UiHelpers.IsHighlighterTool(ViewModel.ActiveTool), Mode=OneWay}">
                                 <FontIcon FontSize="14" Glyph="&#xE891;" />
                             </ToggleButton>
+
+                            <!-- Geometric Shapes Split Toggle (Last used shape + dropdown chevron for Line, Arrow, Rectangle, Ellipse) -->
+                            <StackPanel Orientation="Horizontal" Spacing="0" VerticalAlignment="Center">
+                                <ToggleButton
+                                    x:Name="ToolbarShapeButton"
+                                    x:Uid="ToolbarShapeButton"
+                                    Width="32"
+                                    MinWidth="32"
+                                    MinHeight="0"
+                                    Padding="0"
+                                    BorderThickness="1,1,0,1"
+                                    CornerRadius="4,0,0,4"
+                                    VerticalAlignment="Center"
+                                    IsTabStop="False"
+                                    Click="OnToolShapeClicked"
+                                    IsChecked="{x:Bind converters:UiHelpers.IsShapeTool(ViewModel.ActiveTool), Mode=OneWay}">
+                                    <Viewbox Width="14" Height="14">
+                                        <Grid Width="16" Height="16">
+                                            <PathIcon
+                                                x:Name="ToolbarShapeLineIcon"
+                                                Data="M 2.35,14.35 L 1.65,13.65 L 13.65,1.65 L 14.35,2.35 Z" />
+                                            <PathIcon
+                                                x:Name="ToolbarShapeArrowIcon"
+                                                Visibility="Collapsed"
+                                                Data="M 14.25,1.75 L 8.5,1.75 L 8.5,2.95 L 12.15,2.95 L 1.65,13.45 L 2.55,14.35 L 13.05,3.85 L 13.05,7.5 L 14.25,7.5 Z" />
+                                            <PathIcon
+                                                x:Name="ToolbarShapeRectangleIcon"
+                                                Visibility="Collapsed"
+                                                Data="M 2,3.5 C 2,2.67 2.67,2 3.5,2 L 12.5,2 C 13.33,2 14,2.67 14,3.5 L 14,12.5 C 14,13.33 13.33,14 12.5,14 L 3.5,14 C 2.67,14 2,13.33 2,12.5 Z M 3.2,3.5 L 3.2,12.5 C 3.2,12.67 3.33,12.8 3.5,12.8 L 12.5,12.8 C 12.67,12.8 12.8,12.67 12.8,12.5 L 12.8,3.5 C 12.8,3.33 12.67,3.2 12.5,3.2 L 3.5,3.2 C 3.33,3.2 3.2,3.33 3.2,3.5 Z" />
+                                            <PathIcon
+                                                x:Name="ToolbarShapeEllipseIcon"
+                                                Visibility="Collapsed"
+                                                Data="M 8,2.5 A 6.2,4.5 0 1 0 8,13.5 A 6.2,4.5 0 1 0 8,2.5 Z M 8,3.7 A 5.0,3.3 0 1 1 8,12.3 A 5.0,3.3 0 1 1 8,3.7 Z" />
+                                        </Grid>
+                                    </Viewbox>
+                                </ToggleButton>
+                                <Button
+                                    x:Name="ToolbarShapePickerButton"
+                                    x:Uid="ToolbarShapePickerButton"
+                                    Width="18"
+                                    MinWidth="18"
+                                    MinHeight="0"
+                                    Padding="0"
+                                    BorderThickness="1"
+                                    CornerRadius="0,4,4,0"
+                                    VerticalAlignment="Center"
+                                    IsTabStop="False">
+                                    <FontIcon FontSize="9" Glyph="&#xE70D;" />
+                                    <Button.Flyout>
+                                        <MenuFlyout Placement="Bottom">
+                                            <MenuFlyoutItem
+                                                x:Name="ShapeLineMenuItem"
+                                                x:Uid="ShapeLineMenuItem"
+                                                Tag="Line"
+                                                Click="OnShapeKindMenuItemClick">
+                                                <MenuFlyoutItem.Icon>
+                                                    <PathIcon Data="M 2.35,14.35 L 1.65,13.65 L 13.65,1.65 L 14.35,2.35 Z" />
+                                                </MenuFlyoutItem.Icon>
+                                            </MenuFlyoutItem>
+                                            <MenuFlyoutItem
+                                                x:Name="ShapeArrowMenuItem"
+                                                x:Uid="ShapeArrowMenuItem"
+                                                Tag="Arrow"
+                                                Click="OnShapeKindMenuItemClick">
+                                                <MenuFlyoutItem.Icon>
+                                                    <PathIcon Data="M 14.25,1.75 L 8.5,1.75 L 8.5,2.95 L 12.15,2.95 L 1.65,13.45 L 2.55,14.35 L 13.05,3.85 L 13.05,7.5 L 14.25,7.5 Z" />
+                                                </MenuFlyoutItem.Icon>
+                                            </MenuFlyoutItem>
+                                            <MenuFlyoutItem
+                                                x:Name="ShapeRectangleMenuItem"
+                                                x:Uid="ShapeRectangleMenuItem"
+                                                Tag="Rectangle"
+                                                Click="OnShapeKindMenuItemClick">
+                                                <MenuFlyoutItem.Icon>
+                                                    <PathIcon Data="M 2,3.5 C 2,2.67 2.67,2 3.5,2 L 12.5,2 C 13.33,2 14,2.67 14,3.5 L 14,12.5 C 14,13.33 13.33,14 12.5,14 L 3.5,14 C 2.67,14 2,13.33 2,12.5 Z M 3.2,3.5 L 3.2,12.5 C 3.2,12.67 3.33,12.8 3.5,12.8 L 12.5,12.8 C 12.67,12.8 12.8,12.67 12.8,12.5 L 12.8,3.5 C 12.8,3.33 12.67,3.2 12.5,3.2 L 3.5,3.2 C 3.33,3.2 3.2,3.33 3.2,3.5 Z" />
+                                                </MenuFlyoutItem.Icon>
+                                            </MenuFlyoutItem>
+                                            <MenuFlyoutItem
+                                                x:Name="ShapeEllipseMenuItem"
+                                                x:Uid="ShapeEllipseMenuItem"
+                                                Tag="Ellipse"
+                                                Click="OnShapeKindMenuItemClick">
+                                                <MenuFlyoutItem.Icon>
+                                                    <PathIcon Data="M 8,2.5 A 6.2,4.5 0 1 0 8,13.5 A 6.2,4.5 0 1 0 8,2.5 Z M 8,3.7 A 5.0,3.3 0 1 1 8,12.3 A 5.0,3.3 0 1 1 8,3.7 Z" />
+                                                </MenuFlyoutItem.Icon>
+                                            </MenuFlyoutItem>
+                                        </MenuFlyout>
+                                    </Button.Flyout>
+                                </Button>
+                            </StackPanel>
                             <ToggleButton
                                 x:Uid="ToolEraserButton"
                                 Click="OnToolEraserClicked"
                                 IsChecked="{x:Bind converters:UiHelpers.IsEraserTool(ViewModel.ActiveTool), Mode=OneWay}">
                                 <FontIcon FontSize="14" Glyph="&#xE75C;" />
                             </ToggleButton>
-                            <Button
-                                x:Name="ToolbarUndoButton"
-                                Width="34"
-                                Height="32"
-                                Padding="0"
-                                CornerRadius="4"
-                                IsTabStop="False"
-                                Style="{StaticResource SubtleButtonStyle}"
-                                Command="{x:Bind ViewModel.UndoAnnotationCommand}"
-                                IsEnabled="{x:Bind ViewModel.CanUndoAnnotation, Mode=OneWay}">
-                                <FontIcon FontSize="14" Glyph="&#xE7A7;" />
-                            </Button>
 
                             <AppBarSeparator Margin="4,4,4,4" />
 

@@ -68,6 +68,7 @@ public sealed partial class DocumentView : Page
     private PointerEventHandler? _wheelHandler;
     private Storyboard? _transitionStoryboard;
     private Storyboard? _searchBarStoryboard;
+    private Storyboard? _annotationToolbarStoryboard;
     private Storyboard? _horizontalPushStoryboard;
     private Storyboard? _statusBarCompactStoryboard;
     private bool _lastStatusBarCompact;
@@ -359,6 +360,8 @@ public sealed partial class DocumentView : Page
     private double _swipeAdjTotalHeightDip;
     private double _swipeAdjScaleRatio = 1.0;
     private PdfPageCanvas? _activeTouchSelectingCanvas;
+    private PdfPageCanvas? _activeTouchShapeCanvas;
+    private uint _touchShapePointerId;
     private PdfPageCanvas? _activeTouchDraggingAnnotCanvas;
     private uint _touchDragAnnotPointerId;
     private uint _touchAnnotPanPointerId;
@@ -594,9 +597,14 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.PlaceTextNoteRequested += OnCanvasPlaceTextNoteRequested;
         PdfPageCanvas.PlaceTextBoxRequested += OnCanvasPlaceTextBoxRequested;
         PdfPageCanvas.PlaceImageRequested += OnCanvasPlaceImageRequested;
+        PdfPageCanvas.ShapeCompleted += OnCanvasShapeCompleted;
+        PdfPageCanvas.TouchShapeDrawStarted += OnCanvasTouchShapeDrawStarted;
+        PdfPageCanvas.TouchShapeDrawEnded += OnCanvasTouchShapeDrawEnded;
         PdfPageCanvas.AnnotationMoved += OnCanvasAnnotationMoved;
         PdfPageCanvas.AnnotationResized += OnCanvasAnnotationResized;
+        PdfPageCanvas.MouseClickedOnPage -= OnCanvasMouseClickedOnPage;
         PdfPageCanvas.MouseClickedOnPage += OnCanvasMouseClickedOnPage;
+        AddHandler(UIElement.KeyUpEvent, new KeyEventHandler(OnDocumentViewKeyUp), true);
         PdfPageCanvas.IsSingleTouchViewerManipulating = () => _isManipulatingSlideSwipe && _activeTouchPointers.Count <= 1;
 
         Loaded += OnLoaded;
@@ -658,6 +666,12 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.PlaceTextBoxRequested += OnCanvasPlaceTextBoxRequested;
         PdfPageCanvas.PlaceImageRequested -= OnCanvasPlaceImageRequested;
         PdfPageCanvas.PlaceImageRequested += OnCanvasPlaceImageRequested;
+        PdfPageCanvas.ShapeCompleted -= OnCanvasShapeCompleted;
+        PdfPageCanvas.ShapeCompleted += OnCanvasShapeCompleted;
+        PdfPageCanvas.TouchShapeDrawStarted -= OnCanvasTouchShapeDrawStarted;
+        PdfPageCanvas.TouchShapeDrawStarted += OnCanvasTouchShapeDrawStarted;
+        PdfPageCanvas.TouchShapeDrawEnded -= OnCanvasTouchShapeDrawEnded;
+        PdfPageCanvas.TouchShapeDrawEnded += OnCanvasTouchShapeDrawEnded;
         PdfPageCanvas.AnnotationMoved -= OnCanvasAnnotationMoved;
         PdfPageCanvas.AnnotationMoved += OnCanvasAnnotationMoved;
         PdfPageCanvas.AnnotationResized -= OnCanvasAnnotationResized;
@@ -707,6 +721,18 @@ public sealed partial class DocumentView : Page
             SyncPagedScrollViewerModes();
             UpdateViewportPages(ViewModel.CurrentDocument.ZoomFactor);
         }
+
+        SyncActiveShapeUi();
+        SyncStrokeThicknessUi();
+        if (FloatingSearchBar is not null)
+        {
+            FloatingSearchBar.Visibility = ViewModel.IsSearchOpen ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        if (FloatingAnnotationToolbar is not null)
+        {
+            FloatingAnnotationToolbar.Visibility = ViewModel.IsAnnotationToolbarOpen ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     private void EnsureScrollViewerWheelHook()
@@ -755,6 +781,8 @@ public sealed partial class DocumentView : Page
         CancelTouchAnnotationResizeHandleDragImmediate();
         StopTouchAnnotPanPolling();
         _activeTouchSelectingCanvas = null;
+        _activeTouchShapeCanvas = null;
+        _touchShapePointerId = 0;
         _activeTouchDraggingAnnotCanvas = null;
         _touchDragAnnotPointerId = 0;
         _touchAnnotPanPointerId = 0;
@@ -777,6 +805,9 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.PlaceTextNoteRequested -= OnCanvasPlaceTextNoteRequested;
         PdfPageCanvas.PlaceTextBoxRequested -= OnCanvasPlaceTextBoxRequested;
         PdfPageCanvas.PlaceImageRequested -= OnCanvasPlaceImageRequested;
+        PdfPageCanvas.ShapeCompleted -= OnCanvasShapeCompleted;
+        PdfPageCanvas.TouchShapeDrawStarted -= OnCanvasTouchShapeDrawStarted;
+        PdfPageCanvas.TouchShapeDrawEnded -= OnCanvasTouchShapeDrawEnded;
         PdfPageCanvas.AnnotationMoved -= OnCanvasAnnotationMoved;
         PdfPageCanvas.AnnotationResized -= OnCanvasAnnotationResized;
         PdfPageCanvas.MouseClickedOnPage -= OnCanvasMouseClickedOnPage;
@@ -790,6 +821,7 @@ public sealed partial class DocumentView : Page
         StopAutoScroll();
         _transitionStoryboard?.Stop();
         _searchBarStoryboard?.Stop();
+        _annotationToolbarStoryboard?.Stop();
         _horizontalPushStoryboard?.Stop();
         _statusBarCompactStoryboard?.Stop();
         _isHorizontalPushAnimating = false;
@@ -1065,6 +1097,7 @@ public sealed partial class DocumentView : Page
             }
             else
             {
+                PlaySearchBarCloseAnimation();
                 _searchDebounceTimer.Stop();
                 ReturnFocusToViewer();
             }
@@ -1074,6 +1107,43 @@ public sealed partial class DocumentView : Page
             if (!_isHorizontalPushAnimating && FloatingTopTransform is not null)
             {
                 FloatingTopTransform.TranslateX = GetTargetFloatingTopOffsetDip();
+            }
+
+            if (ViewModel.IsAnnotationToolbarOpen)
+            {
+                SyncActiveShapeUi();
+                SyncStrokeThicknessUi();
+                PlayFloatingBarAnimation(FloatingAnnotationToolbar, FloatingAnnotationToolbarTransform, open: true, ref _annotationToolbarStoryboard);
+            }
+            else
+            {
+                PlayFloatingBarAnimation(FloatingAnnotationToolbar, FloatingAnnotationToolbarTransform, open: false, ref _annotationToolbarStoryboard);
+            }
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.ActiveTool))
+        {
+            if (ViewModel.ActiveTool != AnnotationTool.Shape)
+            {
+                CancelShapeDrawingOnAllCanvases();
+            }
+
+            SyncPagedScrollViewerModes();
+            UpdateTouchAnnotationResizeHandlesLayout();
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.ActiveShapeKind))
+        {
+            CancelShapeDrawingOnAllCanvases();
+            SyncActiveShapeUi();
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.StrokeThicknessPt))
+        {
+            SyncStrokeThicknessUi();
+            foreach (PdfPageCanvas canvas in _activeCanvases)
+            {
+                if (canvas.IsDrawingShape)
+                {
+                    canvas.InvalidateOverlays();
+                }
             }
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsNightMode))
@@ -3097,9 +3167,20 @@ public sealed partial class DocumentView : Page
             return;
         }
 
+        if (e.Key == Windows.System.VirtualKey.Shift)
+        {
+            RefreshActiveShapePreviewConstraints();
+        }
+
         if (!isCtrl && !isAlt && e.Key == Windows.System.VirtualKey.Escape)
         {
-            if (ViewModel.ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage)
+            if (ViewModel.ActiveTool == AnnotationTool.Shape && CancelShapeDrawingOnAllCanvases())
+            {
+                e.Handled = true;
+                return;
+            }
+
+            if (ViewModel.ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage or AnnotationTool.Shape)
             {
                 e.Handled = true;
                 DismissTopNotification();
@@ -4478,9 +4559,19 @@ public sealed partial class DocumentView : Page
         }
     }
 
-    private void PlaySearchBarOpenAnimation()
+    private void PlaySearchBarOpenAnimation() =>
+        PlayFloatingBarAnimation(FloatingSearchBar, FloatingSearchBarTransform, open: true, ref _searchBarStoryboard);
+
+    private void PlaySearchBarCloseAnimation() =>
+        PlayFloatingBarAnimation(FloatingSearchBar, FloatingSearchBarTransform, open: false, ref _searchBarStoryboard);
+
+    private void PlayFloatingBarAnimation(
+        Border? bar,
+        CompositeTransform? transform,
+        bool open,
+        ref Storyboard? currentStoryboard)
     {
-        if (FloatingSearchBar is null || FloatingSearchBarTransform is null)
+        if (bar is null || transform is null)
         {
             return;
         }
@@ -4495,37 +4586,56 @@ public sealed partial class DocumentView : Page
             RepositionInlineTextEditor();
         }
 
-        _searchBarStoryboard?.Stop();
-        FloatingSearchBar.Opacity = 0.0;
-        FloatingSearchBarTransform.TranslateY = -10.0;
+        currentStoryboard?.Stop();
+        currentStoryboard = null;
+
+        if (!open && bar.Visibility != Visibility.Visible)
+        {
+            return;
+        }
 
         var sb = new Storyboard();
-        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
-        var duration = new Duration(TimeSpan.FromMilliseconds(160));
+        var ease = new CubicEase { EasingMode = open ? EasingMode.EaseOut : EasingMode.EaseIn };
+        var duration = new Duration(TimeSpan.FromMilliseconds(open ? 160 : 120));
 
-        var opacityAnim = new DoubleAnimation { From = 0.0, To = 1.0, Duration = duration, EasingFunction = ease };
-        Storyboard.SetTarget(opacityAnim, FloatingSearchBar);
+        if (open)
+        {
+            bar.Visibility = Visibility.Visible;
+            bar.Opacity = 0.0;
+            transform.TranslateY = -10.0;
+        }
+
+        double fromOpacity = open ? 0.0 : bar.Opacity;
+        double toOpacity = open ? 1.0 : 0.0;
+        double fromY = open ? -10.0 : transform.TranslateY;
+        double toY = open ? 0.0 : -10.0;
+
+        var opacityAnim = new DoubleAnimation { From = fromOpacity, To = toOpacity, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(opacityAnim, bar);
         Storyboard.SetTargetProperty(opacityAnim, "Opacity");
         sb.Children.Add(opacityAnim);
 
-        var translateAnim = new DoubleAnimation { From = -10.0, To = 0.0, Duration = duration, EasingFunction = ease };
-        Storyboard.SetTarget(translateAnim, FloatingSearchBarTransform);
+        var translateAnim = new DoubleAnimation { From = fromY, To = toY, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(translateAnim, transform);
         Storyboard.SetTargetProperty(translateAnim, "TranslateY");
         sb.Children.Add(translateAnim);
 
+        currentStoryboard = sb;
         sb.Completed += (_, _) =>
         {
-            if (FloatingSearchBar is not null)
+            if (open)
             {
-                FloatingSearchBar.Opacity = 1.0;
+                bar.Opacity = 1.0;
+                transform.TranslateY = 0.0;
             }
-            if (FloatingSearchBarTransform is not null)
+            else
             {
-                FloatingSearchBarTransform.TranslateY = 0.0;
+                bar.Visibility = Visibility.Collapsed;
+                bar.Opacity = 1.0;
+                transform.TranslateY = 0.0;
             }
         };
 
-        _searchBarStoryboard = sb;
         sb.Begin();
     }
 
@@ -4591,6 +4701,126 @@ public sealed partial class DocumentView : Page
         }
 
         ViewModel.SetTool(AnnotationTool.Highlighter);
+    }
+
+    private void OnToolHighlighterButtonSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (e.NewSize.Height <= 0)
+        {
+            return;
+        }
+
+        if (double.IsNaN(ToolbarShapeButton.Height) || Math.Abs(ToolbarShapeButton.Height - e.NewSize.Height) > 0.1)
+        {
+            ToolbarShapeButton.Height = e.NewSize.Height;
+        }
+
+        if (double.IsNaN(ToolbarShapePickerButton.Height) || Math.Abs(ToolbarShapePickerButton.Height - e.NewSize.Height) > 0.1)
+        {
+            ToolbarShapePickerButton.Height = e.NewSize.Height;
+        }
+    }
+
+    private void OnToolShapeClicked(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.ActiveTool == AnnotationTool.Shape)
+        {
+            ViewModel.SetTool(AnnotationTool.Select);
+        }
+        else
+        {
+            ViewModel.SetTool(AnnotationTool.Shape);
+        }
+    }
+
+    private void OnShapeKindMenuItemClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string tagStr } &&
+            Enum.TryParse<PdfAnnotationShapeKind>(tagStr, ignoreCase: true, out PdfAnnotationShapeKind kind))
+        {
+            ViewModel.ActiveShapeKind = kind;
+            SyncActiveShapeUi();
+            ViewModel.SetTool(AnnotationTool.Shape);
+        }
+    }
+
+    private void OnToolbarStrokeThicknessChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+    {
+        SyncStrokeThicknessUi();
+    }
+
+    private void SyncActiveShapeUi()
+    {
+        PdfAnnotationShapeKind kind = ViewModel.ActiveShapeKind;
+        SetVisible(ToolbarShapeLineIcon, kind == PdfAnnotationShapeKind.Line);
+        SetVisible(ToolbarShapeArrowIcon, kind == PdfAnnotationShapeKind.Arrow);
+        SetVisible(ToolbarShapeRectangleIcon, kind == PdfAnnotationShapeKind.Rectangle);
+        SetVisible(ToolbarShapeEllipseIcon, kind == PdfAnnotationShapeKind.Ellipse);
+
+        if (ToolbarShapeButton is not null)
+        {
+            string kindKey = kind switch
+            {
+                PdfAnnotationShapeKind.Arrow => ResourceKeys.AnnotSubtypeArrow,
+                PdfAnnotationShapeKind.Rectangle => ResourceKeys.AnnotSubtypeSquare,
+                PdfAnnotationShapeKind.Ellipse => ResourceKeys.AnnotSubtypeCircle,
+                _ => ResourceKeys.AnnotSubtypeLine,
+            };
+            string shapeName = ResourceStrings.Get(kindKey);
+            ToolTipService.SetToolTip(
+                ToolbarShapeButton,
+                ResourceStrings.Format(ResourceKeys.ToolShapeFormatToolTip, shapeName));
+        }
+    }
+
+    private void SyncStrokeThicknessUi()
+    {
+        double pt = Math.Clamp(ViewModel.StrokeThicknessPt, 1.0, 12.0);
+        if (ToolbarThicknessValueText is not null)
+        {
+            ToolbarThicknessValueText.Text = ResourceStrings.Format(ResourceKeys.ToolbarThicknessPtFormat, pt);
+        }
+
+        if (ToolbarThicknessPreviewLine is not null)
+        {
+            double previewHeight = Math.Clamp(pt * 1.4, 1.5, 18.0);
+            ToolbarThicknessPreviewLine.Height = previewHeight;
+            ToolbarThicknessPreviewLine.CornerRadius = new CornerRadius(previewHeight * 0.5);
+            PdfAnnotationColor activeColor = ViewModel.CurrentDocument?.ActiveAnnotationColor ?? ViewModel.DefaultAnnotationColor;
+            ToolbarThicknessPreviewLine.Background = new SolidColorBrush(
+                Windows.UI.Color.FromArgb(255, activeColor.R, activeColor.G, activeColor.B));
+        }
+    }
+
+    private void OnDocumentViewKeyUp(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == Windows.System.VirtualKey.Shift)
+        {
+            RefreshActiveShapePreviewConstraints();
+        }
+    }
+
+    private void RefreshActiveShapePreviewConstraints()
+    {
+        foreach (PdfPageCanvas canvas in _activeCanvases)
+        {
+            canvas.RefreshShapePreviewConstraint();
+        }
+    }
+
+    private bool CancelShapeDrawingOnAllCanvases()
+    {
+        bool canceledAny = false;
+        foreach (PdfPageCanvas canvas in _activeCanvases)
+        {
+            if (canvas.IsDrawingShape)
+            {
+                canvas.CancelShapeDrawing();
+                canceledAny = true;
+            }
+        }
+
+        return canceledAny;
     }
 
     private void OnToolEraserClicked(object sender, RoutedEventArgs e)
@@ -5102,6 +5332,7 @@ public sealed partial class DocumentView : Page
         }
 
         if (_activeTouchSelectingCanvas is { IsTouchSelecting: true } ||
+            _activeTouchShapeCanvas is { IsTouchDrawingShape: true } ||
             _activeTouchDraggingAnnotCanvas is { IsTouchDraggingAnnotation: true } ||
             _isDraggingSelectionHandle ||
             _isDraggingAnnotationMoveHandle ||
@@ -5138,7 +5369,7 @@ public sealed partial class DocumentView : Page
             _isFittedVertically = true;
         }
 
-        bool useCustomSwipeManip = isPagedOrPres;
+        bool useCustomSwipeManip = isPagedOrPres || ViewModel?.ActiveTool == AnnotationTool.Shape;
         ApplyManipulationModeToViewerContent(useCustomSwipeManip);
     }
 
@@ -6075,6 +6306,7 @@ public sealed partial class DocumentView : Page
         ApplySwatchSelectedState(MouseSelColorPinkButton, IsSameColor(color, PdfAnnotationColor.Pink));
         ApplySwatchSelectedState(MouseSelColorOrangeButton, IsSameColor(color, PdfAnnotationColor.Orange));
         ApplySwatchSelectedState(MouseSelColorRedButton, IsSameColor(color, PdfAnnotationColor.Red));
+        SyncStrokeThicknessUi();
     }
 
     private static void SetVisible(UIElement? element, bool visible)
@@ -6165,7 +6397,6 @@ public sealed partial class DocumentView : Page
         }
 
         SetToolTip(ToolbarColorPickerButton, ResourceKeys.ToolbarColorToolTip);
-        SetToolTip(ToolbarUndoButton, ResourceKeys.AnnotUndoToolTip);
         SetToolTip(MouseSelCopyButton, ResourceKeys.TouchSelectionCopyToolTip);
         SetToolTip(MouseSelHighlightButton, ResourceKeys.TouchSelectionHighlightToolTip);
         SetToolTip(MouseSelCommentButton, ResourceKeys.TouchSelectionCommentToolTip);
@@ -6536,6 +6767,68 @@ public sealed partial class DocumentView : Page
         ViewModel.CancelActiveInsertTool();
         HideAnnotationPopupsImmediate();
         OpenInlineTextEditorForCreate(canvas, pdfPt);
+    }
+
+    private async void OnCanvasShapeCompleted(PdfPageCanvas canvas, PdfAnnotationShapeKind shapeKind, Vector2 startPdf, Vector2 endPdf)
+    {
+        if (canvas.PageInfo is not { } pageInfo || ViewModel.CurrentDocument is not { } doc)
+        {
+            return;
+        }
+
+        HideAnnotationPopupsImmediate();
+        try
+        {
+            await doc.AddShapeAsync(
+                pageInfo.Index,
+                shapeKind,
+                startPdf,
+                endPdf,
+                doc.ActiveAnnotationColor,
+                ViewModel.StrokeThicknessPt);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+        }
+    }
+
+    private void OnCanvasTouchShapeDrawStarted(PdfPageCanvas canvas, uint touchPointerId)
+    {
+        _isLastPointerInputTouch = true;
+        _activeTouchShapeCanvas = canvas;
+        _touchShapePointerId = touchPointerId;
+        _isTouchSwipeTracking = false;
+        _isTouchSwipeEngaged = false;
+        if (_isSlideSwipeActive || _isSlideSwipeAnimating)
+        {
+            CancelInteractiveSlideSwipeImmediate();
+        }
+
+        HideAnnotationPopupsImmediate();
+        LockScrollViewerForTouchAnnotationDrag();
+        try
+        {
+            _ = ContinuousScrollViewer?.CancelDirectManipulations();
+        }
+        catch
+        {
+        }
+    }
+
+    private void OnCanvasTouchShapeDrawEnded(PdfPageCanvas canvas)
+    {
+        if (ReferenceEquals(_activeTouchShapeCanvas, canvas))
+        {
+            _activeTouchShapeCanvas = null;
+            _touchShapePointerId = 0;
+        }
+
+        _isTouchSwipeTracking = false;
+        _isTouchSwipeEngaged = false;
+        SyncPagedScrollViewerModes();
     }
 
     private void OnCanvasTouchEmptyHoldRequested(PdfPageCanvas canvas, Vector2 pdfPt, Point canvasDipPt)
@@ -7433,7 +7726,7 @@ public sealed partial class DocumentView : Page
 
         if (AnnotationEditorTitleText is not null)
         {
-            AnnotationEditorTitleText.Text = ResourceStrings.Get(GetSubtypeResourceKey(annot.Subtype));
+            AnnotationEditorTitleText.Text = AnnotationItemViewModel.ResolveSubtypeTitle(annot);
         }
 
         if (AnnotationEditorMetaText is not null)
@@ -8615,28 +8908,6 @@ public sealed partial class DocumentView : Page
         }
     }
 
-    private static string GetSubtypeResourceKey(PdfAnnotationSubtype subtype) => subtype switch
-    {
-        PdfAnnotationSubtype.Highlight => ResourceKeys.AnnotSubtypeHighlight,
-        PdfAnnotationSubtype.Underline => ResourceKeys.AnnotSubtypeUnderline,
-        PdfAnnotationSubtype.Squiggly => ResourceKeys.AnnotSubtypeSquiggly,
-        PdfAnnotationSubtype.StrikeOut => ResourceKeys.AnnotSubtypeStrikeOut,
-        PdfAnnotationSubtype.Text => ResourceKeys.AnnotSubtypeText,
-        PdfAnnotationSubtype.FreeText => ResourceKeys.AnnotSubtypeFreeText,
-        PdfAnnotationSubtype.Ink => ResourceKeys.AnnotSubtypeInk,
-        PdfAnnotationSubtype.Square => ResourceKeys.AnnotSubtypeSquare,
-        PdfAnnotationSubtype.Circle => ResourceKeys.AnnotSubtypeCircle,
-        PdfAnnotationSubtype.Line => ResourceKeys.AnnotSubtypeLine,
-        PdfAnnotationSubtype.Polygon => ResourceKeys.AnnotSubtypePolygon,
-        PdfAnnotationSubtype.PolyLine => ResourceKeys.AnnotSubtypePolyLine,
-        PdfAnnotationSubtype.Stamp => ResourceKeys.AnnotSubtypeStamp,
-        PdfAnnotationSubtype.Caret => ResourceKeys.AnnotSubtypeCaret,
-        PdfAnnotationSubtype.FileAttachment => ResourceKeys.AnnotSubtypeFileAttachment,
-        PdfAnnotationSubtype.Redact => ResourceKeys.AnnotSubtypeRedact,
-        PdfAnnotationSubtype.Widget => ResourceKeys.AnnotSubtypeSignature,
-        _ => ResourceKeys.AnnotSubtypeOther,
-    };
-
     private static string BuildAnnotationMetadataLine(PdfAnnotationInfo annot)
     {
         string dateText = annot.ModifiedDate is { } dt
@@ -9035,6 +9306,7 @@ public sealed partial class DocumentView : Page
 
         if ((!_isLastPointerInputTouch && !_isDraggingAnnotationMoveHandle && !_isDraggingAnnotationResizeHandle) ||
             ViewModel?.IsPresentationMode == true ||
+            ViewModel?.ActiveTool != AnnotationTool.Select ||
             ViewModel?.CurrentDocument?.SelectedAnnotation is not { } selAnnot ||
             selAnnot.IsSignatureWidget ||
             selAnnot.Bounds.IsEmpty)
@@ -11493,6 +11765,23 @@ public sealed partial class DocumentView : Page
             return;
         }
 
+        if (_activeTouchShapeCanvas is { IsTouchDrawingShape: true } shapeCanvas)
+        {
+            if (e.Pointer.PointerId == _touchShapePointerId)
+            {
+                try
+                {
+                    Point ptInCanvas = e.GetCurrentPoint(shapeCanvas).Position;
+                    shapeCanvas.UpdateTouchShapeDrawPoint(ptInCanvas);
+                }
+                catch
+                {
+                }
+            }
+
+            return;
+        }
+
         if (_activeTouchSelectingCanvas is { IsTouchSelecting: true } selectingCanvas)
         {
             try
@@ -11657,6 +11946,31 @@ public sealed partial class DocumentView : Page
             return;
         }
 
+        if (_activeTouchShapeCanvas is { IsTouchDrawingShape: true } shapeCanvas)
+        {
+            uint releasedId = e.Pointer.PointerId;
+            _activeTouchPointers.Remove(releasedId);
+            if (releasedId == _touchShapePointerId)
+            {
+                try
+                {
+                    Point ptInCanvas = e.GetCurrentPoint(shapeCanvas).Position;
+                    shapeCanvas.CompleteTouchShapeDrawSession(ptInCanvas);
+                }
+                catch
+                {
+                    shapeCanvas.CompleteTouchShapeDrawSession(null);
+                }
+
+                if (_activeTouchPointers.Count == 0)
+                {
+                    _firstTouchPointer = null;
+                }
+            }
+
+            return;
+        }
+
         if (_activeTouchSelectingCanvas is { IsTouchSelecting: true } selectingCanvas)
         {
             try
@@ -11719,6 +12033,7 @@ public sealed partial class DocumentView : Page
             }
 
             if (_activeTouchSelectingCanvas is { IsTouchSelecting: true } ||
+                _activeTouchShapeCanvas is { IsTouchDrawingShape: true } ||
                 _activeTouchDraggingAnnotCanvas is { IsTouchDraggingAnnotation: true } ||
                 _isDraggingAnnotationMoveHandle ||
                 _isDraggingAnnotationResizeHandle)
@@ -11774,11 +12089,13 @@ public sealed partial class DocumentView : Page
 
         bool waitingOrDraggingMovableAnnot = _activeTouchDraggingAnnotCanvas is not null ||
                                              FindCanvasWaitingOnMovableAnnotation() is not null;
+        bool isTouchDrawingShape = _activeTouchShapeCanvas is { IsTouchDrawingShape: true } ||
+                                   ViewModel?.ActiveTool == AnnotationTool.Shape;
 
-        // In Continuous Mode (when not touching/dragging a movable annotation or touch text selection), leave e.Mode untouched
-        // as ManipulationModes.System so ContinuousScrollViewer DirectManipulation handles 100% of vertical
-        // scrolling, 2D zoomed panning, and pinch-to-zoom natively on the compositor thread.
-        if (!CanUseInteractiveSlideSwipe() && _activeTouchSelectingCanvas is null && !waitingOrDraggingMovableAnnot)
+        // In Continuous Mode (when not touching/dragging a movable annotation, touch text selection, or shape drawing),
+        // leave e.Mode untouched as ManipulationModes.System so ContinuousScrollViewer DirectManipulation handles
+        // vertical scrolling, 2D zoomed panning, and pinch-to-zoom natively on the compositor thread.
+        if (!CanUseInteractiveSlideSwipe() && _activeTouchSelectingCanvas is null && !waitingOrDraggingMovableAnnot && !isTouchDrawingShape)
         {
             return;
         }
@@ -11787,7 +12104,7 @@ public sealed partial class DocumentView : Page
         {
             e.Container = ScrollViewerContentRoot;
             bool allowPanInertia = CanPanHorizontallyInPagedMode() || CanPanVerticallyInPagedMode();
-            e.Mode = allowPanInertia && _activeTouchSelectingCanvas is null && !waitingOrDraggingMovableAnnot
+            e.Mode = allowPanInertia && _activeTouchSelectingCanvas is null && !waitingOrDraggingMovableAnnot && !isTouchDrawingShape
                 ? (PagedCustomManipulationMode | ManipulationModes.TranslateInertia)
                 : PagedCustomManipulationMode;
         }
@@ -11806,7 +12123,9 @@ public sealed partial class DocumentView : Page
 
         bool waitingOrDraggingMovableAnnot = _activeTouchDraggingAnnotCanvas is not null ||
                                              FindCanvasWaitingOnMovableAnnotation() is not null;
-        if (!CanUseInteractiveSlideSwipe() && _activeTouchSelectingCanvas is null && !waitingOrDraggingMovableAnnot)
+        bool isTouchDrawingShape = _activeTouchShapeCanvas is { IsTouchDrawingShape: true } ||
+                                   ViewModel?.ActiveTool == AnnotationTool.Shape;
+        if (!CanUseInteractiveSlideSwipe() && _activeTouchSelectingCanvas is null && !waitingOrDraggingMovableAnnot && !isTouchDrawingShape)
         {
             return;
         }
@@ -11872,6 +12191,33 @@ public sealed partial class DocumentView : Page
             {
                 Point ptInCanvas = ScrollViewerContentRoot.TransformToVisual(dragAnnotCanvas).TransformPoint(e.Position);
                 dragAnnotCanvas.UpdateTouchAnnotationDragPoint(ptInCanvas);
+            }
+            catch
+            {
+            }
+
+            return;
+        }
+
+        if (_activeTouchShapeCanvas is { IsTouchDrawingShape: true } shapeCanvas)
+        {
+            if (e.IsInertial)
+            {
+                return;
+            }
+
+            if (_activeTouchPointers.Count > 1 || Math.Abs(e.Delta.Scale - 1.0) > 0.0001)
+            {
+                shapeCanvas.CancelShapeDrawing();
+                _touchGestureAxis = PagedTouchGestureAxis.PanOrZoom;
+                ApplyInteractiveZoomAroundPoint(e.Position, e.Delta.Scale, e.Delta.Translation.X, e.Delta.Translation.Y, commitZoomProperty: false);
+                return;
+            }
+
+            try
+            {
+                Point ptInCanvas = ScrollViewerContentRoot.TransformToVisual(shapeCanvas).TransformPoint(e.Position);
+                shapeCanvas.UpdateTouchShapeDrawPoint(ptInCanvas);
             }
             catch
             {
@@ -12033,6 +12379,28 @@ public sealed partial class DocumentView : Page
             catch
             {
                 dragAnnotCanvas.CompleteTouchAnnotationDragSession();
+            }
+
+            return;
+        }
+
+        if (_activeTouchShapeCanvas is { IsTouchDrawingShape: true } shapeCanvas)
+        {
+            if (IsAnyTouchPointerStillInContact())
+            {
+                return;
+            }
+
+            _activeTouchPointers.Clear();
+            _firstTouchPointer = null;
+            try
+            {
+                Point ptInCanvas = ScrollViewerContentRoot.TransformToVisual(shapeCanvas).TransformPoint(e.Position);
+                shapeCanvas.CompleteTouchShapeDrawSession(ptInCanvas);
+            }
+            catch
+            {
+                shapeCanvas.CompleteTouchShapeDrawSession(null);
             }
 
             return;

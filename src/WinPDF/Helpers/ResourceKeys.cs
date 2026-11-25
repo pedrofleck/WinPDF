@@ -459,4 +459,13 @@ public static class ResourceKeys
 
     /// <summary>Inline text formatting bar tooltip: confirm text box.</summary>
     public const string TextBarConfirmToolTip = "TextBar_Confirm_ToolTip";
+
+    /// <summary>Annotation subtype label: Arrow (<c>/Line</c> with arrowhead).</summary>
+    public const string AnnotSubtypeArrow = "Annot_Subtype_Arrow";
+
+    /// <summary>Format string for stroke thickness in points (e.g. "2 pt").</summary>
+    public const string ToolbarThicknessPtFormat = "ToolbarThickness_PtFormat";
+
+    /// <summary>Dynamic tooltip format for the shapes toolbar button ({0} = active shape name).</summary>
+    public const string ToolShapeFormatToolTip = "Tool_Shape_FormatToolTip";
 }

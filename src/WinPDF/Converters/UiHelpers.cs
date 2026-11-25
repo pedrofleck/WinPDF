@@ -92,6 +92,9 @@ public static class UiHelpers
     /// <summary>Checks if the active tool matches TextNote.</summary>
     public static bool IsTextNoteTool(AnnotationTool tool) => tool == AnnotationTool.TextNote;
 
+    /// <summary>Checks if the active tool matches Shape.</summary>
+    public static bool IsShapeTool(AnnotationTool tool) => tool == AnnotationTool.Shape;
+
     /// <summary>Returns Visible if the count is zero.</summary>
     public static Visibility HasNoItems(int count) =>
         count == 0 ? Visibility.Visible : Visibility.Collapsed;

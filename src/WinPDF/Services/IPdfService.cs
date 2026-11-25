@@ -486,6 +486,18 @@ public interface IPdfService : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Creates a geometric shape annotation (Line, Arrow, Rectangle, or Ellipse) on a page.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="request">Shape creation parameters.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The created annotation index and refreshed annotations for the page.</returns>
+    Task<PdfPageAnnotationMutationResult> AddShapeAnnotationAsync(
+        long documentId,
+        PdfCreateShapeRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Captures the embedded raster image payload from an existing <c>/Stamp</c> annotation for copy/cut/undo.
     /// </summary>
     /// <param name="documentId">Document identifier.</param>

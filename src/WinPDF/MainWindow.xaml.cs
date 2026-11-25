@@ -437,6 +437,13 @@ public sealed partial class MainWindow : Window
         SetTitleBar(AppTitleBar);
         AppTitleBar.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
         OpenFileBtn.SizeChanged += (_, _) => UpdateTitleBarNonClientRegions();
+        TitleBarUndoClipContainer.SizeChanged += (_, e) =>
+        {
+            if (TitleBarUndoClip is not null)
+            {
+                TitleBarUndoClip.Rect = new Rect(0, 0, Math.Max(0, e.NewSize.Width), Math.Max(36, e.NewSize.Height));
+            }
+        };
 
         string iconPath = System.IO.Path.Combine(System.AppContext.BaseDirectory, "Assets", "appicon.ico");
         if (System.IO.File.Exists(iconPath))
@@ -540,6 +547,7 @@ public sealed partial class MainWindow : Window
                 }
 
                 ApplySidebarToggleStateImmediate(collapse: !ViewModel.HasDocument || !initialSidebarAllowed);
+                ApplyTitleBarUndoStateImmediate(ViewModel.CanUndoAnnotation);
 
                 bool initialCompact = initialWidthDip < CompactBreakpoint;
                 ViewModel.IsCompactChrome = initialCompact;
@@ -1139,7 +1147,7 @@ public sealed partial class MainWindow : Window
         HookDocumentMenuButton();
     }
 
-    private static void HookAnimatedIconButton(Button button, AnimatedIcon icon)
+    private static void HookAnimatedIconButton(ButtonBase button, AnimatedIcon icon)
     {
         AnimatedIcon.SetState(icon, "Normal");
 
@@ -1184,10 +1192,12 @@ public sealed partial class MainWindow : Window
         }), true);
     }
 
+    private const double TitleBarUndoSlotWidthDip = 40.0;
     private Storyboard? _ellipsisWaveStoryboard;
     private Storyboard? _settingsTransitionStoryboard;
     private Storyboard? _sidebarStoryboard;
     private Storyboard? _sidebarToggleStoryboard;
+    private Storyboard? _titleBarUndoStoryboard;
     private Storyboard? _titleBarCompactStoryboard;
     private double _cachedAppTitleTextWidth = 56.0;
     private double _cachedOpenFileTextWidth = 88.0;
@@ -1286,6 +1296,146 @@ public sealed partial class MainWindow : Window
         };
 
         _sidebarToggleStoryboard = sb;
+        sb.Begin();
+    }
+
+    private void ApplyTitleBarUndoStateImmediate(bool show)
+    {
+        if (TitleBarUndoClipContainer is null || TitleBarUndoBtn is null || TitleBarUndoTransform is null)
+        {
+            return;
+        }
+
+        _titleBarUndoStoryboard?.Stop();
+        if (show)
+        {
+            TitleBarUndoClipContainer.Visibility = Visibility.Visible;
+            TitleBarUndoClipContainer.Width = TitleBarUndoSlotWidthDip;
+            TitleBarUndoTransform.TranslateX = 0.0;
+            TitleBarUndoTransform.ScaleX = 1.0;
+            TitleBarUndoTransform.ScaleY = 1.0;
+            TitleBarUndoBtn.Opacity = 1.0;
+            TitleBarUndoBtn.IsHitTestVisible = true;
+        }
+        else
+        {
+            TitleBarUndoBtn.IsHitTestVisible = false;
+            TitleBarUndoBtn.Opacity = 0.0;
+            TitleBarUndoTransform.TranslateX = 8.0;
+            TitleBarUndoTransform.ScaleX = 0.84;
+            TitleBarUndoTransform.ScaleY = 0.84;
+            TitleBarUndoClipContainer.Width = 0.0;
+            TitleBarUndoClipContainer.Visibility = Visibility.Collapsed;
+        }
+
+        DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
+    }
+
+    private void AnimateTitleBarUndoButton(bool show)
+    {
+        if (TitleBarUndoClipContainer is null || TitleBarUndoBtn is null || TitleBarUndoTransform is null)
+        {
+            return;
+        }
+
+        if (!_isWindowLoaded)
+        {
+            ApplyTitleBarUndoStateImmediate(show);
+            return;
+        }
+
+        if (!show && TitleBarUndoClipContainer.Visibility == Visibility.Collapsed)
+        {
+            ApplyTitleBarUndoStateImmediate(false);
+            return;
+        }
+
+        _titleBarUndoStoryboard?.Stop();
+        TitleBarUndoClipContainer.Visibility = Visibility.Visible;
+        TitleBarUndoBtn.IsHitTestVisible = show;
+
+        double startW = TitleBarUndoClipContainer.ActualWidth > 0.5
+            ? TitleBarUndoClipContainer.ActualWidth
+            : (double.IsNaN(TitleBarUndoClipContainer.Width) ? (show ? 0.0 : TitleBarUndoSlotWidthDip) : TitleBarUndoClipContainer.Width);
+        double targetW = show ? TitleBarUndoSlotWidthDip : 0.0;
+
+        double startX = show ? (startW < 1.0 ? 8.0 : TitleBarUndoTransform.TranslateX) : TitleBarUndoTransform.TranslateX;
+        double targetX = show ? 0.0 : 8.0;
+
+        double startScale = show ? (startW < 1.0 ? 0.84 : TitleBarUndoTransform.ScaleX) : TitleBarUndoTransform.ScaleX;
+        double targetScale = show ? 1.0 : 0.84;
+
+        double startOpacity = show ? (startW < 1.0 ? 0.0 : TitleBarUndoBtn.Opacity) : TitleBarUndoBtn.Opacity;
+        double targetOpacity = show ? 1.0 : 0.0;
+
+        var sb = new Storyboard();
+        var layoutEase = new ExponentialEase { Exponent = 4.5, EasingMode = EasingMode.EaseOut };
+        var fadeEase = new CubicEase { EasingMode = show ? EasingMode.EaseOut : EasingMode.EaseIn };
+        var layoutDuration = new Duration(TimeSpan.FromMilliseconds(show ? 240 : 200));
+        var fadeDuration = new Duration(TimeSpan.FromMilliseconds(show ? 180 : 140));
+
+        var widthAnim = new DoubleAnimation
+        {
+            From = startW,
+            To = targetW,
+            Duration = layoutDuration,
+            EasingFunction = layoutEase,
+            EnableDependentAnimation = true
+        };
+        Storyboard.SetTarget(widthAnim, TitleBarUndoClipContainer);
+        Storyboard.SetTargetProperty(widthAnim, "Width");
+        sb.Children.Add(widthAnim);
+
+        var translateAnim = new DoubleAnimation
+        {
+            From = startX,
+            To = targetX,
+            Duration = layoutDuration,
+            EasingFunction = layoutEase
+        };
+        Storyboard.SetTarget(translateAnim, TitleBarUndoTransform);
+        Storyboard.SetTargetProperty(translateAnim, "TranslateX");
+        sb.Children.Add(translateAnim);
+
+        var scaleXAnim = new DoubleAnimation
+        {
+            From = startScale,
+            To = targetScale,
+            Duration = fadeDuration,
+            EasingFunction = fadeEase
+        };
+        Storyboard.SetTarget(scaleXAnim, TitleBarUndoTransform);
+        Storyboard.SetTargetProperty(scaleXAnim, "ScaleX");
+        sb.Children.Add(scaleXAnim);
+
+        var scaleYAnim = new DoubleAnimation
+        {
+            From = startScale,
+            To = targetScale,
+            Duration = fadeDuration,
+            EasingFunction = fadeEase
+        };
+        Storyboard.SetTarget(scaleYAnim, TitleBarUndoTransform);
+        Storyboard.SetTargetProperty(scaleYAnim, "ScaleY");
+        sb.Children.Add(scaleYAnim);
+
+        var opacityAnim = new DoubleAnimation
+        {
+            From = startOpacity,
+            To = targetOpacity,
+            Duration = fadeDuration,
+            EasingFunction = fadeEase
+        };
+        Storyboard.SetTarget(opacityAnim, TitleBarUndoBtn);
+        Storyboard.SetTargetProperty(opacityAnim, "Opacity");
+        sb.Children.Add(opacityAnim);
+
+        sb.Completed += (_, _) =>
+        {
+            ApplyTitleBarUndoStateImmediate(ViewModel.CanUndoAnnotation);
+        };
+
+        _titleBarUndoStoryboard = sb;
         sb.Begin();
     }
 
@@ -2177,6 +2327,14 @@ public sealed partial class MainWindow : Window
             TryAddPassthrough(OpenFileBtn);
             TryAddPassthrough(SearchBtn);
             TryAddPassthrough(SettingsBackBtn);
+            if (TitleBarUndoClipContainer is not null &&
+                TitleBarUndoClipContainer.Visibility == Visibility.Visible &&
+                TitleBarUndoClipContainer.ActualWidth >= 4.0 &&
+                ViewModel.CanUndoAnnotation)
+            {
+                TryAddPassthrough(TitleBarUndoBtn);
+            }
+
             TryAddPassthrough(AnnotationToolsToggleBtn);
             TryAddPassthrough(InsertMenuBtn);
             TryAddPassthrough(DocumentMenuBtn);
@@ -2271,11 +2429,16 @@ public sealed partial class MainWindow : Window
             }
 
             ApplySidebarToggleStateImmediate(collapse: !ViewModel.HasDocument || !sidebarAllowed);
+            ApplyTitleBarUndoStateImmediate(ViewModel.CanUndoAnnotation);
             UpdateSidebarLayout();
             UpdateMainContainerStyle();
             UpdateDocumentAreaNarrowState();
             SelectSidebarTab(ViewModel.SidebarTab);
             DispatcherQueue.TryEnqueue(UpdateTitleBarNonClientRegions);
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.CanUndoAnnotation))
+        {
+            AnimateTitleBarUndoButton(ViewModel.CanUndoAnnotation);
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsAnnotationToolbarOpen))
         {

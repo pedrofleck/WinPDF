@@ -127,19 +127,31 @@
                 <!-- Annotations & Comments section -->
                 <StackPanel
                     Spacing="4"
-                    Visibility="{x:Bind converters:UiHelpers.HasItems(ViewModel.CurrentDocument.AnnotationsSummary.Count), Mode=OneWay}">
-                    <TextBlock
-                        x:Uid="Annotations_SectionHeader"
-                        Margin="4,4,4,2"
+                    Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.CurrentDocument.HasAnyAnnotations), Mode=OneWay}">
+                    <CheckBox
+                        x:Uid="Annotations_FilterCommentsCheckBox"
+                        Margin="4,2,4,2"
+                        MinWidth="0"
+                        MinHeight="28"
+                        FontSize="12.5"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        FontWeight="SemiBold"
-                        Style="{StaticResource CaptionTextBlockStyle}" />
+                        IsChecked="{x:Bind ViewModel.CurrentDocument.FilterCommentsOnly, Mode=TwoWay}" />
+
+                    <TextBlock
+                        x:Uid="Annotations_FilterEmptyText"
+                        Margin="4,12,4,4"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Style="{StaticResource CaptionTextBlockStyle}"
+                        TextAlignment="Center"
+                        TextWrapping="Wrap"
+                        Visibility="{x:Bind converters:UiHelpers.HasNoItems(ViewModel.CurrentDocument.AnnotationsSummary.Count), Mode=OneWay}" />
 
                     <ListView
                         IsItemClickEnabled="True"
                         ItemClick="OnAnnotationItemClick"
                         SelectionMode="None"
-                        ItemsSource="{x:Bind ViewModel.CurrentDocument.AnnotationsSummary, Mode=OneWay}">
+                        ItemsSource="{x:Bind ViewModel.CurrentDocument.AnnotationsSummary, Mode=OneWay}"
+                        Visibility="{x:Bind converters:UiHelpers.HasItems(ViewModel.CurrentDocument.AnnotationsSummary.Count), Mode=OneWay}">
                         <ListView.ItemContainerTransitions>
                             <TransitionCollection>
                                 <AddDeleteThemeTransition />

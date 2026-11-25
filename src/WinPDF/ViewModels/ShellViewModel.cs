@@ -179,6 +179,41 @@ public sealed partial class ShellViewModel : ObservableObject
     public partial AnnotationTool ActiveTool { get; set; } = AnnotationTool.Select;
 
     /// <summary>
+    /// Gets or sets the geometric shape kind created by <see cref="AnnotationTool.Shape"/> (persisted across sessions).
+    /// </summary>
+    [ObservableProperty]
+    public partial PdfAnnotationShapeKind ActiveShapeKind { get; set; } = PdfAnnotationShapeKind.Line;
+
+    partial void OnActiveShapeKindChanged(PdfAnnotationShapeKind value)
+    {
+        if (!_isInitializingSettings)
+        {
+            _settingsService.Update(s => s.LastUsedShape = value);
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the preferred stroke / border thickness in PDF points for shapes and ink strokes.
+    /// </summary>
+    [ObservableProperty]
+    public partial double StrokeThicknessPt { get; set; } = 2.0;
+
+    partial void OnStrokeThicknessPtChanged(double value)
+    {
+        double clamped = Math.Clamp(Math.Round(value * 2.0) / 2.0, 1.0, 12.0);
+        if (Math.Abs(clamped - value) > 0.001)
+        {
+            StrokeThicknessPt = clamped;
+            return;
+        }
+
+        if (!_isInitializingSettings)
+        {
+            _settingsService.Update(s => s.DefaultStrokeWidthPt = clamped);
+        }
+    }
+
+    /// <summary>
     /// Gets or sets a value indicating whether touch contacts are routed to drawing instead of panning/zooming.
     /// </summary>
     [ObservableProperty]
@@ -197,6 +232,26 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     [ObservableProperty]
     public partial bool IsAnnotationToolbarOpen { get; set; }
+
+    partial void OnIsAnnotationToolbarOpenChanged(bool value)
+    {
+        if (value)
+        {
+            PendingImageToInsert = null;
+            if (ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage)
+            {
+                ActiveTool = AnnotationTool.Select;
+            }
+        }
+        else
+        {
+            IsAnnotationNoticeOpen = false;
+            if (ActiveTool != AnnotationTool.Select)
+            {
+                ActiveTool = AnnotationTool.Select;
+            }
+        }
+    }
 
     /// <summary>
     /// Gets or sets a value indicating whether the annotation not implemented notice InfoBar is open.
@@ -467,6 +522,10 @@ public sealed partial class ShellViewModel : ObservableObject
         CurrentTheme = _settingsService.Settings.Theme;
         ViewMode = _settingsService.Settings.DefaultViewMode;
         IsTouchDrawingEnabled = _settingsService.Settings.DefaultTouchDrawing;
+        ActiveShapeKind = Enum.IsDefined(_settingsService.Settings.LastUsedShape)
+            ? _settingsService.Settings.LastUsedShape
+            : PdfAnnotationShapeKind.Line;
+        StrokeThicknessPt = Math.Clamp(_settingsService.Settings.DefaultStrokeWidthPt, 1.0, 12.0);
         IsSidebarOpen = _settingsService.Settings.IsSidebarOpen;
         _isInitializingSettings = false;
 
@@ -1535,22 +1594,6 @@ public sealed partial class ShellViewModel : ObservableObject
     public void ToggleAnnotationToolbar()
     {
         IsAnnotationToolbarOpen = !IsAnnotationToolbarOpen;
-        if (IsAnnotationToolbarOpen)
-        {
-            PendingImageToInsert = null;
-            if (ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage)
-            {
-                ActiveTool = AnnotationTool.Select;
-            }
-        }
-        else
-        {
-            IsAnnotationNoticeOpen = false;
-            if (ActiveTool != AnnotationTool.Select)
-            {
-                ActiveTool = AnnotationTool.Select;
-            }
-        }
     }
 
     /// <summary>
@@ -1663,12 +1706,12 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Cancels any active Insert-menu placement mode and restores <see cref="AnnotationTool.Select"/>.
+    /// Cancels any active Insert-menu or Shape placement mode and restores <see cref="AnnotationTool.Select"/>.
     /// </summary>
     public void CancelActiveInsertTool()
     {
         PendingImageToInsert = null;
-        if (ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage)
+        if (ActiveTool is AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage or AnnotationTool.Shape)
         {
             ActiveTool = AnnotationTool.Select;
         }

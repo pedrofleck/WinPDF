@@ -224,6 +224,19 @@ public sealed partial class AnnotationItemViewModel : ObservableObject
             return ResourceStrings.Get(ResourceKeys.AnnotSubtypeFreeText);
         }
 
+        if (info.Subtype is PdfAnnotationSubtype.Line or PdfAnnotationSubtype.Ink)
+        {
+            if (string.Equals(info.Subject, "Arrow", StringComparison.OrdinalIgnoreCase))
+            {
+                return ResourceStrings.Get(ResourceKeys.AnnotSubtypeArrow);
+            }
+
+            if (string.Equals(info.Subject, "Line", StringComparison.OrdinalIgnoreCase))
+            {
+                return ResourceStrings.Get(ResourceKeys.AnnotSubtypeLine);
+            }
+        }
+
         string key = info.Subtype switch
         {
             PdfAnnotationSubtype.Highlight => ResourceKeys.AnnotSubtypeHighlight,

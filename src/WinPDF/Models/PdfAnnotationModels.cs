@@ -336,7 +336,7 @@ public sealed record PdfAnnotationInfo(
     public bool IsTextMarkup => Subtype is PdfAnnotationSubtype.Highlight or PdfAnnotationSubtype.Underline or PdfAnnotationSubtype.Squiggly or PdfAnnotationSubtype.StrikeOut;
 
     /// <summary>Gets a value indicating whether the user can recolor this annotation directly.</summary>
-    public bool SupportsColorChange => IsTextMarkup || Subtype is PdfAnnotationSubtype.Text or PdfAnnotationSubtype.FreeText || TextStyle is not null;
+    public bool SupportsColorChange => IsTextMarkup || Subtype is PdfAnnotationSubtype.Text or PdfAnnotationSubtype.FreeText or PdfAnnotationSubtype.Line or PdfAnnotationSubtype.Ink or PdfAnnotationSubtype.Square or PdfAnnotationSubtype.Circle || TextStyle is not null;
 
     /// <summary>Gets a value indicating whether this annotation can be dragged to a new position on the page.</summary>
     public bool IsMovable => !IsSignatureWidget && !IsTextMarkup;
@@ -345,7 +345,7 @@ public sealed record PdfAnnotationInfo(
     public bool CanCopyOrCut => !IsSignatureWidget && !IsTextMarkup;
 
     /// <summary>Gets a value indicating whether this annotation supports interactive corner-handle resizing.</summary>
-    public bool IsResizable => Subtype == PdfAnnotationSubtype.Stamp && !IsSignatureWidget && TextStyle is null;
+    public bool IsResizable => !IsSignatureWidget && TextStyle is null && Subtype is PdfAnnotationSubtype.Stamp or PdfAnnotationSubtype.Square or PdfAnnotationSubtype.Circle;
 
     /// <summary>
     /// Determines whether the specified PDF user-space point lies inside this annotation's hit area.
@@ -520,6 +520,29 @@ public sealed record PdfCreateImageRequest(
     string Subject = "",
     double? ExplicitWidthPt = null,
     double? ExplicitHeightPt = null);
+
+/// <summary>
+/// Request to insert a geometric shape annotation (Line, Arrow, Rectangle, or Ellipse) onto a PDF page.
+/// </summary>
+/// <param name="PageIndex">Zero-based target page index.</param>
+/// <param name="ShapeKind">Shape variant to create.</param>
+/// <param name="StartPdfX">Start X coordinate in PDF user space (points).</param>
+/// <param name="StartPdfY">Start Y coordinate in PDF user space (points).</param>
+/// <param name="EndPdfX">End X coordinate in PDF user space (points).</param>
+/// <param name="EndPdfY">End Y coordinate in PDF user space (points).</param>
+/// <param name="Color">Stroke RGBA color.</param>
+/// <param name="StrokeWidthPt">Stroke width in PDF points.</param>
+/// <param name="Author">Author display name.</param>
+public sealed record PdfCreateShapeRequest(
+    int PageIndex,
+    PdfAnnotationShapeKind ShapeKind,
+    float StartPdfX,
+    float StartPdfY,
+    float EndPdfX,
+    float EndPdfY,
+    PdfAnnotationColor Color,
+    float StrokeWidthPt,
+    string Author);
 
 /// <summary>
 /// Request to update the comment body and optional color of an existing annotation.

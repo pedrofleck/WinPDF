@@ -6,6 +6,7 @@ using System.Runtime.InteropServices.WindowsRuntime;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Graphics.Canvas;
 using Microsoft.Graphics.Canvas.Effects;
+using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.Graphics.Canvas.UI;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Input;
@@ -85,6 +86,12 @@ public sealed partial class PdfPageCanvas : Grid
     private static readonly InputSystemCursor s_crossCursor = InputSystemCursor.Create(InputSystemCursorShape.Cross);
     private static readonly InputSystemCursor s_sizeNwSeCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeNorthwestSoutheast);
     private static readonly InputSystemCursor s_sizeNeSwCursor = InputSystemCursor.Create(InputSystemCursorShape.SizeNortheastSouthwest);
+    private static readonly CanvasStrokeStyle s_roundShapeStrokeStyle = new()
+    {
+        StartCap = CanvasCapStyle.Round,
+        EndCap = CanvasCapStyle.Round,
+        LineJoin = CanvasLineJoin.Round,
+    };
 
     [ComImport]
     [Guid("905a0fef-bc53-11df-8c49-001e4fc686da")]
@@ -322,6 +329,15 @@ public sealed partial class PdfPageCanvas : Grid
     private PdfAnnotationInfo? _pendingTouchHoldOpenAnnot;
     private PdfAnnotationInfo? _touchHoldMovableCandidate;
 
+    // Interactive geometric shape drawing state (Mouse: 2-click start -> end, Touch: touch-and-drag)
+    private bool _isDrawingShape;
+    private bool _shapeDrawIsTouch;
+    private PdfAnnotationShapeKind _shapeDrawKind;
+    private Point _shapeDrawStartDip;
+    private Point _shapeDrawRawEndDip;
+    private Point _shapeDrawEndDip;
+    private uint _shapeTouchPointerId;
+
     /// <summary>
     /// Gets a value indicating whether this canvas is currently waiting for a touch hold threshold.
     /// </summary>
@@ -341,6 +357,32 @@ public sealed partial class PdfPageCanvas : Grid
     /// Gets a value indicating whether an interactive touch annotation drag or corner-resize session is currently active on this canvas.
     /// </summary>
     public bool IsTouchDraggingAnnotation => _isTouchDraggingAnnotation || _isTouchResizingAnnotation;
+
+    /// <summary>
+    /// Gets a value indicating whether a geometric shape drawing gesture is currently active on this canvas.
+    /// </summary>
+    public bool IsDrawingShape => _isDrawingShape;
+
+    /// <summary>
+    /// Gets a value indicating whether a touch-drag geometric shape drawing gesture is currently active on this canvas.
+    /// </summary>
+    public bool IsTouchDrawingShape => _isDrawingShape && _shapeDrawIsTouch;
+
+    /// <summary>
+    /// Event raised when a touch shape-draw gesture starts on a page canvas, passing the canvas and touch pointer ID.
+    /// </summary>
+    public static event Action<PdfPageCanvas, uint>? TouchShapeDrawStarted;
+
+    /// <summary>
+    /// Event raised when a touch shape-draw gesture completes or is canceled.
+    /// </summary>
+    public static event Action<PdfPageCanvas>? TouchShapeDrawEnded;
+
+    /// <summary>
+    /// Event raised when a geometric shape drawing interaction completes on a page canvas.
+    /// Parameters: canvas, shapeKind, startPdfPoint, endPdfPoint.
+    /// </summary>
+    public static event Action<PdfPageCanvas, PdfAnnotationShapeKind, Vector2, Vector2>? ShapeCompleted;
 
     /// <summary>
     /// Event raised when a 300ms touch hold over a movable annotation (or selected resize handle) starts touch dragging/resizing.
@@ -531,7 +573,9 @@ public sealed partial class PdfPageCanvas : Grid
         {
             ShellViewModel? shell = _shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>();
             DocumentViewModel? doc = _observedDocument ?? shell?.CurrentDocument;
-            usePagedTouchManip = shell?.IsPresentationMode == true || (doc is not null && !doc.IsContinuous);
+            usePagedTouchManip = shell?.ActiveTool == AnnotationTool.Shape ||
+                                 shell?.IsPresentationMode == true ||
+                                 (doc is not null && !doc.IsContinuous);
         }
 
         ManipulationModes customFlags = includeInertia
@@ -1029,7 +1073,7 @@ public sealed partial class PdfPageCanvas : Grid
             return false;
         }
 
-        return shell.ActiveTool is AnnotationTool.Select or AnnotationTool.Highlighter or AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage;
+        return shell.ActiveTool is AnnotationTool.Select or AnnotationTool.Highlighter or AnnotationTool.TextNote or AnnotationTool.InsertText or AnnotationTool.InsertImage or AnnotationTool.Shape;
     }
 
     private void FocusParentViewerIfNeeded()
@@ -1169,8 +1213,10 @@ public sealed partial class PdfPageCanvas : Grid
     private void OnTouchSelectionPollingRendering(object? sender, object e)
     {
         bool isDraggingOrResizingAnnot = _isTouchDraggingAnnotation || _isTouchResizingAnnotation;
+        bool isTouchDrawingShape = _isDrawingShape && _shapeDrawIsTouch;
         bool needsPolling = _isTouchSelecting ||
                             isDraggingOrResizingAnnot ||
+                            isTouchDrawingShape ||
                             _isTouchWaitingForCanceledTap ||
                             _pendingTouchHoldOpenAnnot is not null;
 
@@ -1256,6 +1302,54 @@ public sealed partial class PdfPageCanvas : Grid
                     }
 
                     AnnotationClicked?.Invoke(this, pendingAnnot, _touchCurrentDipPoint);
+                }
+            }
+
+            return;
+        }
+
+        // Mode 2.5: Touch drag shape drawing (touch down -> drag -> lift)
+        if (isTouchDrawingShape)
+        {
+            if (!GetPointerInfo(_shapeTouchPointerId, out POINTER_INFO shapePi))
+            {
+                _touchPollingMissingInfoCount++;
+                if (_touchPollingMissingInfoCount >= 6)
+                {
+                    StopTouchSelectionPolling();
+                    CompleteTouchShapeDrawSession(_shapeDrawRawEndDip);
+                }
+
+                return;
+            }
+
+            _touchPollingMissingInfoCount = 0;
+
+            if ((shapePi.pointerFlags & POINTER_FLAG_INCONTACT) == 0 ||
+                (shapePi.pointerFlags & POINTER_FLAG_UP) != 0)
+            {
+                StopTouchSelectionPolling();
+                CompleteTouchShapeDrawSession(_shapeDrawRawEndDip);
+                return;
+            }
+
+            if (_hasTouchStartScreenPx && XamlRoot?.Content is { } shapeRoot)
+            {
+                double scale = XamlRoot.RasterizationScale > 0 ? XamlRoot.RasterizationScale : 1.0;
+                double dxDip = (shapePi.ptPixelLocation.X - _touchStartScreenPx.X) / scale;
+                double dyDip = (shapePi.ptPixelLocation.Y - _touchStartScreenPx.Y) / scale;
+                Point curRootDip = new(_touchPressRootDipPoint.X + dxDip, _touchPressRootDipPoint.Y + dyDip);
+                try
+                {
+                    Point curCanvasDip = shapeRoot.TransformToVisual(this).TransformPoint(curRootDip);
+                    if (Math.Abs(curCanvasDip.X - _shapeDrawRawEndDip.X) > 0.25 ||
+                        Math.Abs(curCanvasDip.Y - _shapeDrawRawEndDip.Y) > 0.25)
+                    {
+                        UpdateTouchShapeDrawPoint(curCanvasDip);
+                    }
+                }
+                catch
+                {
                 }
             }
 
@@ -1389,7 +1483,7 @@ public sealed partial class PdfPageCanvas : Grid
         _touchHoldMovableCandidate = null;
         _touchHoldHitResult = default;
         _hasTouchHoldHitResult = false;
-        if (!_isTouchSelecting && !_isTouchDraggingAnnotation && !_isTouchResizingAnnotation)
+        if (!_isTouchSelecting && !_isTouchDraggingAnnotation && !_isTouchResizingAnnotation && !(_isDrawingShape && _shapeDrawIsTouch))
         {
             StopTouchSelectionPolling();
         }
@@ -1399,11 +1493,213 @@ public sealed partial class PdfPageCanvas : Grid
         }
     }
 
+    private static bool IsShiftKeyDown() =>
+        (InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift) &
+         Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
+
+    private Point ClampToCanvasDip(Point posDip)
+    {
+        if (PageInfo is null)
+        {
+            return posDip;
+        }
+
+        bool swap = PageCoordinateTransform.NormalizeRotation(PageInfo.Rotation + RotationAngle) is 90 or 270;
+        double pageW = ActualWidth > 1.0 ? ActualWidth : (swap ? PageInfo.HeightPt : PageInfo.WidthPt) * PageCoordinateTransform.DipsPerPoint;
+        double pageH = ActualHeight > 1.0 ? ActualHeight : (swap ? PageInfo.WidthPt : PageInfo.HeightPt) * PageCoordinateTransform.DipsPerPoint;
+        return new Point(
+            Math.Clamp(posDip.X, 0.0, Math.Max(1.0, pageW)),
+            Math.Clamp(posDip.Y, 0.0, Math.Max(1.0, pageH)));
+    }
+
+    private Point ConstrainShapeEndPointDip(
+        PdfAnnotationShapeKind kind,
+        Point startDip,
+        Point rawEndDip,
+        bool constrain)
+    {
+        if (!constrain || PageInfo is null)
+        {
+            return ClampToCanvasDip(rawEndDip);
+        }
+
+        bool swap = PageCoordinateTransform.NormalizeRotation(PageInfo.Rotation + RotationAngle) is 90 or 270;
+        double pageW = ActualWidth > 1.0 ? ActualWidth : (swap ? PageInfo.HeightPt : PageInfo.WidthPt) * PageCoordinateTransform.DipsPerPoint;
+        double pageH = ActualHeight > 1.0 ? ActualHeight : (swap ? PageInfo.WidthPt : PageInfo.HeightPt) * PageCoordinateTransform.DipsPerPoint;
+        double dx = rawEndDip.X - startDip.X;
+        double dy = rawEndDip.Y - startDip.Y;
+
+        if (kind is PdfAnnotationShapeKind.Line or PdfAnnotationShapeKind.Arrow)
+        {
+            double len = Math.Sqrt((dx * dx) + (dy * dy));
+            if (len < 0.5)
+            {
+                return startDip;
+            }
+
+            double snappedRad = Math.Round(Math.Atan2(dy, dx) / (Math.PI / 4.0)) * (Math.PI / 4.0);
+            double ux = Math.Cos(snappedRad);
+            double uy = Math.Sin(snappedRad);
+            if (Math.Abs(ux) < 1e-6)
+            {
+                ux = 0.0;
+            }
+            if (Math.Abs(uy) < 1e-6)
+            {
+                uy = 0.0;
+            }
+
+            double maxLen = len;
+            if (ux > 0.0)
+            {
+                maxLen = Math.Min(maxLen, Math.Max(0.0, (pageW - startDip.X) / ux));
+            }
+            else if (ux < 0.0)
+            {
+                maxLen = Math.Min(maxLen, Math.Max(0.0, startDip.X / (-ux)));
+            }
+
+            if (uy > 0.0)
+            {
+                maxLen = Math.Min(maxLen, Math.Max(0.0, (pageH - startDip.Y) / uy));
+            }
+            else if (uy < 0.0)
+            {
+                maxLen = Math.Min(maxLen, Math.Max(0.0, startDip.Y / (-uy)));
+            }
+
+            return new Point(startDip.X + (ux * maxLen), startDip.Y + (uy * maxLen));
+        }
+
+        double side = Math.Max(Math.Abs(dx), Math.Abs(dy));
+        double sx = dx >= 0.0 ? 1.0 : -1.0;
+        double sy = dy >= 0.0 ? 1.0 : -1.0;
+        double maxSideX = sx > 0.0 ? Math.Max(0.0, pageW - startDip.X) : startDip.X;
+        double maxSideY = sy > 0.0 ? Math.Max(0.0, pageH - startDip.Y) : startDip.Y;
+        side = Math.Min(side, Math.Min(maxSideX, maxSideY));
+        return new Point(startDip.X + (sx * side), startDip.Y + (sy * side));
+    }
+
+    internal void RefreshShapePreviewConstraint()
+    {
+        if (!_isDrawingShape || PageInfo is null)
+        {
+            return;
+        }
+
+        Point updated = ConstrainShapeEndPointDip(_shapeDrawKind, _shapeDrawStartDip, _shapeDrawRawEndDip, IsShiftKeyDown());
+        if (Math.Abs(updated.X - _shapeDrawEndDip.X) > 0.2 || Math.Abs(updated.Y - _shapeDrawEndDip.Y) > 0.2)
+        {
+            _shapeDrawEndDip = updated;
+            InvalidateOverlays();
+        }
+    }
+
+    internal void UpdateTouchShapeDrawPoint(Point posInCanvasDip)
+    {
+        if (!_isDrawingShape || !_shapeDrawIsTouch || _isUnloaded || PageInfo is null)
+        {
+            return;
+        }
+
+        _shapeDrawRawEndDip = ClampToCanvasDip(posInCanvasDip);
+        _shapeDrawEndDip = ConstrainShapeEndPointDip(_shapeDrawKind, _shapeDrawStartDip, _shapeDrawRawEndDip, IsShiftKeyDown());
+        InvalidateOverlays();
+    }
+
+    internal void CompleteTouchShapeDrawSession(Point? finalInCanvasDip)
+    {
+        StopTouchSelectionPolling();
+        if (!_isDrawingShape || !_shapeDrawIsTouch)
+        {
+            return;
+        }
+
+        if (finalInCanvasDip is { } finalPt && PageInfo is not null)
+        {
+            _shapeDrawRawEndDip = ClampToCanvasDip(finalPt);
+        }
+
+        Point finalEndDip = ConstrainShapeEndPointDip(_shapeDrawKind, _shapeDrawStartDip, _shapeDrawRawEndDip, IsShiftKeyDown());
+        PdfAnnotationShapeKind commitKind = _shapeDrawKind;
+        Point commitStart = _shapeDrawStartDip;
+
+        _isDrawingShape = false;
+        _shapeDrawIsTouch = false;
+        _shapeTouchPointerId = 0;
+        _activeCanvasTouchPointerTicks.Clear();
+
+        if (_touchPointerRef is not null)
+        {
+            _isReleasingCapture = true;
+            try
+            {
+                ReleasePointerCapture(_touchPointerRef);
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _isReleasingCapture = false;
+                _touchPointerRef = null;
+            }
+        }
+
+        InvalidateOverlays();
+        TouchShapeDrawEnded?.Invoke(this);
+
+        if (PageInfo is not null && double.Hypot(finalEndDip.X - commitStart.X, finalEndDip.Y - commitStart.Y) >= 5.0)
+        {
+            ShapeCompleted?.Invoke(this, commitKind, ToPdfPoint(commitStart), ToPdfPoint(finalEndDip));
+        }
+    }
+
+    internal void CancelShapeDrawing()
+    {
+        if (!_isDrawingShape)
+        {
+            return;
+        }
+
+        bool wasTouch = _shapeDrawIsTouch;
+        _isDrawingShape = false;
+        _shapeDrawIsTouch = false;
+        _shapeTouchPointerId = 0;
+        if (wasTouch)
+        {
+            StopTouchSelectionPolling();
+            if (_touchPointerRef is not null)
+            {
+                _isReleasingCapture = true;
+                try
+                {
+                    ReleasePointerCapture(_touchPointerRef);
+                }
+                catch
+                {
+                }
+                finally
+                {
+                    _isReleasingCapture = false;
+                    _touchPointerRef = null;
+                }
+            }
+        }
+
+        InvalidateOverlays();
+        if (wasTouch)
+        {
+            TouchShapeDrawEnded?.Invoke(this);
+        }
+    }
+
     /// <summary>
     /// Cancels any pending touch hold, active touch text selection drag, or active touch annotation drag/resize.
     /// </summary>
     internal void CancelTouchSelectionAndHold()
     {
+        CancelShapeDrawing();
         StopTouchSelectionPolling();
         _touchHoldTimer.Stop();
         _isTouchWaitingForHold = false;
@@ -1545,6 +1841,117 @@ public sealed partial class PdfPageCanvas : Grid
         {
             // Keep Finger 1's active annotation drag/resize intact while Finger 2 pans the viewport in DocumentView.
             return;
+        }
+
+        ShellViewModel? activeShell = _shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>();
+        if (activeShell?.ActiveTool == AnnotationTool.Shape)
+        {
+            if (isTouch)
+            {
+                long shapeNow = Environment.TickCount64;
+                PruneStaleCanvasTouchPointers(shapeNow);
+                _activeCanvasTouchPointerTicks[e.Pointer.PointerId] = shapeNow;
+                if (_activeCanvasTouchPointerTicks.Count > 1)
+                {
+                    CancelShapeDrawing();
+                    return;
+                }
+
+                SubscribeToActiveDocument();
+                TouchSelectionDismissRequested?.Invoke();
+                _observedDocument?.ClearSelection();
+                if (_observedDocument is not null)
+                {
+                    _observedDocument.SelectedAnnotation = null;
+                }
+
+                Point clampedStart = ClampToCanvasDip(pt.Position);
+                _isDrawingShape = true;
+                _shapeDrawIsTouch = true;
+                _shapeDrawKind = activeShell.ActiveShapeKind;
+                _shapeDrawStartDip = clampedStart;
+                _shapeDrawRawEndDip = clampedStart;
+                _shapeDrawEndDip = clampedStart;
+                _shapeTouchPointerId = e.Pointer.PointerId;
+                _touchPointerId = e.Pointer.PointerId;
+                _touchPointerRef = e.Pointer;
+                _touchPressRootDipPoint = XamlRoot?.Content is { } sRootElem
+                    ? e.GetCurrentPoint(sRootElem).Position
+                    : clampedStart;
+                _hasTouchStartScreenPx = GetPointerInfo(_shapeTouchPointerId, out POINTER_INFO shapeStartPi);
+                _touchStartScreenPx = _hasTouchStartScreenPx ? shapeStartPi.ptPixelLocation : default;
+                _touchPollingMissingInfoCount = 0;
+
+                TouchShapeDrawStarted?.Invoke(this, _shapeTouchPointerId);
+                try
+                {
+                    _ = CapturePointer(e.Pointer);
+                }
+                catch
+                {
+                }
+
+                StartTouchSelectionPolling();
+                InvalidateOverlays();
+                e.Handled = true;
+                return;
+            }
+
+            if (pt.Properties.IsRightButtonPressed)
+            {
+                if (_isDrawingShape)
+                {
+                    CancelShapeDrawing();
+                    e.Handled = true;
+                    return;
+                }
+
+                return;
+            }
+
+            if (pt.Properties.IsLeftButtonPressed)
+            {
+                SubscribeToActiveDocument();
+                _observedDocument?.ClearSelection();
+                if (_observedDocument is not null)
+                {
+                    _observedDocument.SelectedAnnotation = null;
+                }
+
+                Point clampedPt = ClampToCanvasDip(pt.Position);
+                if (!_isDrawingShape || _shapeDrawIsTouch)
+                {
+                    // Click 1: anchor start point; mouse move renders live Win2D preview until Click 2.
+                    _isDrawingShape = true;
+                    _shapeDrawIsTouch = false;
+                    _shapeDrawKind = activeShell.ActiveShapeKind;
+                    _shapeDrawStartDip = clampedPt;
+                    _shapeDrawRawEndDip = clampedPt;
+                    _shapeDrawEndDip = clampedPt;
+                    SetCursorShape(InputSystemCursorShape.Cross);
+                    InvalidateOverlays();
+                    e.Handled = true;
+                    return;
+                }
+
+                // Click 2: constrain end point if Shift held and commit the shape.
+                _shapeDrawRawEndDip = clampedPt;
+                Point finalEndDip = ConstrainShapeEndPointDip(_shapeDrawKind, _shapeDrawStartDip, clampedPt, IsShiftKeyDown());
+                PdfAnnotationShapeKind commitKind = _shapeDrawKind;
+                Point commitStart = _shapeDrawStartDip;
+                _isDrawingShape = false;
+                _shapeDrawIsTouch = false;
+                InvalidateOverlays();
+
+                double dist = double.Hypot(finalEndDip.X - commitStart.X, finalEndDip.Y - commitStart.Y);
+                if (dist >= 4.0)
+                {
+                    ShapeCompleted?.Invoke(this, commitKind, ToPdfPoint(commitStart), ToPdfPoint(finalEndDip));
+                }
+
+                e.Handled = true;
+                return;
+            }
         }
 
         if (!isTouch && !pt.Properties.IsLeftButtonPressed)
@@ -3063,6 +3470,13 @@ public sealed partial class PdfPageCanvas : Grid
 
         if (e.Pointer.PointerDeviceType == PointerDeviceType.Touch)
         {
+            if (_isDrawingShape && _shapeDrawIsTouch && e.Pointer.PointerId == _shapeTouchPointerId)
+            {
+                e.Handled = true;
+                UpdateTouchShapeDrawPoint(e.GetCurrentPoint(this).Position);
+                return;
+            }
+
             if (e.Pointer.PointerId == _touchPointerId)
             {
                 Point touchPosDip = e.GetCurrentPoint(this).Position;
@@ -3085,6 +3499,20 @@ public sealed partial class PdfPageCanvas : Grid
         }
 
         Point posDip = e.GetCurrentPoint(this).Position;
+
+        if ((_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool == AnnotationTool.Shape)
+        {
+            SetCursorShape(InputSystemCursorShape.Cross);
+            if (_isDrawingShape && !_shapeDrawIsTouch)
+            {
+                _shapeDrawRawEndDip = ClampToCanvasDip(posDip);
+                _shapeDrawEndDip = ConstrainShapeEndPointDip(_shapeDrawKind, _shapeDrawStartDip, _shapeDrawRawEndDip, IsShiftKeyDown());
+                InvalidateOverlays();
+                e.Handled = true;
+            }
+
+            return;
+        }
 
         if (_isPointerDown && _isResizingAnnotation && _resizingAnnotation is not null && PageInfo is not null)
         {
@@ -3172,6 +3600,13 @@ public sealed partial class PdfPageCanvas : Grid
         if (e.Pointer.PointerDeviceType == PointerDeviceType.Touch)
         {
             _activeCanvasTouchPointerTicks.Remove(e.Pointer.PointerId);
+            if (_isDrawingShape && _shapeDrawIsTouch && e.Pointer.PointerId == _shapeTouchPointerId)
+            {
+                e.Handled = true;
+                CompleteTouchShapeDrawSession(e.GetCurrentPoint(this).Position);
+                return;
+            }
+
             if (e.Pointer.PointerId == _touchPointerId)
             {
                 Point touchReleaseDip = e.GetCurrentPoint(this).Position;
@@ -3385,6 +3820,21 @@ public sealed partial class PdfPageCanvas : Grid
         if (e.Pointer.PointerDeviceType == PointerDeviceType.Touch)
         {
             uint canceledId = e.Pointer.PointerId;
+            if (_isDrawingShape && _shapeDrawIsTouch && canceledId == _shapeTouchPointerId)
+            {
+                if (GetPointerInfo(_shapeTouchPointerId, out POINTER_INFO shapePi) &&
+                    (shapePi.pointerFlags & POINTER_FLAG_INCONTACT) != 0 &&
+                    (shapePi.pointerFlags & POINTER_FLAG_UP) == 0)
+                {
+                    StartTouchSelectionPolling();
+                    return;
+                }
+
+                _activeCanvasTouchPointerTicks.Remove(canceledId);
+                CompleteTouchShapeDrawSession(_shapeDrawRawEndDip);
+                return;
+            }
+
             bool isDraggingAnnot = _isTouchDraggingAnnotation || _isTouchResizingAnnotation;
             if (isDraggingAnnot && canceledId != _touchPointerId)
             {
@@ -4111,7 +4561,7 @@ public sealed partial class PdfPageCanvas : Grid
         PdfAnnotationInfo? resizedAnnot = _isResizingAnnotation ? _resizingAnnotation : null;
         bool hasResizedAnnotOnPage = resizedAnnot is not null && resizedAnnot.PageIndex == pageIndex;
 
-        if (pageMatches.Count == 0 && !hasSelectionOnPage && !hasSelectedAnnotOnPage && !hasDraggedAnnotOnPage && !hasResizedAnnotOnPage)
+        if (pageMatches.Count == 0 && !hasSelectionOnPage && !hasSelectedAnnotOnPage && !hasDraggedAnnotOnPage && !hasResizedAnnotOnPage && !_isDrawingShape)
         {
             return;
         }
@@ -4285,6 +4735,64 @@ public sealed partial class PdfPageCanvas : Grid
             ds.DrawRectangle(previewRect, previewStroke, 1.75f);
             DrawCornerResizeHandles(ds, previewRect, previewStroke);
         }
+
+        // 6. Live geometric shape drawing preview (Line, Arrow, Rectangle, Ellipse)
+        if (_isDrawingShape)
+        {
+            ShellViewModel? shell = _shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>();
+            PdfAnnotationColor activeColor = doc.ActiveAnnotationColor;
+            Windows.UI.Color strokeColor = Windows.UI.Color.FromArgb(255, activeColor.R, activeColor.G, activeColor.B);
+            double strokePt = Math.Clamp(shell?.StrokeThicknessPt ?? 2.0, 0.75, 24.0);
+            float strokeDip = (float)(strokePt * PageCoordinateTransform.DipsPerPoint);
+
+            Vector2 p1 = new((float)(_shapeDrawStartDip.X + offsetX), (float)(_shapeDrawStartDip.Y + offsetY));
+            Vector2 p2 = new((float)(_shapeDrawEndDip.X + offsetX), (float)(_shapeDrawEndDip.Y + offsetY));
+
+            if (_shapeDrawKind is PdfAnnotationShapeKind.Line or PdfAnnotationShapeKind.Arrow)
+            {
+                ds.DrawLine(p1, p2, strokeColor, strokeDip, s_roundShapeStrokeStyle);
+                if (_shapeDrawKind == PdfAnnotationShapeKind.Arrow)
+                {
+                    float dx = p2.X - p1.X;
+                    float dy = p2.Y - p1.Y;
+                    float len = MathF.Sqrt((dx * dx) + (dy * dy));
+                    if (len > 2.0f)
+                    {
+                        float ux = dx / len;
+                        float uy = dy / len;
+                        float headLenDip = Math.Min(
+                            len * 0.45f,
+                            (float)(Math.Clamp((strokePt * 4.2) + 6.0, 9.0, 34.0) * PageCoordinateTransform.DipsPerPoint));
+                        const float cosA = 0.8829476f;
+                        const float sinA = 0.4694716f;
+                        Vector2 w1 = new(
+                            p2.X - (headLenDip * ((ux * cosA) - (uy * sinA))),
+                            p2.Y - (headLenDip * ((ux * sinA) + (uy * cosA))));
+                        Vector2 w2 = new(
+                            p2.X - (headLenDip * ((ux * cosA) + (uy * sinA))),
+                            p2.Y - (headLenDip * (-(ux * sinA) + (uy * cosA))));
+                        ds.DrawLine(w1, p2, strokeColor, strokeDip, s_roundShapeStrokeStyle);
+                        ds.DrawLine(w2, p2, strokeColor, strokeDip, s_roundShapeStrokeStyle);
+                    }
+                }
+            }
+            else if (_shapeDrawKind == PdfAnnotationShapeKind.Rectangle)
+            {
+                double left = Math.Min(p1.X, p2.X);
+                double top = Math.Min(p1.Y, p2.Y);
+                double width = Math.Max(1.0, Math.Abs(p2.X - p1.X));
+                double height = Math.Max(1.0, Math.Abs(p2.Y - p1.Y));
+                ds.DrawRectangle(new Rect(left, top, width, height), strokeColor, strokeDip, s_roundShapeStrokeStyle);
+            }
+            else
+            {
+                float cx = (p1.X + p2.X) * 0.5f;
+                float cy = (p1.Y + p2.Y) * 0.5f;
+                float rx = Math.Max(0.5f, MathF.Abs(p2.X - p1.X) * 0.5f);
+                float ry = Math.Max(0.5f, MathF.Abs(p2.Y - p1.Y) * 0.5f);
+                ds.DrawEllipse(cx, cy, rx, ry, strokeColor, strokeDip, s_roundShapeStrokeStyle);
+            }
+        }
     }
 
     private static void DrawCornerResizeHandles(CanvasDrawingSession ds, Rect rect, Windows.UI.Color stroke)
@@ -4384,15 +4892,20 @@ public sealed partial class PdfPageCanvas : Grid
         bool shiftDown = (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift) &
                           Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
 
+        bool lockAspectByDefault = _resizingAnnotation?.Subtype == PdfAnnotationSubtype.Stamp;
+        bool preserveAspect = lockAspectByDefault ? !shiftDown : shiftDown;
+
         double w = rawW;
         double h = rawH;
-        if (!shiftDown && _resizeOrigRectDip.Width > 1.0 && _resizeOrigRectDip.Height > 1.0)
+        if (preserveAspect && _resizeOrigRectDip.Width > 1.0 && _resizeOrigRectDip.Height > 1.0)
         {
-            double scale = Math.Max(rawW / _resizeOrigRectDip.Width, rawH / _resizeOrigRectDip.Height);
-            double maxScale = Math.Min(maxW / _resizeOrigRectDip.Width, maxH / _resizeOrigRectDip.Height);
+            double refW = lockAspectByDefault ? _resizeOrigRectDip.Width : 1.0;
+            double refH = lockAspectByDefault ? _resizeOrigRectDip.Height : 1.0;
+            double scale = Math.Max(rawW / refW, rawH / refH);
+            double maxScale = Math.Min(maxW / refW, maxH / refH);
             scale = Math.Min(scale, maxScale);
-            w = Math.Max(20.0, _resizeOrigRectDip.Width * scale);
-            h = Math.Max(20.0, _resizeOrigRectDip.Height * scale);
+            w = Math.Max(20.0, refW * scale);
+            h = Math.Max(20.0, refH * scale);
         }
 
         double left = keepLeft ? anchorX - w : anchorX;

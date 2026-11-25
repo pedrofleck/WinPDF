@@ -38,5 +38,28 @@ public enum AnnotationTool
     /// <summary>
     /// Places an inline formatted text box annotation onto the page.
     /// </summary>
-    InsertText
+    InsertText,
+
+    /// <summary>
+    /// Draws geometric shape annotations (Line, Arrow, Rectangle, Ellipse).
+    /// </summary>
+    Shape
+}
+
+/// <summary>
+/// Supported geometric shape variants for <see cref="AnnotationTool.Shape"/>.
+/// </summary>
+public enum PdfAnnotationShapeKind
+{
+    /// <summary>Straight line segment (<c>/Line</c>).</summary>
+    Line = 0,
+
+    /// <summary>Line segment with an arrowhead at the end point (<c>/Line</c>).</summary>
+    Arrow = 1,
+
+    /// <summary>Axis-aligned rectangle or square (<c>/Square</c>).</summary>
+    Rectangle = 2,
+
+    /// <summary>Axis-aligned ellipse or circle (<c>/Circle</c>).</summary>
+    Ellipse = 3,
 }

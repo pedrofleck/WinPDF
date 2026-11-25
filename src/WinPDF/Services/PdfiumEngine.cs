@@ -2790,6 +2790,20 @@ internal sealed unsafe class PdfiumEngine : IDisposable
             }
             else
             {
+                IReadOnlyList<PdfCapturedPath>? existingPathsForRecolor = null;
+                PdfAnnotationColor? existingInteriorForRecolor = null;
+                if (request.NewColor is not null)
+                {
+                    if (subtype is PdfAnnotationSubtype.Line or PdfAnnotationSubtype.Ink)
+                    {
+                        existingPathsForRecolor = ReadAnnotCapturedPaths(annot);
+                    }
+                    else if (subtype is PdfAnnotationSubtype.Square or PdfAnnotationSubtype.Circle)
+                    {
+                        existingInteriorForRecolor = ReadAnnotInteriorColor(annot, subtype);
+                    }
+                }
+
                 if (request.NewColor is { } newColor)
                 {
                     // PDFium refuses FPDFAnnot_SetColor if an appearance stream already exists; clear AP first.
@@ -2836,6 +2850,90 @@ internal sealed unsafe class PdfiumEngine : IDisposable
                     {
                         string apStream = BuildMarkupLineAppearanceStream(subtype, quads, markupColor);
                         SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
+                    }
+                }
+                else if (subtype is PdfAnnotationSubtype.Square or PdfAnnotationSubtype.Circle && request.NewColor is { } shapeColor)
+                {
+                    FsRectF rect = default;
+                    if (PdfiumNative.FPDFAnnot_GetRect(annot, &rect) != 0)
+                    {
+                        FsRectF normRect = new()
+                        {
+                            Left = Math.Min(rect.Left, rect.Right),
+                            Bottom = Math.Min(rect.Bottom, rect.Top),
+                            Right = Math.Max(rect.Left, rect.Right),
+                            Top = Math.Max(rect.Bottom, rect.Top),
+                        };
+                        float bw = PdfiumNative.FPDFAnnot_GetBorder(annot, out _, out _, out float borderVal) != 0 && borderVal > 0.1f
+                            ? Math.Clamp(borderVal, 0.5f, 32f)
+                            : 2.0f;
+                        string apStream = BuildShapeAppearanceStream(subtype, normRect, shapeColor, existingInteriorForRecolor, bw);
+                        SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
+                    }
+                }
+                else if (subtype == PdfAnnotationSubtype.Line && request.NewColor is { } lineColor)
+                {
+                    FsRectF rect = default;
+                    if (PdfiumNative.FPDFAnnot_GetRect(annot, &rect) != 0)
+                    {
+                        PdfRect bounds = PdfRect.FromCorners(rect.Left, rect.Bottom, rect.Right, rect.Top);
+                        FsRectF normRect = new() { Left = bounds.Left, Bottom = bounds.Bottom, Right = bounds.Right, Top = bounds.Top };
+                        float bw = PdfiumNative.FPDFAnnot_GetBorder(annot, out _, out _, out float borderVal) != 0 && borderVal > 0.1f
+                            ? Math.Clamp(borderVal, 0.5f, 32f)
+                            : 2.0f;
+                        if (existingPathsForRecolor is { Count: > 0 })
+                        {
+                            string apStream = BuildCapturedPathsAppearanceStream(existingPathsForRecolor, bounds, normRect, bw, lineColor, overrideColor: lineColor);
+                            SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
+                        }
+                    }
+                }
+                else if (subtype == PdfAnnotationSubtype.Ink && request.NewColor is { } inkColor)
+                {
+                    float bw = PdfiumNative.FPDFAnnot_GetBorder(annot, out _, out _, out float borderVal) != 0 && borderVal > 0.1f
+                        ? Math.Clamp(borderVal, 0.5f, 32f)
+                        : 2.0f;
+                    uint strokeCount = PdfiumNative.FPDFAnnot_GetInkListCount(annot);
+                    List<FsPointF[]> strokes = new((int)Math.Min(strokeCount, 1024u));
+                    for (uint s = 0; s < strokeCount; s++)
+                    {
+                        uint ptCount = PdfiumNative.FPDFAnnot_GetInkListPath(annot, s, null, 0);
+                        if (ptCount == 0 || ptCount > 65536)
+                        {
+                            continue;
+                        }
+
+                        FsPointF[] pts = new FsPointF[ptCount];
+                        fixed (FsPointF* ptr = pts)
+                        {
+                            uint copied = PdfiumNative.FPDFAnnot_GetInkListPath(annot, s, ptr, ptCount);
+                            if (copied > 0 && copied < ptCount)
+                            {
+                                pts = pts[..(int)copied];
+                            }
+                        }
+
+                        if (pts.Length > 0)
+                        {
+                            strokes.Add(pts);
+                        }
+                    }
+
+                    if (strokes.Count > 0)
+                    {
+                        string apStream = BuildInkAppearanceStream(strokes, inkColor, bw);
+                        SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
+                    }
+                    else if (existingPathsForRecolor is { Count: > 0 })
+                    {
+                        FsRectF rect = default;
+                        if (PdfiumNative.FPDFAnnot_GetRect(annot, &rect) != 0)
+                        {
+                            PdfRect bounds = PdfRect.FromCorners(rect.Left, rect.Bottom, rect.Right, rect.Top);
+                            FsRectF normRect = new() { Left = bounds.Left, Bottom = bounds.Bottom, Right = bounds.Right, Top = bounds.Top };
+                            string apStream = BuildCapturedPathsAppearanceStream(existingPathsForRecolor, bounds, normRect, bw, inkColor, overrideColor: inkColor);
+                            SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
+                        }
                     }
                 }
             }
@@ -2946,6 +3044,25 @@ internal sealed unsafe class PdfiumEngine : IDisposable
                                 _ = PdfiumNative.FPDFAnnot_AddInkStroke(annot, ptr, (nuint)pts.Length);
                             }
                         }
+
+                        float bw = PdfiumNative.FPDFAnnot_GetBorder(annot, out _, out _, out float borderVal) != 0 && borderVal > 0.1f
+                            ? Math.Clamp(borderVal, 0.5f, 32f)
+                            : 2.0f;
+                        string apStream = BuildInkAppearanceStream(translatedStrokes, existingColor, bw);
+                        SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
+                    }
+                }
+                else
+                {
+                    IReadOnlyList<PdfCapturedPath>? captured = ReadAnnotCapturedPaths(annot);
+                    if (captured is { Count: > 0 })
+                    {
+                        PdfRect oldBounds = new(rLeft, rBottom, rRight, rTop);
+                        float bw = PdfiumNative.FPDFAnnot_GetBorder(annot, out _, out _, out float borderVal) != 0 && borderVal > 0.1f
+                            ? Math.Clamp(borderVal, 0.5f, 32f)
+                            : 2.0f;
+                        string apStream = BuildCapturedPathsAppearanceStream(captured, oldBounds, newRect, bw, existingColor);
+                        SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
                     }
                 }
             }
@@ -2954,6 +3071,28 @@ internal sealed unsafe class PdfiumEngine : IDisposable
                 string apStream = BuildCommentIconAppearanceStream(newRect, existingColor);
                 SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
             }
+            else if (subtype is PdfAnnotationSubtype.Line or PdfAnnotationSubtype.Square or PdfAnnotationSubtype.Circle)
+            {
+                IReadOnlyList<PdfCapturedPath>? captured = ReadAnnotCapturedPaths(annot);
+                if (captured is { Count: > 0 })
+                {
+                    PdfRect oldBounds = new(rLeft, rBottom, rRight, rTop);
+                    float bw = PdfiumNative.FPDFAnnot_GetBorder(annot, out _, out _, out float borderVal) != 0 && borderVal > 0.1f
+                        ? Math.Clamp(borderVal, 0.5f, 32f)
+                        : 2.0f;
+                    string apStream = BuildCapturedPathsAppearanceStream(captured, oldBounds, newRect, bw, existingColor);
+                    SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
+                }
+                else if (subtype is PdfAnnotationSubtype.Square or PdfAnnotationSubtype.Circle)
+                {
+                    PdfAnnotationColor? interior = ReadAnnotInteriorColor(annot, subtype);
+                    float bw = PdfiumNative.FPDFAnnot_GetBorder(annot, out _, out _, out float borderVal) != 0 && borderVal > 0.1f
+                        ? Math.Clamp(borderVal, 0.5f, 32f)
+                        : 2.0f;
+                    string apStream = BuildShapeAppearanceStream(subtype, newRect, existingColor, interior, bw);
+                    SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
+                }
+            }
         }
 
         IReadOnlyList<PdfAnnotationInfo> refreshed = ReadPageAnnotations(documentId, request.PageIndex, cancellationToken);
@@ -2961,7 +3100,7 @@ internal sealed unsafe class PdfiumEngine : IDisposable
     }
 
     /// <summary>
-    /// Resizes an existing resizable annotation (<c>/Stamp</c>) to new PDF user-space bounds.
+    /// Resizes an existing resizable annotation (<c>/Stamp</c>, <c>/Square</c>, <c>/Circle</c>) to new PDF user-space bounds.
     /// </summary>
     internal PdfPageAnnotationMutationResult ResizeAnnotation(
         long documentId,
@@ -2982,6 +3121,7 @@ internal sealed unsafe class PdfiumEngine : IDisposable
                 throw new PdfiumException(PdfiumErrorCode.Page, $"Annotation {request.AnnotIndex} not found on page {request.PageIndex}.");
             }
 
+            PdfAnnotationSubtype subtype = (PdfAnnotationSubtype)PdfiumNative.FPDFAnnot_GetSubtype(annot);
             Box pageBox = ReadVisiblePageBox(document, page, request.PageIndex);
             float left = Math.Clamp(request.NewBounds.Left, pageBox.Left, Math.Max(pageBox.Left, pageBox.Right - 16f));
             float right = Math.Clamp(request.NewBounds.Right, Math.Min(pageBox.Right, left + 16f), pageBox.Right);
@@ -2997,10 +3137,133 @@ internal sealed unsafe class PdfiumEngine : IDisposable
             };
             _ = PdfiumNative.FPDFAnnot_SetRect(annot, &newRect);
             SetAnnotString(annot, "M", PdfSignatureInspector.FormatPdfDate(DateTimeOffset.Now));
+
+            if (subtype is PdfAnnotationSubtype.Square or PdfAnnotationSubtype.Circle)
+            {
+                PdfAnnotationColor strokeColor = ReadAnnotColor(annot, subtype);
+                PdfAnnotationColor? interior = ReadAnnotInteriorColor(annot, subtype);
+                float bw = PdfiumNative.FPDFAnnot_GetBorder(annot, out _, out _, out float borderVal) != 0 && borderVal > 0.1f
+                    ? Math.Clamp(borderVal, 0.5f, 32f)
+                    : 2.0f;
+                string apStream = BuildShapeAppearanceStream(subtype, newRect, strokeColor, interior, bw);
+                SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
+            }
         }
 
         IReadOnlyList<PdfAnnotationInfo> refreshed = ReadPageAnnotations(documentId, request.PageIndex, cancellationToken);
         return new PdfPageAnnotationMutationResult(request.PageIndex, request.AnnotIndex, refreshed);
+    }
+
+    /// <summary>
+    /// Creates a geometric shape annotation (Line, Arrow, Rectangle, or Ellipse) on <paramref name="request"/> page.
+    /// </summary>
+    internal PdfPageAnnotationMutationResult AddShapeAnnotation(
+        long documentId,
+        PdfCreateShapeRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        PdfiumPageHandle page = _pageCache.GetOrLoad(document, documentId, request.PageIndex)
+            ?? throw new PdfiumException(PdfiumErrorCode.Page, $"Page {request.PageIndex} could not be loaded.");
+
+        Box pageBox = ReadVisiblePageBox(document, page, request.PageIndex);
+        float borderW = Math.Clamp(request.StrokeWidthPt, 0.75f, 24f);
+        float x1 = Math.Clamp(request.StartPdfX, pageBox.Left + 1f, pageBox.Right - 1f);
+        float y1 = Math.Clamp(request.StartPdfY, pageBox.Bottom + 1f, pageBox.Top - 1f);
+        float x2 = Math.Clamp(request.EndPdfX, pageBox.Left + 1f, pageBox.Right - 1f);
+        float y2 = Math.Clamp(request.EndPdfY, pageBox.Bottom + 1f, pageBox.Top - 1f);
+        string author = string.IsNullOrWhiteSpace(request.Author) ? Environment.UserName : request.Author;
+
+        PdfAnnotationSubtype subtype = request.ShapeKind switch
+        {
+            PdfAnnotationShapeKind.Rectangle => PdfAnnotationSubtype.Square,
+            PdfAnnotationShapeKind.Ellipse => PdfAnnotationSubtype.Circle,
+            _ => PdfAnnotationSubtype.Ink,
+        };
+
+        string subject = request.ShapeKind switch
+        {
+            PdfAnnotationShapeKind.Arrow => "Arrow",
+            PdfAnnotationShapeKind.Rectangle => "Rectangle",
+            PdfAnnotationShapeKind.Ellipse => "Ellipse",
+            _ => "Line",
+        };
+
+        FsRectF rect;
+        string apStream;
+        List<FsPointF[]>? inkStrokes = null;
+        if (request.ShapeKind is PdfAnnotationShapeKind.Line or PdfAnnotationShapeKind.Arrow)
+        {
+            bool isArrow = request.ShapeKind == PdfAnnotationShapeKind.Arrow;
+            float pad = isArrow ? Math.Max(14f, (borderW * 4.2f) + 8f) : Math.Max(4f, borderW * 1.5f);
+            rect = new FsRectF
+            {
+                Left = Math.Max(pageBox.Left, Math.Min(x1, x2) - pad),
+                Bottom = Math.Max(pageBox.Bottom, Math.Min(y1, y2) - pad),
+                Right = Math.Min(pageBox.Right, Math.Max(x1, x2) + pad),
+                Top = Math.Min(pageBox.Top, Math.Max(y1, y2) + pad),
+            };
+            inkStrokes = BuildLineOrArrowStrokes(isArrow, x1, y1, x2, y2, borderW);
+            apStream = BuildInkAppearanceStream(inkStrokes, request.Color, borderW);
+        }
+        else
+        {
+            float pad = Math.Max(0.5f, borderW * 0.5f);
+            float minX = Math.Min(x1, x2);
+            float maxX = Math.Max(minX + 4f, Math.Max(x1, x2));
+            float minY = Math.Min(y1, y2);
+            float maxY = Math.Max(minY + 4f, Math.Max(y1, y2));
+            rect = new FsRectF
+            {
+                Left = Math.Max(pageBox.Left, minX - pad),
+                Bottom = Math.Max(pageBox.Bottom, minY - pad),
+                Right = Math.Min(pageBox.Right, maxX + pad),
+                Top = Math.Min(pageBox.Top, maxY + pad),
+            };
+            apStream = BuildShapeAppearanceStream(subtype, rect, request.Color, interiorColor: null, borderW);
+        }
+
+        int createdIndex;
+        using (PdfiumAnnotationHandle annot = PdfiumNative.FPDFPage_CreateAnnot(page, (int)subtype))
+        {
+            if (annot.IsInvalid)
+            {
+                throw new PdfiumException(PdfiumErrorCode.Page, $"Failed to create {subtype} annotation.");
+            }
+
+            _ = PdfiumNative.FPDFAnnot_SetRect(annot, &rect);
+            if (inkStrokes is not null)
+            {
+                foreach (FsPointF[] pts in inkStrokes)
+                {
+                    fixed (FsPointF* ptr = pts)
+                    {
+                        _ = PdfiumNative.FPDFAnnot_AddInkStroke(annot, ptr, (nuint)pts.Length);
+                    }
+                }
+            }
+
+            _ = PdfiumNative.FPDFAnnot_SetColor(
+                annot,
+                PdfiumConstants.AnnotColorTypeColor,
+                request.Color.R,
+                request.Color.G,
+                request.Color.B,
+                255);
+            _ = PdfiumNative.FPDFAnnot_SetBorder(annot, 0f, 0f, borderW);
+            _ = PdfiumNative.FPDFAnnot_SetFlags(annot, PdfiumConstants.AnnotFlagPrint);
+            SetAnnotString(annot, "T", author);
+            SetAnnotString(annot, "M", PdfSignatureInspector.FormatPdfDate(DateTimeOffset.Now));
+            SetAnnotString(annot, "Subj", subject);
+            SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
+            createdIndex = PdfiumNative.FPDFPage_GetAnnotIndex(page, annot);
+        }
+
+        IReadOnlyList<PdfAnnotationInfo> refreshed = ReadPageAnnotations(documentId, request.PageIndex, cancellationToken);
+        return new PdfPageAnnotationMutationResult(request.PageIndex, createdIndex, refreshed);
     }
 
     /// <summary>
@@ -3397,6 +3660,10 @@ internal sealed unsafe class PdfiumEngine : IDisposable
             _ = PdfiumNative.FPDFAnnot_SetFlags(annot, PdfiumConstants.AnnotFlagPrint);
             SetAnnotString(annot, "T", author);
             SetAnnotString(annot, "M", PdfSignatureInspector.FormatPdfDate(DateTimeOffset.Now));
+            if (!string.IsNullOrWhiteSpace(source.Subject))
+            {
+                SetAnnotString(annot, "Subj", source.Subject);
+            }
             if (!string.IsNullOrWhiteSpace(source.Contents))
             {
                 SetAnnotString(annot, "Contents", source.Contents);
@@ -3551,7 +3818,8 @@ internal sealed unsafe class PdfiumEngine : IDisposable
 
                 if (!isSigWidget && subtype is not (PdfAnnotationSubtype.Highlight or PdfAnnotationSubtype.Underline or PdfAnnotationSubtype.Squiggly or PdfAnnotationSubtype.StrikeOut))
                 {
-                    if (PdfiumNative.FPDFAnnot_GetColor(annot, PdfiumConstants.AnnotColorTypeInterior, out uint ir, out uint ig, out uint ib, out uint ia) != 0 && ia > 0)
+                    if (PdfiumNative.FPDFAnnot_HasKey(annot, "IC") != 0 &&
+                        PdfiumNative.FPDFAnnot_GetColor(annot, PdfiumConstants.AnnotColorTypeInterior, out uint ir, out uint ig, out uint ib, out uint ia) != 0 && ia > 0)
                     {
                         interiorColor = new PdfAnnotationColor((byte)Math.Clamp(ir, 0u, 255u), (byte)Math.Clamp(ig, 0u, 255u), (byte)Math.Clamp(ib, 0u, 255u), (byte)Math.Clamp(ia, 0u, 255u));
                     }
@@ -3788,7 +4056,8 @@ internal sealed unsafe class PdfiumEngine : IDisposable
             return apColor;
         }
 
-        if (PdfiumNative.FPDFAnnot_GetColor(annot, PdfiumConstants.AnnotColorTypeInterior, out uint ir, out uint ig, out uint ib, out uint ia) != 0 && ia > 0)
+        if (PdfiumNative.FPDFAnnot_HasKey(annot, "IC") != 0 &&
+            PdfiumNative.FPDFAnnot_GetColor(annot, PdfiumConstants.AnnotColorTypeInterior, out uint ir, out uint ig, out uint ib, out uint ia) != 0 && ia > 0)
         {
             return new PdfAnnotationColor((byte)Math.Clamp(ir, 0u, 255u), (byte)Math.Clamp(ig, 0u, 255u), (byte)Math.Clamp(ib, 0u, 255u), (byte)Math.Clamp(ia, 0u, 255u));
         }
@@ -4837,6 +5106,82 @@ internal sealed unsafe class PdfiumEngine : IDisposable
         return sb.ToString();
     }
 
+    private static PdfAnnotationColor? ReadAnnotInteriorColor(PdfiumAnnotationHandle annot, PdfAnnotationSubtype subtype)
+    {
+        if (PdfiumNative.FPDFAnnot_HasKey(annot, "IC") != 0 &&
+            PdfiumNative.FPDFAnnot_GetColor(annot, PdfiumConstants.AnnotColorTypeInterior, out uint ir, out uint ig, out uint ib, out uint ia) != 0 &&
+            ia > 0)
+        {
+            return new PdfAnnotationColor(
+                (byte)Math.Clamp(ir, 0u, 255u),
+                (byte)Math.Clamp(ig, 0u, 255u),
+                (byte)Math.Clamp(ib, 0u, 255u),
+                (byte)Math.Clamp(ia, 0u, 255u));
+        }
+
+        if (subtype is PdfAnnotationSubtype.Square or PdfAnnotationSubtype.Circle or PdfAnnotationSubtype.Polygon)
+        {
+            IReadOnlyList<PdfCapturedPath>? captured = ReadAnnotCapturedPaths(annot);
+            if (captured is { Count: > 0 })
+            {
+                for (int i = 0; i < captured.Count; i++)
+                {
+                    PdfCapturedPath path = captured[i];
+                    if (path.FillMode != 0 && path.FillColor is { A: > 0 } fc)
+                    {
+                        return fc;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static List<FsPointF[]> BuildLineOrArrowStrokes(
+        bool isArrow,
+        float x1,
+        float y1,
+        float x2,
+        float y2,
+        float borderWidthPt)
+    {
+        List<FsPointF[]> strokes =
+        [
+            [
+                new FsPointF { X = x1, Y = y1 },
+                new FsPointF { X = x2, Y = y2 },
+            ]
+        ];
+
+        if (isArrow)
+        {
+            float dx = x2 - x1;
+            float dy = y2 - y1;
+            float len = MathF.Sqrt((dx * dx) + (dy * dy));
+            if (len > 1.0f)
+            {
+                float ux = dx / len;
+                float uy = dy / len;
+                float headLen = Math.Min(len * 0.45f, Math.Clamp((borderWidthPt * 4.2f) + 6.0f, 9.0f, 34.0f));
+                const float cosA = 0.8829476f; // cos(28 deg)
+                const float sinA = 0.4694716f; // sin(28 deg)
+                float w1x = x2 - (headLen * ((ux * cosA) - (uy * sinA)));
+                float w1y = y2 - (headLen * ((ux * sinA) + (uy * cosA)));
+                float w2x = x2 - (headLen * ((ux * cosA) + (uy * sinA)));
+                float w2y = y2 - (headLen * (-(ux * sinA) + (uy * cosA)));
+                strokes.Add(
+                [
+                    new FsPointF { X = w1x, Y = w1y },
+                    new FsPointF { X = x2, Y = y2 },
+                    new FsPointF { X = w2x, Y = w2y },
+                ]);
+            }
+        }
+
+        return strokes;
+    }
+
     private static string BuildShapeAppearanceStream(
         PdfAnnotationSubtype subtype,
         FsRectF rect,
@@ -5015,7 +5360,8 @@ internal sealed unsafe class PdfiumEngine : IDisposable
         PdfRect sourceBounds,
         FsRectF targetRect,
         float fallbackBorderWidthPt,
-        PdfAnnotationColor? fallbackColor = null)
+        PdfAnnotationColor? fallbackColor = null,
+        PdfAnnotationColor? overrideColor = null)
     {
         float minX = float.MaxValue;
         float minY = float.MaxValue;
@@ -5132,14 +5478,14 @@ internal sealed unsafe class PdfiumEngine : IDisposable
 
             if (path.HasStroke)
             {
-                PdfAnnotationColor sc = path.StrokeColor ?? fallbackColor ?? PdfAnnotationColor.Blue;
+                PdfAnnotationColor sc = overrideColor ?? path.StrokeColor ?? fallbackColor ?? PdfAnnotationColor.Blue;
                 float sw = Math.Clamp(path.StrokeWidthPt * scaleStroke, 0.35f, 32f);
                 sb.Append(CultureInfo.InvariantCulture, $"{sw:F2} w {(sc.R / 255.0):F3} {(sc.G / 255.0):F3} {(sc.B / 255.0):F3} RG ");
             }
 
             if (path.FillMode != 0)
             {
-                PdfAnnotationColor fc = path.FillColor ?? path.StrokeColor ?? fallbackColor ?? PdfAnnotationColor.Blue;
+                PdfAnnotationColor fc = overrideColor ?? path.FillColor ?? path.StrokeColor ?? fallbackColor ?? PdfAnnotationColor.Blue;
                 sb.Append(CultureInfo.InvariantCulture, $"{(fc.R / 255.0):F3} {(fc.G / 255.0):F3} {(fc.B / 255.0):F3} rg ");
             }
 
