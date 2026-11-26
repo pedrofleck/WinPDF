@@ -90,9 +90,9 @@ WinPDF/
    ├─ Helpers/                  ← ResourceStrings, ResourceKeys, small utilities
    ├─ Models/            (S2+)  ← plain records: PdfPageInfo, OutlineItem, PdfTextModels, Annotation models
    ├─ ViewModels/        (S2+)  ← ShellViewModel, DocumentViewModel, PageViewModel, ThumbnailViewModel
-   ├─ Views/             (S2+)  ← XAML pages / user controls (no business logic in code-behind)
-   ├─ Controls/          (S3+)  ← PdfPageCanvas, SplitterContainer, ThumbnailPresenter
-   ├─ Services/          (S3+)  ← IPdfService, PdfiumService, PdfiumEngine, IFilePickerService, IDialogService
+   ├─ Views/             (S2+)  ← XAML pages / user controls (`DocumentView.xaml(.cs)`, `DocumentView.Touch.cs`, `DocumentView.TouchSwipe.cs`, `DocumentView.Annotations.cs`, `DocumentView.Printing.cs`)
+   ├─ Controls/          (S3+)  ← `PdfPageCanvas(.Input/.Touch).cs`, `SplitterContainer`, `ThumbnailPresenter`
+   ├─ Services/          (S3+)  ← IPdfService, PdfiumService, `PdfiumEngine(.Annotations).cs`, IFilePickerService, IDialogService
    ├─ Rendering/         (S3+)  ← TileCache, PdfiumPageCache, ZoomQuantizer, PageCoordinateTransform
    └─ Interop/Pdfium/    (S3+)  ← [LibraryImport] declarations, SafeHandles, PDFium enums/structs
 ```
@@ -202,11 +202,11 @@ priority channels. Every public `IPdfService` method enqueues a job and returns 
 
 ### 4.4 Touch & Precision Touchpad Architecture **(implemented in `v0.5.x`)**
 
-1. **Interactive Horizontal Slide Swipe (`DocumentView.xaml(.cs)`):**
+1. **Interactive Horizontal Slide Swipe (`DocumentView.TouchSwipe.cs`):**
    - Active in Paged mode (`!doc.IsContinuous`) and Presentation mode (`F5`) for both 1-finger touch drag and 2-finger Precision Touchpad horizontal swipe (`IsHorizontalMouseWheel && !isShiftDown`).
    - Synchronously translates the current page while revealing `AdjacentSlidePreviewContainer` (`AdjacentLeftPageCanvas` / `AdjacentRightPageCanvas`) pre-populated from `TileCache` Level 0 / `s_slideBuffer`.
    - Includes edge rubber-banding on first/last page and velocity/distance commit vs. cubic ease-out bounce-back. Keyboard arrows, mouse wheel, and `PrevPageZone`/`NextPageZone` remain instant (no animation).
-2. **Touch Long-Press Text Selection & Floating Action Bar (`PdfPageCanvas.cs`, `DocumentView.xaml(.cs)`):**
+2. **Touch Long-Press Text Selection & Floating Action Bar (`PdfPageCanvas.Touch.cs`, `DocumentView.Touch.cs`):**
    - Holding a finger for `320 ms` within `10 DIPs` over selectable text engages `_isTouchSelecting`, cancels `DirectManipulation`, selects the initial word, and tracks drag selection with draggable start/end handles (`TouchSelectionStartHandle` / `TouchSelectionEndHandle`).
    - Releasing the finger opens the native WinUI 3 `CommandBarFlyout` (`TouchSelectionCommandBarFlyout`) above the selection with Copy, Highlight, Add Comment, Underline, Strikethrough, Squiggly, and 6 preset color swatches.
    - Selected annotations on touch expose a unified non-modal overlay (`TouchAnnotationResizeHandlesCanvas` above `ContinuousScrollViewer` with `ManipulationMode="None"`) containing a `>= 52×52 DIP` body move target (`TouchAnnotationMoveBodyHandle`), corner resize handles (shifted slightly outward on small images to preserve the central move zone), and a non-modal Acrylic floating QuickBar (`TouchAnnotationQuickBarBorder`) so `DirectManipulation` and modal flyout light-dismiss walls never steal touch drags or resizes; dragging a 2nd finger anywhere else on screen (`_touchAnnotPanPointerId`) pans the viewport natively in parallel while keeping the dragged object pinned under Finger 1.
