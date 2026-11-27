@@ -98,6 +98,44 @@ public sealed partial class DocumentView
         {
             ToolbarShapePickerButton.Height = e.NewSize.Height;
         }
+
+        if (ToolbarEraserButton is not null &&
+            (double.IsNaN(ToolbarEraserButton.Height) || Math.Abs(ToolbarEraserButton.Height - e.NewSize.Height) > 0.1))
+        {
+            ToolbarEraserButton.Height = e.NewSize.Height;
+        }
+
+        if (ToolbarEraserPickerButton is not null &&
+            (double.IsNaN(ToolbarEraserPickerButton.Height) || Math.Abs(ToolbarEraserPickerButton.Height - e.NewSize.Height) > 0.1))
+        {
+            ToolbarEraserPickerButton.Height = e.NewSize.Height;
+        }
+    }
+
+    private void OnEraserModeMenuItemClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string tagStr } &&
+            Enum.TryParse<PdfEraserMode>(tagStr, ignoreCase: true, out PdfEraserMode mode))
+        {
+            ViewModel.ActiveEraserMode = mode;
+            SyncActiveEraserUi();
+            ViewModel.SetTool(AnnotationTool.Eraser);
+        }
+    }
+
+    private void SyncActiveEraserUi()
+    {
+        PdfEraserMode mode = ViewModel.ActiveEraserMode;
+        SetVisible(ToolbarEraserStrokeIcon, mode == PdfEraserMode.Stroke);
+        SetVisible(ToolbarEraserPointIcon, mode == PdfEraserMode.Point);
+
+        if (ToolbarEraserButton is not null)
+        {
+            string tipKey = mode == PdfEraserMode.Point
+                ? ResourceKeys.ToolEraserPointToolTip
+                : ResourceKeys.ToolEraserStrokeToolTip;
+            ToolTipService.SetToolTip(ToolbarEraserButton, ResourceStrings.Get(tipKey));
+        }
     }
 
     private void OnToolShapeClicked(object sender, RoutedEventArgs e)
@@ -504,12 +542,14 @@ public sealed partial class DocumentView
         ApplySwatchSelectedState(ToolbarColorPinkButton, IsSameColor(color, PdfAnnotationColor.Pink));
         ApplySwatchSelectedState(ToolbarColorOrangeButton, IsSameColor(color, PdfAnnotationColor.Orange));
         ApplySwatchSelectedState(ToolbarColorRedButton, IsSameColor(color, PdfAnnotationColor.Red));
+        ApplySwatchSelectedState(ToolbarColorBlackButton, IsSameColor(color, PdfAnnotationColor.Black));
         ApplySwatchSelectedState(MouseSelColorYellowButton, IsSameColor(color, PdfAnnotationColor.Yellow));
         ApplySwatchSelectedState(MouseSelColorGreenButton, IsSameColor(color, PdfAnnotationColor.Green));
         ApplySwatchSelectedState(MouseSelColorBlueButton, IsSameColor(color, PdfAnnotationColor.Blue));
         ApplySwatchSelectedState(MouseSelColorPinkButton, IsSameColor(color, PdfAnnotationColor.Pink));
         ApplySwatchSelectedState(MouseSelColorOrangeButton, IsSameColor(color, PdfAnnotationColor.Orange));
         ApplySwatchSelectedState(MouseSelColorRedButton, IsSameColor(color, PdfAnnotationColor.Red));
+        ApplySwatchSelectedState(MouseSelColorBlackButton, IsSameColor(color, PdfAnnotationColor.Black));
         SyncStrokeThicknessUi();
     }
 
@@ -580,6 +620,7 @@ public sealed partial class DocumentView
         ConfigureColorButton(TouchSelectionColorPinkButton, ContextColorPinkItem, AnnotColorPinkButton, QuickColorPinkButton, MouseSelColorPinkButton, ToolbarColorPinkButton, ResourceKeys.ColorPink, PdfAnnotationColor.Pink);
         ConfigureColorButton(TouchSelectionColorOrangeButton, ContextColorOrangeItem, AnnotColorOrangeButton, QuickColorOrangeButton, MouseSelColorOrangeButton, ToolbarColorOrangeButton, ResourceKeys.ColorOrange, PdfAnnotationColor.Orange);
         ConfigureColorButton(TouchSelectionColorRedButton, ContextColorRedItem, AnnotColorRedButton, QuickColorRedButton, MouseSelColorRedButton, ToolbarColorRedButton, ResourceKeys.ColorRed, PdfAnnotationColor.Red);
+        ConfigureColorButton(TouchSelectionColorBlackButton, ContextColorBlackItem, AnnotColorBlackButton, QuickColorBlackButton, MouseSelColorBlackButton, ToolbarColorBlackButton, ResourceKeys.ColorBlack, PdfAnnotationColor.Black);
 
         if (TouchEmptyPasteButton is not null)
         {
@@ -625,6 +666,7 @@ public sealed partial class DocumentView
         SetToolTip(TouchQuickColorPinkButton, ResourceKeys.ColorPink);
         SetToolTip(TouchQuickColorOrangeButton, ResourceKeys.ColorOrange);
         SetToolTip(TouchQuickColorRedButton, ResourceKeys.ColorRed);
+        SetToolTip(TouchQuickColorBlackButton, ResourceKeys.ColorBlack);
         SetToolTip(AnnotationEditorCopyButton, ResourceKeys.AnnotCopyToolTip);
         SetToolTip(AnnotationEditorCutButton, ResourceKeys.AnnotCutToolTip);
         SetToolTip(AnnotationEditorCloseButton, ResourceKeys.AnnotClose);
@@ -721,6 +763,7 @@ public sealed partial class DocumentView
         "Pink" => PdfAnnotationColor.Pink,
         "Orange" => PdfAnnotationColor.Orange,
         "Red" => PdfAnnotationColor.Red,
+        "Black" => PdfAnnotationColor.Black,
         _ => fallback,
     };
 
@@ -1211,6 +1254,7 @@ public sealed partial class DocumentView
         ApplySwatchSelectedState(QuickColorPinkButton, IsSameColor(annot.Color, PdfAnnotationColor.Pink));
         ApplySwatchSelectedState(QuickColorOrangeButton, IsSameColor(annot.Color, PdfAnnotationColor.Orange));
         ApplySwatchSelectedState(QuickColorRedButton, IsSameColor(annot.Color, PdfAnnotationColor.Red));
+        ApplySwatchSelectedState(QuickColorBlackButton, IsSameColor(annot.Color, PdfAnnotationColor.Black));
 
         try
         {
@@ -1875,6 +1919,7 @@ public sealed partial class DocumentView
         UpdateSwatchSelection(AnnotColorPinkButton, PdfAnnotationColor.Pink);
         UpdateSwatchSelection(AnnotColorOrangeButton, PdfAnnotationColor.Orange);
         UpdateSwatchSelection(AnnotColorRedButton, PdfAnnotationColor.Red);
+        UpdateSwatchSelection(AnnotColorBlackButton, PdfAnnotationColor.Black);
 
         if (AnnotationEditorTextBox is not null)
         {

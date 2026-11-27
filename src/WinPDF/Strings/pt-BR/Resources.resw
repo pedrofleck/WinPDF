@@ -310,6 +310,7 @@
   <data name="Color_Pink" xml:space="preserve"><value>Rosa</value></data>
   <data name="Color_Orange" xml:space="preserve"><value>Laranja</value></data>
   <data name="Color_Red" xml:space="preserve"><value>Vermelho</value></data>
+  <data name="Color_Black" xml:space="preserve"><value>Preto</value></data>
   <data name="Annot_Subtype_Highlight" xml:space="preserve"><value>Realce</value></data>
   <data name="Annot_Subtype_Underline" xml:space="preserve"><value>Sublinhado</value></data>
   <data name="Annot_Subtype_Squiggly" xml:space="preserve"><value>Ondulado</value></data>
@@ -407,4 +408,11 @@
   <data name="ShapeArrowMenuItem.Text" xml:space="preserve"><value>Flecha</value></data>
   <data name="ShapeRectangleMenuItem.Text" xml:space="preserve"><value>Retângulo</value></data>
   <data name="ShapeEllipseMenuItem.Text" xml:space="preserve"><value>Elipse</value></data>
+  <data name="ToolbarEraserButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Borracha</value></data>
+  <data name="ToolbarEraserPickerButton.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Escolher modo da borracha</value></data>
+  <data name="ToolbarEraserPickerButton.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Escolher modo da borracha</value></data>
+  <data name="EraserModeStrokeMenuItem.Text" xml:space="preserve"><value>Apagar objeto</value></data>
+  <data name="EraserModePointMenuItem.Text" xml:space="preserve"><value>Borracha parcial</value></data>
+  <data name="Tool_Eraser_StrokeToolTip" xml:space="preserve"><value>Apagar objeto</value></data>
+  <data name="Tool_Eraser_PointToolTip" xml:space="preserve"><value>Borracha parcial</value></data>
 </root>

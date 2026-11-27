@@ -422,6 +422,406 @@ public static class InkStrokeProcessor
     }
 
     /// <summary>
+    /// Returns <see langword="true"/> when <paramref name="annotation"/> is a freehand ink drawing
+    /// (excluding geometric <c>Line</c>/<c>Arrow</c> annotations that also store <c>/InkList</c> geometry).
+    /// </summary>
+    public static bool IsFreehandInk(PdfAnnotationInfo annotation)
+        => annotation.Subtype == PdfAnnotationSubtype.Ink &&
+           !string.Equals(annotation.Subject, "Line", StringComparison.OrdinalIgnoreCase) &&
+           !string.Equals(annotation.Subject, "Arrow", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Serializes per-vertex stylus pressure values into a compact PDF dictionary string (<c>/WinPDFInk</c>).
+    /// Returns an empty string when no stroke uses pressure variation.
+    /// </summary>
+    public static string SerializePressureMetadata(IReadOnlyList<PdfInkStrokeData> strokes)
+    {
+        bool anyPressure = false;
+        for (int s = 0; s < strokes.Count; s++)
+        {
+            if (strokes[s].HasPressureVariation && strokes[s].Samples.Count > 0)
+            {
+                anyPressure = true;
+                break;
+            }
+        }
+
+        if (!anyPressure)
+        {
+            return string.Empty;
+        }
+
+        StringBuilder sb = new(256);
+        sb.Append("v1|");
+        for (int s = 0; s < strokes.Count; s++)
+        {
+            if (s > 0)
+            {
+                sb.Append(';');
+            }
+
+            PdfInkStrokeData stroke = strokes[s];
+            if (!stroke.HasPressureVariation)
+            {
+                sb.Append('-');
+                continue;
+            }
+
+            for (int i = 0; i < stroke.Samples.Count; i++)
+            {
+                if (i > 0)
+                {
+                    sb.Append(',');
+                }
+
+                float p = Math.Clamp(stroke.Samples[i].Pressure, 0.04f, 1.0f);
+                sb.Append(CultureInfo.InvariantCulture, $"{p:F3}");
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Parses per-stroke pressure lists serialized by <see cref="SerializePressureMetadata"/>.
+    /// </summary>
+    public static IReadOnlyList<IReadOnlyList<float>>? TryParsePressureMetadata(string? raw, int expectedStrokeCount)
+    {
+        if (string.IsNullOrWhiteSpace(raw) || expectedStrokeCount <= 0 || !raw.StartsWith("v1|", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string body = raw[3..];
+        string[] strokeTokens = body.Split(';');
+        if (strokeTokens.Length != expectedStrokeCount)
+        {
+            return null;
+        }
+
+        List<IReadOnlyList<float>> result = new(strokeTokens.Length);
+        bool anyValid = false;
+        for (int s = 0; s < strokeTokens.Length; s++)
+        {
+            string tok = strokeTokens[s].Trim();
+            if (tok == "-" || string.IsNullOrEmpty(tok))
+            {
+                result.Add(Array.Empty<float>());
+                continue;
+            }
+
+            string[] parts = tok.Split(',');
+            float[] pressures = new float[parts.Length];
+            for (int i = 0; i < parts.Length; i++)
+            {
+                if (!float.TryParse(parts[i], NumberStyles.Float, CultureInfo.InvariantCulture, out float val) || !float.IsFinite(val))
+                {
+                    return null;
+                }
+
+                pressures[i] = Math.Clamp(val, 0.04f, 1.0f);
+            }
+
+            result.Add(pressures);
+            anyValid = true;
+        }
+
+        return anyValid ? result : null;
+    }
+
+    /// <summary>
+    /// Combines <see cref="PdfAnnotationInfo.Strokes"/> and <see cref="PdfAnnotationInfo.InkPressures"/>
+    /// into full <see cref="PdfInkStrokeData"/> entries.
+    /// </summary>
+    public static List<PdfInkStrokeData> ExtractInkStrokeData(PdfAnnotationInfo annotation)
+    {
+        ArgumentNullException.ThrowIfNull(annotation);
+        IReadOnlyList<IReadOnlyList<Vector2>>? rawStrokes = annotation.Strokes;
+        if (rawStrokes is null || rawStrokes.Count == 0)
+        {
+            return [];
+        }
+
+        List<PdfInkStrokeData> output = new(rawStrokes.Count);
+        IReadOnlyList<IReadOnlyList<float>>? pressureLists = annotation.InkPressures;
+        for (int s = 0; s < rawStrokes.Count; s++)
+        {
+            IReadOnlyList<Vector2> pts = rawStrokes[s];
+            if (pts.Count == 0)
+            {
+                continue;
+            }
+
+            IReadOnlyList<float>? pList = pressureLists is not null && s < pressureLists.Count ? pressureLists[s] : null;
+            bool hasPressure = pList is not null && pList.Count == pts.Count;
+            List<PdfInkSample> samples = new(pts.Count);
+            for (int i = 0; i < pts.Count; i++)
+            {
+                float p = hasPressure ? pList![i] : 0.5f;
+                samples.Add(new PdfInkSample(pts[i].X, pts[i].Y, p));
+            }
+
+            output.Add(new PdfInkStrokeData(samples, hasPressure));
+        }
+
+        return output;
+    }
+
+    /// <summary>
+    /// Converts <see cref="PdfInkStrokeData"/> entries back into point arrays for <see cref="PdfAnnotationInfo.Strokes"/>.
+    /// </summary>
+    public static IReadOnlyList<IReadOnlyList<Vector2>> ToVectorStrokes(IReadOnlyList<PdfInkStrokeData> strokes)
+    {
+        List<IReadOnlyList<Vector2>> list = new(strokes.Count);
+        for (int s = 0; s < strokes.Count; s++)
+        {
+            IReadOnlyList<PdfInkSample> samples = strokes[s].Samples;
+            Vector2[] arr = new Vector2[samples.Count];
+            for (int i = 0; i < samples.Count; i++)
+            {
+                arr[i] = new Vector2(samples[i].X, samples[i].Y);
+            }
+
+            list.Add(arr);
+        }
+
+        return list;
+    }
+
+    /// <summary>
+    /// Converts <see cref="PdfInkStrokeData"/> entries back into pressure arrays for <see cref="PdfAnnotationInfo.InkPressures"/>.
+    /// </summary>
+    public static IReadOnlyList<IReadOnlyList<float>>? ToPressureLists(IReadOnlyList<PdfInkStrokeData> strokes)
+    {
+        bool anyPressure = false;
+        List<IReadOnlyList<float>> list = new(strokes.Count);
+        for (int s = 0; s < strokes.Count; s++)
+        {
+            PdfInkStrokeData st = strokes[s];
+            if (st.HasPressureVariation && st.Samples.Count > 0)
+            {
+                anyPressure = true;
+                float[] pArr = new float[st.Samples.Count];
+                for (int i = 0; i < st.Samples.Count; i++)
+                {
+                    pArr[i] = st.Samples[i].Pressure;
+                }
+
+                list.Add(pArr);
+            }
+            else
+            {
+                list.Add(Array.Empty<float>());
+            }
+        }
+
+        return anyPressure ? list : null;
+    }
+
+    /// <summary>
+    /// Partially erases the portions of <paramref name="strokes"/> covered by the capsule <c>(segA, segB, eraserRadiusPt)</c>,
+    /// splitting affected strokes cleanly while preserving stylus pressure metadata on surviving segments.
+    /// </summary>
+    /// <returns>The surviving strokes (empty if the entire ink drawing was erased).</returns>
+    public static List<PdfInkStrokeData> ErasePointFromStrokes(
+        IReadOnlyList<PdfInkStrokeData> strokes,
+        Vector2 segA,
+        Vector2 segB,
+        float eraserRadiusPt,
+        out bool modified)
+    {
+        ArgumentNullException.ThrowIfNull(strokes);
+        modified = false;
+
+        List<PdfInkStrokeData> result = new(strokes.Count);
+        float effectiveRadius = MathF.Max(1.0f, eraserRadiusPt);
+        float threshSq = effectiveRadius * effectiveRadius;
+        float dotThreshSq = (effectiveRadius + 1.25f) * (effectiveRadius + 1.25f);
+        float envMinX = MathF.Min(segA.X, segB.X) - effectiveRadius - 2f;
+        float envMaxX = MathF.Max(segA.X, segB.X) + effectiveRadius + 2f;
+        float envMinY = MathF.Min(segA.Y, segB.Y) - effectiveRadius - 2f;
+        float envMaxY = MathF.Max(segA.Y, segB.Y) + effectiveRadius + 2f;
+        float maxStep = Math.Clamp(effectiveRadius * 0.35f, 0.75f, 1.35f);
+
+        for (int s = 0; s < strokes.Count; s++)
+        {
+            PdfInkStrokeData stroke = strokes[s];
+            IReadOnlyList<PdfInkSample> samples = stroke.Samples;
+            if (samples.Count == 0)
+            {
+                modified = true;
+                continue;
+            }
+
+            if (samples.Count == 1)
+            {
+                float dSq = PointToSegmentDistanceSquared(samples[0].X, samples[0].Y, segA.X, segA.Y, segB.X, segB.Y);
+                if (dSq <= dotThreshSq)
+                {
+                    modified = true;
+                }
+                else
+                {
+                    result.Add(stroke);
+                }
+
+                continue;
+            }
+
+            // Quick stroke bounding box rejection.
+            float sMinX = float.MaxValue;
+            float sMinY = float.MaxValue;
+            float sMaxX = float.MinValue;
+            float sMaxY = float.MinValue;
+            for (int i = 0; i < samples.Count; i++)
+            {
+                sMinX = MathF.Min(sMinX, samples[i].X);
+                sMinY = MathF.Min(sMinY, samples[i].Y);
+                sMaxX = MathF.Max(sMaxX, samples[i].X);
+                sMaxY = MathF.Max(sMaxY, samples[i].Y);
+            }
+
+            if (sMaxX < envMinX || sMinX > envMaxX || sMaxY < envMinY || sMinY > envMaxY)
+            {
+                result.Add(stroke);
+                continue;
+            }
+
+            // Densify segments so fast strokes still split smoothly right at the eraser boundary.
+            List<PdfInkSample> dense = new(samples.Count * 2);
+            dense.Add(samples[0]);
+            for (int i = 0; i < samples.Count - 1; i++)
+            {
+                PdfInkSample p0 = samples[i];
+                PdfInkSample p1 = samples[i + 1];
+                float dx = p1.X - p0.X;
+                float dy = p1.Y - p0.Y;
+                float len = MathF.Sqrt((dx * dx) + (dy * dy));
+                int steps = Math.Clamp((int)MathF.Ceiling(len / maxStep), 1, 128);
+                for (int k = 1; k <= steps; k++)
+                {
+                    float t = (float)k / steps;
+                    dense.Add(new PdfInkSample(
+                        p0.X + (dx * t),
+                        p0.Y + (dy * t),
+                        p0.Pressure + ((p1.Pressure - p0.Pressure) * t)));
+                }
+            }
+
+            bool[] hit = new bool[dense.Count];
+            bool anyHit = false;
+            for (int i = 0; i < dense.Count; i++)
+            {
+                PdfInkSample p = dense[i];
+                if (PointToSegmentDistanceSquared(p.X, p.Y, segA.X, segA.Y, segB.X, segB.Y) <= threshSq)
+                {
+                    hit[i] = true;
+                    anyHit = true;
+                }
+            }
+
+            if (!anyHit)
+            {
+                result.Add(stroke);
+                continue;
+            }
+
+            modified = true;
+            int idx = 0;
+            while (idx < dense.Count)
+            {
+                if (hit[idx])
+                {
+                    idx++;
+                    continue;
+                }
+
+                int start = idx;
+                while (idx < dense.Count && !hit[idx])
+                {
+                    idx++;
+                }
+
+                int end = idx - 1; // inclusive
+                List<PdfInkSample> run = new((end - start) + 3);
+                if (start > 0 && hit[start - 1])
+                {
+                    run.Add(FindCutBoundarySample(dense[start], dense[start - 1], segA, segB, effectiveRadius));
+                }
+
+                double arcLen = 0.0;
+                for (int r = start; r <= end; r++)
+                {
+                    if (run.Count > 0)
+                    {
+                        PdfInkSample prev = run[^1];
+                        arcLen += double.Hypot(dense[r].X - prev.X, dense[r].Y - prev.Y);
+                    }
+
+                    run.Add(dense[r]);
+                }
+
+                if (end + 1 < dense.Count && hit[end + 1])
+                {
+                    PdfInkSample exitSample = FindCutBoundarySample(dense[end], dense[end + 1], segA, segB, effectiveRadius);
+                    if (run.Count > 0)
+                    {
+                        PdfInkSample prev = run[^1];
+                        arcLen += double.Hypot(exitSample.X - prev.X, exitSample.Y - prev.Y);
+                    }
+
+                    run.Add(exitSample);
+                }
+
+                // Drop microscopic cut specks shorter than 1.25 pt.
+                if (arcLen >= 1.25 || (start == 0 && end == dense.Count - 1))
+                {
+                    List<PdfInkSample> simplified = run.Count > 2
+                        ? SimplifySamples(run, epsilon: 0.30f, preservePressure: stroke.HasPressureVariation)
+                        : run;
+                    if (simplified.Count > 0)
+                    {
+                        result.Add(new PdfInkStrokeData(simplified, stroke.HasPressureVariation));
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static PdfInkSample FindCutBoundarySample(
+        PdfInkSample outside,
+        PdfInkSample inside,
+        Vector2 segA,
+        Vector2 segB,
+        float radius)
+    {
+        float radiusSq = radius * radius;
+        float lo = 0f; // outside
+        float hi = 1f; // inside
+        for (int iter = 0; iter < 6; iter++)
+        {
+            float mid = (lo + hi) * 0.5f;
+            float mx = outside.X + ((inside.X - outside.X) * mid);
+            float my = outside.Y + ((inside.Y - outside.Y) * mid);
+            if (PointToSegmentDistanceSquared(mx, my, segA.X, segA.Y, segB.X, segB.Y) <= radiusSq)
+            {
+                hi = mid;
+            }
+            else
+            {
+                lo = mid;
+            }
+        }
+
+        return new PdfInkSample(
+            outside.X + ((inside.X - outside.X) * lo),
+            outside.Y + ((inside.Y - outside.Y) * lo),
+            outside.Pressure + ((inside.Pressure - outside.Pressure) * lo));
+    }
+
+    /// <summary>
     /// Tests whether an eraser brush segment <c>(segA, segB)</c> in PDF user space intersects <paramref name="annotation"/>.
     /// Uses precise polyline hit-testing for ink/line/arrow strokes and hollow-perimeter testing for large unfilled shapes.
     /// </summary>
@@ -429,12 +829,14 @@ public static class InkStrokeProcessor
     /// <param name="segA">Eraser segment start in PDF points.</param>
     /// <param name="segB">Eraser segment end in PDF points.</param>
     /// <param name="eraserRadiusPt">Eraser tip radius in PDF points.</param>
+    /// <param name="eraserMode">Active eraser mode (<see cref="PdfEraserMode.Stroke"/> or <see cref="PdfEraserMode.Point"/>).</param>
     /// <returns><see langword="true"/> if the eraser touches the annotation.</returns>
     public static bool IntersectsAnnotation(
         PdfAnnotationInfo annotation,
         Vector2 segA,
         Vector2 segB,
-        float eraserRadiusPt)
+        float eraserRadiusPt,
+        PdfEraserMode eraserMode = PdfEraserMode.Stroke)
     {
         ArgumentNullException.ThrowIfNull(annotation);
         if (annotation.IsSignatureWidget)
@@ -442,7 +844,14 @@ public static class InkStrokeProcessor
             return false;
         }
 
-        float pad = MathF.Max(2f, eraserRadiusPt + MathF.Max(1.5f, annotation.BorderWidthPt * 0.75f));
+        if (eraserMode == PdfEraserMode.Point && !IsFreehandInk(annotation))
+        {
+            return false;
+        }
+
+        float pad = eraserMode == PdfEraserMode.Point
+            ? MathF.Max(1.0f, eraserRadiusPt)
+            : MathF.Max(1.5f, eraserRadiusPt + MathF.Max(1.0f, annotation.BorderWidthPt * 0.5f));
         float minX = MathF.Min(segA.X, segB.X) - pad;
         float maxX = MathF.Max(segA.X, segB.X) + pad;
         float minY = MathF.Min(segA.Y, segB.Y) - pad;

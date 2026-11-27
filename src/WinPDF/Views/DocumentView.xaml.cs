@@ -383,6 +383,7 @@ public sealed partial class DocumentView : Page
         }
 
         SyncActiveShapeUi();
+        SyncActiveEraserUi();
         SyncStrokeThicknessUi();
         SyncTouchShapeDrawOverlayVisibility();
         SyncTouchInkDrawOverlayVisibility();
@@ -787,6 +788,7 @@ public sealed partial class DocumentView : Page
             if (ViewModel.IsAnnotationToolbarOpen)
             {
                 SyncActiveShapeUi();
+                SyncActiveEraserUi();
                 SyncStrokeThicknessUi();
                 PlayFloatingBarAnimation(FloatingAnnotationToolbar, FloatingAnnotationToolbarTransform, open: true, ref _annotationToolbarStoryboard);
             }
@@ -811,6 +813,10 @@ public sealed partial class DocumentView : Page
         {
             CancelShapeDrawingOnAllCanvases();
             SyncActiveShapeUi();
+        }
+        else if (e.PropertyName == nameof(ShellViewModel.ActiveEraserMode))
+        {
+            SyncActiveEraserUi();
         }
         else if (e.PropertyName == nameof(ShellViewModel.StrokeThicknessPt))
         {

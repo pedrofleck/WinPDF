@@ -193,6 +193,20 @@ public sealed partial class ShellViewModel : ObservableObject
     }
 
     /// <summary>
+    /// Gets or sets the eraser behavior used by <see cref="AnnotationTool.Eraser"/> and S Pen eraser actions (persisted across sessions).
+    /// </summary>
+    [ObservableProperty]
+    public partial PdfEraserMode ActiveEraserMode { get; set; } = PdfEraserMode.Stroke;
+
+    partial void OnActiveEraserModeChanged(PdfEraserMode value)
+    {
+        if (!_isInitializingSettings)
+        {
+            _settingsService.Update(s => s.LastUsedEraserMode = value);
+        }
+    }
+
+    /// <summary>
     /// Gets or sets the preferred stroke / border thickness in PDF points for shapes and ink strokes.
     /// </summary>
     [ObservableProperty]
@@ -218,6 +232,45 @@ public sealed partial class ShellViewModel : ObservableObject
     /// </summary>
     [ObservableProperty]
     public partial bool IsTouchDrawingEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether a pen/stylus digitizer is present on this device.
+    /// Controls visibility of the <c>TouchDrawingToggle</c> toolbar button; when <see langword="false"/>,
+    /// touch automatically draws whenever a drawing/erasing tool is active.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool HasPenDigitizer { get; set; }
+
+    /// <summary>
+    /// Marks that a stylus/pen digitizer has been detected dynamically (e.g. an external tablet plugged in mid-session).
+    /// </summary>
+    public void NotifyPenDetected()
+    {
+        if (!HasPenDigitizer)
+        {
+            HasPenDigitizer = true;
+        }
+    }
+
+    private static bool DetectPenDigitizer()
+    {
+        try
+        {
+            IReadOnlyList<Windows.Devices.Input.PointerDevice> devices = Windows.Devices.Input.PointerDevice.GetPointerDevices();
+            for (int i = 0; i < devices.Count; i++)
+            {
+                if (devices[i].PointerDeviceType == Windows.Devices.Input.PointerDeviceType.Pen)
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
+    }
 
     partial void OnIsTouchDrawingEnabledChanged(bool value)
     {
@@ -522,9 +575,13 @@ public sealed partial class ShellViewModel : ObservableObject
         CurrentTheme = _settingsService.Settings.Theme;
         ViewMode = _settingsService.Settings.DefaultViewMode;
         IsTouchDrawingEnabled = _settingsService.Settings.DefaultTouchDrawing;
+        HasPenDigitizer = DetectPenDigitizer();
         ActiveShapeKind = Enum.IsDefined(_settingsService.Settings.LastUsedShape)
             ? _settingsService.Settings.LastUsedShape
             : PdfAnnotationShapeKind.Line;
+        ActiveEraserMode = Enum.IsDefined(_settingsService.Settings.LastUsedEraserMode)
+            ? _settingsService.Settings.LastUsedEraserMode
+            : PdfEraserMode.Stroke;
         StrokeThicknessPt = Math.Clamp(_settingsService.Settings.DefaultStrokeWidthPt, 1.0, 12.0);
         IsSidebarOpen = _settingsService.Settings.IsSidebarOpen;
         _isInitializingSettings = false;

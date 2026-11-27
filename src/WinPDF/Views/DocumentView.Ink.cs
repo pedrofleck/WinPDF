@@ -20,7 +20,9 @@ public sealed partial class DocumentView
         int PageIndex,
         Vector2 SegA,
         Vector2 SegB,
-        float RadiusPt);
+        float RadiusPt,
+        PdfEraserMode EraserMode,
+        long SessionId);
 
     private const double PalmContactSizeThresholdDip = 28.0;
     private const double PenPalmExclusionRadiusDip = 150.0;
@@ -34,6 +36,7 @@ public sealed partial class DocumentView
     private Point _inkOverlayLastEraserDip;
     private bool _hasInkOverlayLastEraserDip;
     private PdfPageCanvas? _inkOverlayHoverCanvas;
+    private long _currentEraserSessionId;
 
     private bool _isPenInContact;
     private uint _activePenPointerId;
@@ -168,7 +171,14 @@ public sealed partial class DocumentView
             }
 
             _inkOverlayHoverCanvas = hitCanvas;
-            hitCanvas.UpdatePenHoverCursor(localPt, isEraser, ViewModel.StrokeThicknessPt, doc.ActiveAnnotationColor);
+            double? svZoom = ContinuousScrollViewer is { ZoomFactor: > 0.05f } sv ? sv.ZoomFactor : null;
+            hitCanvas.UpdatePenHoverCursor(
+                localPt,
+                isEraser,
+                ViewModel.StrokeThicknessPt,
+                doc.ActiveAnnotationColor,
+                ViewModel.ActiveEraserMode,
+                svZoom);
         }
         else if (_inkOverlayHoverCanvas is not null)
         {
@@ -216,6 +226,7 @@ public sealed partial class DocumentView
         PointerPoint pt = e.GetCurrentPoint(TouchInkDrawOverlay);
         if (e.Pointer.PointerDeviceType == PointerDeviceType.Pen)
         {
+            ViewModel.NotifyPenDetected();
             _lastPenActivityTick = Environment.TickCount64;
             _lastPenOverlayPos = pt.Position;
             _hasLastPenOverlayPos = true;
@@ -276,7 +287,7 @@ public sealed partial class DocumentView
             // Reject resting palm near the active pen tip while still allowing the opposite hand (>150 DIPs away) to pan/zoom.
             bool nearPen = IsTouchNearActivePen(pt.Position, nowTick);
             bool penRecentlyActive = _isPenInContact || (nowTick - _lastPenActivityTick) < 350;
-            bool allowTouchDraw = ViewModel.IsTouchDrawingEnabled && !penRecentlyActive && !nearPen;
+            bool allowTouchDraw = (!ViewModel.HasPenDigitizer || ViewModel.IsTouchDrawingEnabled) && !penRecentlyActive && !nearPen;
 
             if (nearPen && !_isInkOverlayTwoFingerNavigating && _inkOverlayTouchPointers.Count == 0)
             {
@@ -374,6 +385,7 @@ public sealed partial class DocumentView
         }
         else if (devType == PointerDeviceType.Pen)
         {
+            ViewModel.NotifyPenDetected();
             _isPenInContact = true;
             _activePenPointerId = pid;
             _lastPenActivityTick = nowTick;
@@ -440,10 +452,18 @@ public sealed partial class DocumentView
         {
             _isInkOverlayErasing = true;
             _isInkOverlayDrawing = false;
+            _currentEraserSessionId++;
             _inkOverlayLastEraserDip = localPt;
             _hasInkOverlayLastEraserDip = true;
             _inkOverlayHoverCanvas = targetCanvas;
-            targetCanvas.UpdatePenHoverCursor(localPt, isEraser: true, ViewModel.StrokeThicknessPt, doc.ActiveAnnotationColor);
+            double? svZoom = ContinuousScrollViewer is { ZoomFactor: > 0.05f } sv ? sv.ZoomFactor : null;
+            targetCanvas.UpdatePenHoverCursor(
+                localPt,
+                isEraser: true,
+                ViewModel.StrokeThicknessPt,
+                doc.ActiveAnnotationColor,
+                ViewModel.ActiveEraserMode,
+                svZoom);
             EnqueueEraserSegment(targetCanvas, localPt, localPt);
         }
         else
@@ -650,7 +670,14 @@ public sealed partial class DocumentView
                 _hasInkOverlayLastEraserDip = true;
             }
 
-            canvas.UpdatePenHoverCursor(_inkOverlayLastEraserDip, isEraser: true, ViewModel.StrokeThicknessPt, doc.ActiveAnnotationColor);
+            double? svZoom = ContinuousScrollViewer is { ZoomFactor: > 0.05f } sv ? sv.ZoomFactor : null;
+            canvas.UpdatePenHoverCursor(
+                _inkOverlayLastEraserDip,
+                isEraser: true,
+                ViewModel.StrokeThicknessPt,
+                doc.ActiveAnnotationColor,
+                ViewModel.ActiveEraserMode,
+                svZoom);
             return;
         }
 
@@ -896,14 +923,17 @@ public sealed partial class DocumentView
         PageCoordinateTransform transform = PageCoordinateTransform.FromPage(pageInfo, canvas.RotationAngle);
         Vector2 segA = transform.ToPdf(new Vector2((float)dipA.X, (float)dipA.Y));
         Vector2 segB = transform.ToPdf(new Vector2((float)dipB.X, (float)dipB.Y));
-        double zoom = ContinuousScrollViewer?.ZoomFactor > 0.05 ? ContinuousScrollViewer.ZoomFactor : 1.0;
-        float radiusPt = PdfPageCanvas.ComputeEraserRadiusPdfPt(zoom, ViewModel.StrokeThicknessPt);
+        double zoom = ContinuousScrollViewer is { ZoomFactor: > 0.05f } sv ? sv.ZoomFactor : canvas.ZoomFactor;
+        PdfEraserMode mode = ViewModel.ActiveEraserMode;
+        float radiusPt = PdfPageCanvas.ComputeEraserRadiusPdfPt(zoom, ViewModel.StrokeThicknessPt, mode);
 
         _eraserSegmentQueue.Enqueue(new EraserSegmentJob(
             pageInfo.Index,
             segA,
             segB,
-            radiusPt));
+            radiusPt,
+            mode,
+            _currentEraserSessionId));
 
         if (!_isDrainingEraserQueue)
         {
@@ -930,21 +960,71 @@ public sealed partial class DocumentView
                     break;
                 }
 
-                // Re-query live annotations before each deletion so shifted indices never collide.
-                while (true)
+                if (job.EraserMode == PdfEraserMode.Point)
                 {
                     IReadOnlyList<PdfAnnotationInfo> hits = doc.FindAnnotationsHitByEraser(
                         job.PageIndex,
                         job.SegA,
                         job.SegB,
-                        job.RadiusPt);
-                    if (hits.Count == 0)
-                    {
-                        break;
-                    }
+                        job.RadiusPt,
+                        PdfEraserMode.Point);
 
-                    PdfAnnotationInfo target = hits[0];
-                    await doc.DeleteAnnotationAsync(target.PageIndex, target.AnnotIndex, recordUndo: true);
+                    for (int i = 0; i < hits.Count; i++)
+                    {
+                        PdfAnnotationInfo target = hits[i];
+                        if (target.Strokes is { Count: > 0 })
+                        {
+                            List<PdfInkStrokeData> current = InkStrokeProcessor.ExtractInkStrokeData(target);
+                            List<PdfInkStrokeData> remaining = InkStrokeProcessor.ErasePointFromStrokes(
+                                current,
+                                job.SegA,
+                                job.SegB,
+                                job.RadiusPt,
+                                out bool modified);
+                            if (!modified)
+                            {
+                                continue;
+                            }
+
+                            if (remaining.Count == 0)
+                            {
+                                await doc.DeleteAnnotationAsync(target.PageIndex, target.AnnotIndex, recordUndo: true, eraserSessionId: job.SessionId);
+                            }
+                            else
+                            {
+                                _ = await doc.ReplaceInkStrokesAsync(
+                                    target.PageIndex,
+                                    target.AnnotIndex,
+                                    remaining,
+                                    recordUndo: true,
+                                    gestureSessionId: job.SessionId);
+                            }
+                        }
+                        else
+                        {
+                            await doc.DeleteAnnotationAsync(target.PageIndex, target.AnnotIndex, recordUndo: true, eraserSessionId: job.SessionId);
+                        }
+                    }
+                }
+                else
+                {
+                    // Stroke mode: re-query live annotations before each full deletion so shifted indices never collide.
+                    while (true)
+                    {
+                        IReadOnlyList<PdfAnnotationInfo> hits = doc.FindAnnotationsHitByEraser(
+                            job.PageIndex,
+                            job.SegA,
+                            job.SegB,
+                            job.RadiusPt,
+                            PdfEraserMode.Stroke);
+                        if (hits.Count == 0)
+                        {
+                            break;
+                        }
+
+                        PdfAnnotationInfo target = hits[0];
+                        await doc.DeleteAnnotationAsync(target.PageIndex, target.AnnotIndex, recordUndo: true, eraserSessionId: job.SessionId);
+                    }
                 }
             }
         }

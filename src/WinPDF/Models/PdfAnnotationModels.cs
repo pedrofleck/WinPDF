@@ -119,6 +119,9 @@ public readonly record struct PdfAnnotationColor(byte R, byte G, byte B, byte A 
 
     /// <summary>Preset crimson-red highlight/note color.</summary>
     public static readonly PdfAnnotationColor Red = new(242, 76, 76, 255);
+
+    /// <summary>Preset crisp-black ink/text/shape color.</summary>
+    public static readonly PdfAnnotationColor Black = new(20, 20, 20, 255);
 }
 
 /// <summary>
@@ -303,6 +306,7 @@ public sealed record PdfFreeTextStyle(
 /// <param name="CapturedPaths">Optional captured vector paths from the annotation's appearance stream (<c>/AP</c>).</param>
 /// <param name="CapturedImage">Optional captured raster image payload for <c>/Stamp</c> annotations.</param>
 /// <param name="TextStyle">Optional inline text formatting metadata when this annotation is a WinPDF text box.</param>
+/// <param name="InkPressures">Optional per-vertex stylus pressure values corresponding 1:1 to <paramref name="Strokes"/>.</param>
 public sealed record PdfAnnotationInfo(
     int PageIndex,
     int AnnotIndex,
@@ -324,7 +328,8 @@ public sealed record PdfAnnotationInfo(
     IReadOnlyList<IReadOnlyList<System.Numerics.Vector2>>? Strokes = null,
     IReadOnlyList<PdfCapturedPath>? CapturedPaths = null,
     PdfCapturedImage? CapturedImage = null,
-    PdfFreeTextStyle? TextStyle = null)
+    PdfFreeTextStyle? TextStyle = null,
+    IReadOnlyList<IReadOnlyList<float>>? InkPressures = null)
 {
     /// <summary>Gets a value indicating whether this annotation carries a non-empty comment or text body.</summary>
     public bool HasComment => !string.IsNullOrWhiteSpace(Contents);
@@ -630,6 +635,17 @@ public sealed record PdfCreateInkRequest(
     PdfAnnotationColor Color,
     float BaseWidthPt,
     string Author = "");
+
+/// <summary>
+/// Request to replace the strokes of an existing <c>/Ink</c> annotation in-place (for partial point erasing or undo).
+/// </summary>
+/// <param name="PageIndex">Zero-based page index.</param>
+/// <param name="AnnotIndex">Zero-based annotation index.</param>
+/// <param name="Strokes">Remaining strokes in PDF user space (points).</param>
+public sealed record PdfReplaceInkStrokesRequest(
+    int PageIndex,
+    int AnnotIndex,
+    IReadOnlyList<PdfInkStrokeData> Strokes);
 
 /// <summary>
 /// Result returned after creating or updating an annotation, carrying refreshed page annotations and target index.

@@ -528,6 +528,21 @@ public sealed class PdfiumService : IPdfService, IPdfiumBitmapOwner
     }
 
     /// <inheritdoc/>
+    public Task<PdfPageAnnotationMutationResult> ReplaceInkStrokesAsync(
+        long documentId,
+        PdfReplaceInkStrokesRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return Enqueue<PdfPageAnnotationMutationResult>(
+            new PdfiumJob<PdfPageAnnotationMutationResult>(
+                PdfJobPriority.Critical,
+                (engine, token) => engine.ReplaceInkAnnotation(documentId, request, token),
+                cancellationToken),
+            highPriority: true);
+    }
+
+    /// <inheritdoc/>
     public Task<PdfCapturedImage?> CaptureStampImageAsync(
         long documentId,
         int pageIndex,

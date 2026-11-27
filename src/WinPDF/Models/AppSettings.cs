@@ -31,6 +31,11 @@ public sealed class AppSettings
     public PdfAnnotationShapeKind LastUsedShape { get; set; } = PdfAnnotationShapeKind.Line;
 
     /// <summary>
+    /// Gets or sets the last eraser mode selected by the user on the annotation toolbar.
+    /// </summary>
+    public PdfEraserMode LastUsedEraserMode { get; set; } = PdfEraserMode.Stroke;
+
+    /// <summary>
     /// Gets or sets the preferred line/border thickness in PDF points for shapes and ink strokes.
     /// </summary>
     public double DefaultStrokeWidthPt { get; set; } = 2.0;

@@ -103,6 +103,10 @@
                     x:Name="ContextColorRedItem"
                     Tag="Red"
                     Click="OnContextColorHighlightClick" />
+                <MenuFlyoutItem
+                    x:Name="ContextColorBlackItem"
+                    Tag="Black"
+                    Click="OnContextColorHighlightClick" />
             </MenuFlyoutSubItem>
 
             <MenuFlyoutSeparator x:Name="ContextAnnotSeparator" />
@@ -501,6 +505,16 @@
                         BorderThickness="1"
                         Tag="Red"
                         Click="OnMouseSelectionColorClick" />
+                    <Button
+                        x:Name="MouseSelColorBlackButton"
+                        Width="20"
+                        Height="20"
+                        Padding="0"
+                        CornerRadius="10"
+                        Background="#FF141414"
+                        BorderThickness="1"
+                        Tag="Black"
+                        Click="OnMouseSelectionColorClick" />
                 </StackPanel>
             </StackPanel>
         </Flyout>
@@ -648,6 +662,16 @@
                         Background="#FFF24C4C"
                         BorderThickness="1"
                         Tag="Red"
+                        Click="OnQuickBarColorSelectClick" />
+                    <Button
+                        x:Name="QuickColorBlackButton"
+                        Width="22"
+                        Height="22"
+                        Padding="0"
+                        CornerRadius="11"
+                        Background="#FF141414"
+                        BorderThickness="1"
+                        Tag="Black"
                         Click="OnQuickBarColorSelectClick" />
                 </StackPanel>
             </StackPanel>
@@ -810,6 +834,16 @@
                             Background="#FFF24C4C"
                             BorderThickness="2"
                             Tag="Red"
+                            Click="OnAnnotationColorSwatchClick" />
+                        <Button
+                            x:Name="AnnotColorBlackButton"
+                            Width="20"
+                            Height="20"
+                            Padding="0"
+                            CornerRadius="10"
+                            Background="#FF141414"
+                            BorderThickness="2"
+                            Tag="Black"
                             Click="OnAnnotationColorSwatchClick" />
                     </StackPanel>
                 </Grid>
@@ -1017,6 +1051,10 @@
                             <AppBarButton
                                 x:Name="TouchSelectionColorRedButton"
                                 Tag="Red"
+                                Click="OnTouchSelectionColorClick" />
+                            <AppBarButton
+                                x:Name="TouchSelectionColorBlackButton"
+                                Tag="Black"
                                 Click="OnTouchSelectionColorClick" />
                         </CommandBarFlyout.SecondaryCommands>
                     </CommandBarFlyout>
@@ -1496,6 +1534,16 @@
                                     Background="#FFF24C4C"
                                     BorderThickness="1"
                                     Tag="Red"
+                                    Click="OnQuickBarColorSelectClick" />
+                                <Button
+                                    x:Name="TouchQuickColorBlackButton"
+                                    Width="24"
+                                    Height="24"
+                                    Padding="0"
+                                    CornerRadius="12"
+                                    Background="#FF141414"
+                                    BorderThickness="1"
+                                    Tag="Black"
                                     Click="OnQuickBarColorSelectClick" />
                             </StackPanel>
                         </StackPanel>
@@ -2304,6 +2352,16 @@
                                                 BorderThickness="1"
                                                 Tag="Red"
                                                 Click="OnToolbarDefaultColorSelectClick" />
+                                            <Button
+                                                x:Name="ToolbarColorBlackButton"
+                                                Width="22"
+                                                Height="22"
+                                                Padding="0"
+                                                CornerRadius="11"
+                                                Background="#FF141414"
+                                                BorderThickness="1"
+                                                Tag="Black"
+                                                Click="OnToolbarDefaultColorSelectClick" />
                                         </StackPanel>
                                     </Flyout>
                                 </Button.Flyout>
@@ -2476,19 +2534,84 @@
                                     </Button.Flyout>
                                 </Button>
                             </StackPanel>
-                            <ToggleButton
-                                x:Uid="ToolEraserButton"
-                                Click="OnToolEraserClicked"
-                                IsChecked="{x:Bind converters:UiHelpers.IsEraserTool(ViewModel.ActiveTool), Mode=OneWay}">
-                                <FontIcon FontSize="14" Glyph="&#xE75C;" />
-                            </ToggleButton>
+                            <!-- Eraser Split Toggle (Stroke vs Point eraser + dropdown chevron) -->
+                            <StackPanel Orientation="Horizontal" Spacing="0" VerticalAlignment="Center">
+                                <ToggleButton
+                                    x:Name="ToolbarEraserButton"
+                                    x:Uid="ToolbarEraserButton"
+                                    Width="32"
+                                    MinWidth="32"
+                                    MinHeight="0"
+                                    Padding="0"
+                                    BorderThickness="1,1,0,1"
+                                    CornerRadius="4,0,0,4"
+                                    VerticalAlignment="Center"
+                                    IsTabStop="False"
+                                    Click="OnToolEraserClicked"
+                                    IsChecked="{x:Bind converters:UiHelpers.IsEraserTool(ViewModel.ActiveTool), Mode=OneWay}">
+                                    <Grid Width="16" Height="16">
+                                        <FontIcon
+                                            x:Name="ToolbarEraserStrokeIcon"
+                                            FontSize="14"
+                                            Glyph="&#xE75C;" />
+                                        <Viewbox
+                                            x:Name="ToolbarEraserPointIcon"
+                                            Width="14"
+                                            Height="14"
+                                            Visibility="Collapsed">
+                                            <PathIcon
+                                                Width="16"
+                                                Height="16"
+                                                Data="M 10.6,1.6 L 14.4,5.4 C 14.9,5.9 14.9,6.7 14.4,7.2 L 7.6,14.0 L 3.4,14.0 L 1.6,12.2 C 1.1,11.7 1.1,10.9 1.6,10.4 L 8.8,1.6 C 9.3,1.1 10.1,1.1 10.6,1.6 Z M 4.0,12.8 L 7.1,12.8 L 9.5,10.4 L 5.6,6.5 L 2.5,11.3 Z M 10.2,13.0 L 14.5,13.0 L 14.5,14.2 L 10.2,14.2 Z" />
+                                        </Viewbox>
+                                    </Grid>
+                                </ToggleButton>
+                                <Button
+                                    x:Name="ToolbarEraserPickerButton"
+                                    x:Uid="ToolbarEraserPickerButton"
+                                    Width="18"
+                                    MinWidth="18"
+                                    MinHeight="0"
+                                    Padding="0"
+                                    BorderThickness="1"
+                                    CornerRadius="0,4,4,0"
+                                    VerticalAlignment="Center"
+                                    IsTabStop="False">
+                                    <FontIcon FontSize="9" Glyph="&#xE70D;" />
+                                    <Button.Flyout>
+                                        <MenuFlyout Placement="Bottom">
+                                            <MenuFlyoutItem
+                                                x:Name="EraserModeStrokeMenuItem"
+                                                x:Uid="EraserModeStrokeMenuItem"
+                                                Tag="Stroke"
+                                                Click="OnEraserModeMenuItemClick">
+                                                <MenuFlyoutItem.Icon>
+                                                    <FontIcon Glyph="&#xE75C;" />
+                                                </MenuFlyoutItem.Icon>
+                                            </MenuFlyoutItem>
+                                            <MenuFlyoutItem
+                                                x:Name="EraserModePointMenuItem"
+                                                x:Uid="EraserModePointMenuItem"
+                                                Tag="Point"
+                                                Click="OnEraserModeMenuItemClick">
+                                                <MenuFlyoutItem.Icon>
+                                                    <PathIcon Data="M 10.6,1.6 L 14.4,5.4 C 14.9,5.9 14.9,6.7 14.4,7.2 L 7.6,14.0 L 3.4,14.0 L 1.6,12.2 C 1.1,11.7 1.1,10.9 1.6,10.4 L 8.8,1.6 C 9.3,1.1 10.1,1.1 10.6,1.6 Z M 4.0,12.8 L 7.1,12.8 L 9.5,10.4 L 5.6,6.5 L 2.5,11.3 Z M 10.2,13.0 L 14.5,13.0 L 14.5,14.2 L 10.2,14.2 Z" />
+                                                </MenuFlyoutItem.Icon>
+                                            </MenuFlyoutItem>
+                                        </MenuFlyout>
+                                    </Button.Flyout>
+                                </Button>
+                            </StackPanel>
 
-                            <AppBarSeparator Margin="4,4,4,4" />
+                            <AppBarSeparator
+                                Margin="4,4,4,4"
+                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasPenDigitizer), Mode=OneWay}" />
 
                             <ToggleButton
                                 x:Uid="TouchDrawingToggle"
                                 IsTabStop="False"
-                                IsChecked="{x:Bind ViewModel.IsTouchDrawingEnabled, Mode=TwoWay}">
+                                IsChecked="{x:Bind ViewModel.IsTouchDrawingEnabled, Mode=TwoWay}"
+                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasPenDigitizer), Mode=OneWay}">
                                 <FontIcon FontSize="14" Glyph="&#xED5F;" />
                             </ToggleButton>
                         </StackPanel>

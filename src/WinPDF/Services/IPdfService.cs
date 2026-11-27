@@ -510,6 +510,18 @@ public interface IPdfService : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Replaces the strokes and appearance stream of an existing <c>/Ink</c> annotation in-place.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="request">Replacement stroke parameters.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The updated annotation index and refreshed annotations for the page.</returns>
+    Task<PdfPageAnnotationMutationResult> ReplaceInkStrokesAsync(
+        long documentId,
+        PdfReplaceInkStrokesRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Captures the embedded raster image payload from an existing <c>/Stamp</c> annotation for copy/cut/undo.
     /// </summary>
     /// <param name="documentId">Document identifier.</param>

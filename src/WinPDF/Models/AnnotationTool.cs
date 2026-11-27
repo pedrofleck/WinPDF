@@ -63,3 +63,15 @@ public enum PdfAnnotationShapeKind
     /// <summary>Axis-aligned ellipse or circle (<c>/Circle</c>).</summary>
     Ellipse = 3,
 }
+
+/// <summary>
+/// Supported erasing behaviors for <see cref="AnnotationTool.Eraser"/> and S Pen eraser gestures.
+/// </summary>
+public enum PdfEraserMode
+{
+    /// <summary>Erases the entire ink stroke or annotation touched by the eraser.</summary>
+    Stroke = 0,
+
+    /// <summary>Erases only the portions of freehand ink strokes under the eraser tip, splitting strokes cleanly.</summary>
+    Point = 1,
+}

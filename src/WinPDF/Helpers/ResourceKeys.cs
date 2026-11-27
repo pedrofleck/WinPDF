@@ -256,6 +256,9 @@ public static class ResourceKeys
     /// <summary>Color name: Red.</summary>
     public const string ColorRed = "Color_Red";
 
+    /// <summary>Color name: Black.</summary>
+    public const string ColorBlack = "Color_Black";
+
     /// <summary>Annotation subtype label: Highlight.</summary>
     public const string AnnotSubtypeHighlight = "Annot_Subtype_Highlight";
 
@@ -468,4 +471,10 @@ public static class ResourceKeys
 
     /// <summary>Dynamic tooltip format for the shapes toolbar button ({0} = active shape name).</summary>
     public const string ToolShapeFormatToolTip = "Tool_Shape_FormatToolTip";
+
+    /// <summary>Tooltip for the Eraser button when set to full stroke/object mode.</summary>
+    public const string ToolEraserStrokeToolTip = "Tool_Eraser_StrokeToolTip";
+
+    /// <summary>Tooltip for the Eraser button when set to point/partial stroke mode.</summary>
+    public const string ToolEraserPointToolTip = "Tool_Eraser_PointToolTip";
 }

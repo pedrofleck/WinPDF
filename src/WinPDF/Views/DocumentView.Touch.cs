@@ -536,6 +536,7 @@ public sealed partial class DocumentView
 
         if (e.Pointer.PointerDeviceType == PointerDeviceType.Pen)
         {
+            ViewModel.NotifyPenDetected();
             _isLastPointerInputTouch = false;
             ProtectedCursor = s_shapeOverlayCrossCursor;
             if (pt.Properties.IsRightButtonPressed || pt.Properties.IsBarrelButtonPressed)
@@ -1402,6 +1403,7 @@ public sealed partial class DocumentView
         ApplySwatchSelectedState(TouchQuickColorPinkButton, IsSameColor(annot.Color, PdfAnnotationColor.Pink));
         ApplySwatchSelectedState(TouchQuickColorOrangeButton, IsSameColor(annot.Color, PdfAnnotationColor.Orange));
         ApplySwatchSelectedState(TouchQuickColorRedButton, IsSameColor(annot.Color, PdfAnnotationColor.Red));
+        ApplySwatchSelectedState(TouchQuickColorBlackButton, IsSameColor(annot.Color, PdfAnnotationColor.Black));
     }
 
     private void UpdateTouchAnnotationResizeHandlesLayout(Rect? livePreviewCanvasRect = null, PdfPageCanvas? liveCanvas = null)

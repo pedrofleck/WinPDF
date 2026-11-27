@@ -42,15 +42,29 @@ public sealed partial class PdfPageCanvas
     /// <summary>
     /// Computes the consistent eraser tip radius in PDF points so the visual eraser ring
     /// and the eraser hit-test geometry match identically at any zoom level.
+    /// In <see cref="PdfEraserMode.Point"/>, the eraser matches the selected pen stroke thickness;
+    /// in <see cref="PdfEraserMode.Stroke"/>, it renders a compact object-selection ring.
     /// </summary>
     /// <param name="zoomFactor">Active scroll viewer zoom factor.</param>
     /// <param name="strokeWidthPt">Current annotation stroke thickness setting in PDF points.</param>
+    /// <param name="eraserMode">Active eraser mode.</param>
     /// <returns>Eraser radius in PDF points.</returns>
-    public static float ComputeEraserRadiusPdfPt(double zoomFactor, double strokeWidthPt)
+    public static float ComputeEraserRadiusPdfPt(
+        double zoomFactor,
+        double strokeWidthPt,
+        PdfEraserMode eraserMode = PdfEraserMode.Stroke)
     {
-        float radiusScreenDip = (float)Math.Clamp(10.0 + (strokeWidthPt * 1.15), 11.0, 24.0);
-        float radiusPageDip = radiusScreenDip / (float)Math.Max(0.25, zoomFactor);
-        return Math.Clamp(radiusPageDip / (float)PageCoordinateTransform.DipsPerPoint, 3.0f, 36.0f);
+        double clampedZoom = Math.Max(0.25, zoomFactor);
+        if (eraserMode == PdfEraserMode.Point)
+        {
+            float penRadiusPt = (float)Math.Clamp(strokeWidthPt * 0.5, 0.5, 24.0);
+            float minVisiblePt = 2.2f / (float)(clampedZoom * PageCoordinateTransform.DipsPerPoint);
+            return MathF.Max(penRadiusPt, minVisiblePt);
+        }
+
+        // Object/stroke eraser: compact ~4.5 screen-DIP radius (~9 DIP diameter) rather than a giant overlay circle.
+        float radiusPageDip = 4.5f / (float)clampedZoom;
+        return Math.Clamp(radiusPageDip / (float)PageCoordinateTransform.DipsPerPoint, 1.0f, 18.0f);
     }
 
     /// <summary>
@@ -214,24 +228,35 @@ public sealed partial class PdfPageCanvas
     /// <param name="isEraser">Whether the cursor should render as an eraser ring rather than a pen nib.</param>
     /// <param name="brushWidthPt">Nominal brush thickness in PDF points.</param>
     /// <param name="color">Active annotation color.</param>
-    public void UpdatePenHoverCursor(Point dipPt, bool isEraser, double brushWidthPt, PdfAnnotationColor color)
+    /// <param name="eraserMode">Active eraser mode (<see cref="PdfEraserMode.Stroke"/> or <see cref="PdfEraserMode.Point"/>).</param>
+    /// <param name="zoomFactorOverride">Optional scroll-viewer zoom factor override so visual ring matches erase radius identically.</param>
+    public void UpdatePenHoverCursor(
+        Point dipPt,
+        bool isEraser,
+        double brushWidthPt,
+        PdfAnnotationColor color,
+        PdfEraserMode eraserMode = PdfEraserMode.Stroke,
+        double? zoomFactorOverride = null)
     {
         if (PageInfo is null)
         {
             return;
         }
 
+        double activeZoom = zoomFactorOverride is > 0.05 ? zoomFactorOverride.Value : EffectiveZoom;
         Point clamped = ClampToCanvasDip(dipPt);
         float targetRadiusDip = isEraser
-            ? ComputeEraserRadiusPdfPt(ZoomFactor, brushWidthPt) * (float)PageCoordinateTransform.DipsPerPoint
-            : Math.Max(1.75f, (float)(Math.Clamp(brushWidthPt, 0.5, 32.0) * PageCoordinateTransform.DipsPerPoint * 0.5));
+            ? ComputeEraserRadiusPdfPt(activeZoom, brushWidthPt, eraserMode) * (float)PageCoordinateTransform.DipsPerPoint
+            : Math.Max(
+                2.2f / (float)Math.Max(0.35, activeZoom),
+                (float)(Math.Clamp(brushWidthPt, 0.5, 32.0) * PageCoordinateTransform.DipsPerPoint * 0.5));
         Windows.UI.Color targetColor = Windows.UI.Color.FromArgb(220, color.R, color.G, color.B);
 
         bool moved = !_hasPenHoverCursor ||
                      Math.Abs(clamped.X - _penHoverDip.X) >= 0.35 ||
                      Math.Abs(clamped.Y - _penHoverDip.Y) >= 0.35 ||
                      _penHoverIsEraser != isEraser ||
-                     MathF.Abs(targetRadiusDip - _penHoverRadiusDip) >= 0.15f ||
+                     MathF.Abs(targetRadiusDip - _penHoverRadiusDip) >= 0.10f ||
                      _penHoverColor != targetColor;
 
         if (!moved)
@@ -295,12 +320,12 @@ public sealed partial class PdfPageCanvas
         {
             float cx = (float)_penHoverDip.X + ox;
             float cy = (float)_penHoverDip.Y + oy;
-            float invZoom = 1.0f / (float)Math.Max(0.35, ZoomFactor);
-            float haloStroke = Math.Clamp(1.35f * invZoom, 0.65f, 2.5f);
+            float invZoom = 1.0f / (float)Math.Max(0.35, EffectiveZoom);
+            float haloStroke = Math.Clamp(1.1f * invZoom, 0.5f, 1.8f);
 
             if (_penHoverIsEraser)
             {
-                float r = Math.Max(3.5f * invZoom, _penHoverRadiusDip);
+                float r = Math.Max(1.25f, _penHoverRadiusDip);
                 Windows.UI.Color fill = IsNightMode
                     ? Windows.UI.Color.FromArgb(46, 255, 130, 145)
                     : Windows.UI.Color.FromArgb(52, 232, 95, 110);
@@ -315,7 +340,7 @@ public sealed partial class PdfPageCanvas
             }
             else
             {
-                float r = Math.Max(2.2f * invZoom, _penHoverRadiusDip);
+                float r = Math.Max(1.25f, _penHoverRadiusDip);
                 Windows.UI.Color dotFill = Windows.UI.Color.FromArgb(175, _penHoverColor.R, _penHoverColor.G, _penHoverColor.B);
                 Windows.UI.Color contrastHalo = IsNightMode
                     ? Windows.UI.Color.FromArgb(220, 255, 255, 255)

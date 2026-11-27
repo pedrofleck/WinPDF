@@ -1144,12 +1144,14 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     /// <param name="segStartPdf">Eraser segment start in PDF points.</param>
     /// <param name="segEndPdf">Eraser segment end in PDF points.</param>
     /// <param name="eraserRadiusPt">Eraser tip radius in PDF points.</param>
+    /// <param name="eraserMode">Active eraser mode (<see cref="PdfEraserMode.Stroke"/> or <see cref="PdfEraserMode.Point"/>).</param>
     /// <returns>Matching annotations in descending <c>AnnotIndex</c> order.</returns>
     public IReadOnlyList<PdfAnnotationInfo> FindAnnotationsHitByEraser(
         int pageIndex,
         System.Numerics.Vector2 segStartPdf,
         System.Numerics.Vector2 segEndPdf,
-        float eraserRadiusPt)
+        float eraserRadiusPt,
+        PdfEraserMode eraserMode = PdfEraserMode.Stroke)
     {
         if (!_annotationsByPage.TryGetValue(pageIndex, out List<PdfAnnotationInfo>? list) || list.Count == 0)
         {
@@ -1160,7 +1162,7 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         for (int i = list.Count - 1; i >= 0; i--)
         {
             PdfAnnotationInfo candidate = list[i];
-            if (WinPDF.Rendering.InkStrokeProcessor.IntersectsAnnotation(candidate, segStartPdf, segEndPdf, eraserRadiusPt))
+            if (WinPDF.Rendering.InkStrokeProcessor.IntersectsAnnotation(candidate, segStartPdf, segEndPdf, eraserRadiusPt, eraserMode))
             {
                 (hits ??= new List<PdfAnnotationInfo>(4)).Add(candidate);
             }
@@ -1719,9 +1721,57 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Replaces the strokes of an existing freehand <c>/Ink</c> annotation in-place (for partial erasing or undo).
+    /// Coalesces consecutive partial-erase steps during the same <paramref name="gestureSessionId"/> into one undo entry.
+    /// </summary>
+    public async Task<PdfAnnotationInfo?> ReplaceInkStrokesAsync(
+        int pageIndex,
+        int annotIndex,
+        IReadOnlyList<PdfInkStrokeData> newStrokes,
+        bool recordUndo = true,
+        long gestureSessionId = 0)
+    {
+        if (_isDisposed || newStrokes is null || newStrokes.Count == 0)
+        {
+            return null;
+        }
+
+        PdfAnnotationInfo? before = recordUndo ? FindExactAnnotation(pageIndex, annotIndex) : null;
+        List<PdfInkStrokeData>? beforeStrokes = before is not null
+            ? WinPDF.Rendering.InkStrokeProcessor.ExtractInkStrokeData(before)
+            : null;
+
+        PdfReplaceInkStrokesRequest req = new(pageIndex, annotIndex, newStrokes);
+        PdfPageAnnotationMutationResult result = await _pdfService.ReplaceInkStrokesAsync(DocumentId, req, _lifetime.Token);
+        if (_isDisposed)
+        {
+            return null;
+        }
+
+        ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
+        PdfAnnotationInfo? updated = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
+        if (recordUndo && beforeStrokes is { Count: > 0 } && updated is not null)
+        {
+            bool coalesceTop = gestureSessionId > 0 &&
+                               _annotationUndoStack.Count > 0 &&
+                               _annotationUndoStack[^1] is UndoReplacedInkEntry top &&
+                               top.GestureSessionId == gestureSessionId &&
+                               top.Location.PageIndex == pageIndex &&
+                               top.Location.AnnotIndex == annotIndex;
+            if (!coalesceTop)
+            {
+                PushUndoEntry(new UndoReplacedInkEntry(pageIndex, annotIndex, beforeStrokes, gestureSessionId));
+            }
+        }
+
+        HasUnsavedChanges = true;
+        return updated;
+    }
+
+    /// <summary>
     /// Deletes an existing annotation from <paramref name="pageIndex"/> and refreshes caches and views.
     /// </summary>
-    public async Task DeleteAnnotationAsync(int pageIndex, int annotIndex, bool recordUndo = true)
+    public async Task DeleteAnnotationAsync(int pageIndex, int annotIndex, bool recordUndo = true, long eraserSessionId = 0)
     {
         if (_isDisposed)
         {
@@ -1757,6 +1807,23 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         ApplyPageAnnotationMutation(pageIndex, refreshed, deletedAnnotIndex: annotIndex);
         if (recordUndo && before is not null)
         {
+            if (eraserSessionId > 0 &&
+                _annotationUndoStack.Count > 0 &&
+                _annotationUndoStack[^1] is UndoReplacedInkEntry top &&
+                top.GestureSessionId == eraserSessionId &&
+                top.Location.PageIndex == pageIndex &&
+                top.Location.AnnotIndex == annotIndex)
+            {
+                List<PdfInkStrokeData> origStrokes = top.PreviousStrokes;
+                _annotationUndoStack.RemoveAt(_annotationUndoStack.Count - 1);
+                before = before with
+                {
+                    Strokes = WinPDF.Rendering.InkStrokeProcessor.ToVectorStrokes(origStrokes),
+                    InkPressures = WinPDF.Rendering.InkStrokeProcessor.ToPressureLists(origStrokes),
+                    CapturedPaths = null,
+                };
+            }
+
             AdjustUndoEntriesForDeletion(pageIndex, annotIndex);
             PushUndoEntry(new UndoDeletedAnnotationEntry(before));
         }
@@ -1995,6 +2062,18 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
                 return true;
 
+            case UndoReplacedInkEntry replacedInk:
+                if (replacedInk.Location.IsValid)
+                {
+                    _ = await ReplaceInkStrokesAsync(
+                        replacedInk.Location.PageIndex,
+                        replacedInk.Location.AnnotIndex,
+                        replacedInk.PreviousStrokes,
+                        recordUndo: false);
+                }
+
+                return true;
+
             case UndoDeletedAnnotationEntry deleted:
                 PdfAnnotationInfo snapshot = deleted.Snapshot;
                 PdfAnnotationInfo? restored = null;
@@ -2224,6 +2303,20 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
         public override void OnAnnotationRestored(int pageIndex, int originalAnnotIndex, int restoredAnnotIndex)
         {
         }
+    }
+
+    private sealed class UndoReplacedInkEntry(
+        int pageIndex,
+        int annotIndex,
+        List<PdfInkStrokeData> previousStrokes,
+        long gestureSessionId) : AnnotationUndoEntry
+    {
+        public AnnotationLocation Location { get; } = new(pageIndex, annotIndex);
+        public List<PdfInkStrokeData> PreviousStrokes { get; } = previousStrokes;
+        public long GestureSessionId { get; } = gestureSessionId;
+
+        public override void OnAnnotationDeleted(int pageIndex, int removedAnnotIndex) => Location.OnDeleted(pageIndex, removedAnnotIndex);
+        public override void OnAnnotationRestored(int pageIndex, int originalAnnotIndex, int restoredAnnotIndex) => Location.OnRestored(pageIndex, originalAnnotIndex, restoredAnnotIndex);
     }
 
     private PdfAnnotationInfo? FindAnnotationByIndex(int pageIndex, int annotIndex)
