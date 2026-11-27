@@ -549,4 +549,10 @@ public static class ResourceKeys
 
     /// <summary>Tooltip shown on the yellow warning badge of a saved signature without a transparent background.</summary>
     public const string SignatureDialogOpaqueBadgeToolTip = "SignatureDialog_OpaqueBadgeToolTip";
+
+    /// <summary>Windows taskbar Jump List category header for recent PDF documents.</summary>
+    public const string JumpListRecentCategory = "JumpList_RecentCategory";
+
+    /// <summary>Windows taskbar Jump List task label to open a new blank window.</summary>
+    public const string JumpListNewWindowTask = "JumpList_NewWindowTask";
 }

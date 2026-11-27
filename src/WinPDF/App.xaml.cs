@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
+using WinPDF.Interop.Shell;
 using WinPDF.Models;
 using WinPDF.Rendering;
 using WinPDF.Services;
@@ -29,21 +30,12 @@ public partial class App : Application
     /// </summary>
     public IServiceProvider Services => _services;
 
-    [LibraryImport("shell32.dll", EntryPoint = "SetCurrentProcessExplicitAppUserModelID", StringMarshalling = StringMarshalling.Utf16)]
-    private static partial int SetCurrentProcessExplicitAppUserModelID(string appID);
-
     /// <summary>
     /// Initializes the singleton application object and configures dependency injection.
     /// </summary>
     public App()
     {
-        try
-        {
-            _ = SetCurrentProcessExplicitAppUserModelID("PedroFleck.WinPDF");
-        }
-        catch
-        {
-        }
+        TaskbarShellIntegration.ApplyProcessAppUserModelId();
 
         UnhandledException += OnAppUnhandledException;
         AppDomain.CurrentDomain.UnhandledException += OnCurrentDomainUnhandledException;
@@ -169,13 +161,21 @@ public partial class App : Application
 
         string[] cmdArgs = Environment.GetCommandLineArgs();
 
-        // Check for automated diagnostic test mode
+        // Check for automated diagnostic test mode or explicit blank new-window launch
         bool isAutoTest = false;
         string? autoTestPdf = null;
         bool isRamBenchmark = false;
         string? ramBenchmarkPdf = null;
+        bool isNewBlankWindow = false;
         for (int i = 1; i < cmdArgs.Length; i++)
         {
+            string trimmedArg = cmdArgs[i].Trim('\"', ' ');
+            if (string.Equals(trimmedArg, TaskbarShellIntegration.NewWindowArgument, StringComparison.OrdinalIgnoreCase))
+            {
+                isNewBlankWindow = true;
+                continue;
+            }
+
             if (string.Equals(cmdArgs[i], "--autotest", StringComparison.OrdinalIgnoreCase))
             {
                 isAutoTest = true;
@@ -241,7 +241,7 @@ public partial class App : Application
         bool isSessionRestore = false;
         int initialPageIndex = 0;
 
-        if (startupPdf is null && !isAutoTest && !isRamBenchmark)
+        if (startupPdf is null && !isAutoTest && !isRamBenchmark && !isNewBlankWindow)
         {
             ISettingsService settingsService = _services.GetRequiredService<ISettingsService>();
             if (settingsService.Settings.ReopenLastDocument &&
@@ -298,6 +298,7 @@ public partial class App : Application
         }
 
         _mainWindow.Activate();
+        shellViewModel.RefreshTaskbarJumpList();
 
         if (startupPdf is not null)
         {

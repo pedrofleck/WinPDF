@@ -458,4 +458,6 @@
   <data name="SignatureDialog_ColorBlue" xml:space="preserve"><value>Tinta azul</value></data>
   <data name="SignatureDialog_ColorRed" xml:space="preserve"><value>Tinta vermelha</value></data>
   <data name="SignatureDialog_OpaqueBadgeToolTip" xml:space="preserve"><value>Sem fundo transparente — esta assinatura pode encobrir parte do documento atrás dela.</value></data>
+  <data name="JumpList_RecentCategory" xml:space="preserve"><value>Recentes</value></data>
+  <data name="JumpList_NewWindowTask" xml:space="preserve"><value>Nova janela</value></data>
 </root>

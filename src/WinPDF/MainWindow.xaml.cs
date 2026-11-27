@@ -475,6 +475,13 @@ public sealed partial class MainWindow : Window
             catch { }
         }
 
+        try
+        {
+            IntPtr taskbarHwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            WinPDF.Interop.Shell.TaskbarShellIntegration.ConfigureWindowProperties(taskbarHwnd);
+        }
+        catch { }
+
         if (AppWindowTitleBar.IsCustomizationSupported())
         {
             AppWindow.TitleBar.PreferredHeightOption = TitleBarHeightOption.Tall;

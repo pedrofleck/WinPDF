@@ -1227,6 +1227,9 @@ public sealed partial class ShellViewModel : ObservableObject
                 s.LastOpenedFilePath = doc.FilePath;
                 s.LastOpenedPageIndex = doc.CurrentPageIndex;
             });
+            _settingsService.AddRecentFile(doc.FilePath);
+            Interop.Shell.TaskbarShellIntegration.NotifyRecentFileOpened(doc.FilePath);
+            RefreshTaskbarJumpList();
 
             ViewMode targetViewMode = _settingsService.Settings.DefaultViewMode;
             if (_settingsService.Settings.SaveDocumentViewSettings &&
@@ -2007,6 +2010,22 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             NotificationRequested?.Invoke(string.Empty, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Refreshes the Windows taskbar Jump List with recent documents and the "New window" task.
+    /// </summary>
+    public void RefreshTaskbarJumpList()
+    {
+        IReadOnlyList<string> recent = _settingsService.GetRecentFiles();
+        string recentTitle = ResourceStrings.Get(ResourceKeys.JumpListRecentCategory);
+        string newWindowTitle = ResourceStrings.Get(ResourceKeys.JumpListNewWindowTask);
+
+        Interop.Shell.TaskbarShellIntegration.RefreshJumpListAsync(
+            recent,
+            recentTitle,
+            newWindowTitle,
+            removedPath => _settingsService.RemoveRecentFile(removedPath));
     }
 
     /// <summary>

@@ -76,6 +76,11 @@ public sealed class AppSettings
     public int LastOpenedPageIndex { get; set; }
 
     /// <summary>
+    /// Gets or sets the ordered list of recently opened PDF file paths (newest first, up to 10).
+    /// </summary>
+    public List<string> RecentFiles { get; set; } = [];
+
+    /// <summary>
     /// Gets or sets a value indicating whether the navigation sidebar is open by default.
     /// </summary>
     public bool IsSidebarOpen { get; set; } = true;

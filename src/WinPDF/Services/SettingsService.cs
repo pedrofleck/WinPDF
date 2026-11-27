@@ -251,6 +251,49 @@ public sealed class SettingsService : ISettingsService
                     }
                 }
 
+                if (TryGetPropertyIgnoreCase(root, "recentFiles", out JsonElement recentEl) &&
+                    recentEl.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (JsonElement recentPathEl in recentEl.EnumerateArray())
+                    {
+                        if (recentPathEl.ValueKind == JsonValueKind.String)
+                        {
+                            string? path = recentPathEl.GetString();
+                            if (!string.IsNullOrWhiteSpace(path) &&
+                                !loaded.RecentFiles.Contains(path, StringComparer.OrdinalIgnoreCase))
+                            {
+                                loaded.RecentFiles.Add(path);
+                                if (loaded.RecentFiles.Count >= 10)
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (loaded.RecentFiles.Count == 0)
+                {
+                    if (!string.IsNullOrWhiteSpace(loaded.LastOpenedFilePath) && File.Exists(loaded.LastOpenedFilePath))
+                    {
+                        loaded.RecentFiles.Add(loaded.LastOpenedFilePath);
+                    }
+
+                    foreach (KeyValuePair<string, SavedDocumentState> kvp in loaded.DocumentStates
+                        .Where(k => !string.IsNullOrWhiteSpace(k.Key) && File.Exists(k.Key))
+                        .OrderByDescending(k => k.Value.LastOpenedUtc))
+                    {
+                        if (!loaded.RecentFiles.Contains(kvp.Key, StringComparer.OrdinalIgnoreCase))
+                        {
+                            loaded.RecentFiles.Add(kvp.Key);
+                            if (loaded.RecentFiles.Count >= 10)
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 Settings = loaded;
             }
             catch (Exception ex)
@@ -316,6 +359,7 @@ public sealed class SettingsService : ISettingsService
                 writer.WriteBoolean("saveDocumentViewSettings", Settings.SaveDocumentViewSettings);
                 WriteDocumentBookmarksJson(writer, Settings.DocumentBookmarks);
                 WriteDocumentStatesJson(writer, Settings.DocumentStates);
+                WriteRecentFilesJson(writer, Settings.RecentFiles);
                 writer.WriteEndObject();
             }
 
@@ -354,6 +398,7 @@ public sealed class SettingsService : ISettingsService
                     writer.WriteBoolean("saveDocumentViewSettings", Settings.SaveDocumentViewSettings);
                     WriteDocumentBookmarksJson(writer, Settings.DocumentBookmarks);
                     WriteDocumentStatesJson(writer, Settings.DocumentStates);
+                    WriteRecentFilesJson(writer, Settings.RecentFiles);
                     writer.WriteEndObject();
                 }
 
@@ -425,6 +470,70 @@ public sealed class SettingsService : ISettingsService
             state.LastOpenedUtc = DateTime.UtcNow;
             SaveInternal();
         }
+    }
+
+    /// <inheritdoc/>
+    public IReadOnlyList<string> GetRecentFiles()
+    {
+        lock (_syncLock)
+        {
+            return [.. Settings.RecentFiles];
+        }
+    }
+
+    /// <inheritdoc/>
+    public void AddRecentFile(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return;
+        }
+
+        string normalized = Path.GetFullPath(filePath);
+        lock (_syncLock)
+        {
+            Settings.RecentFiles.RemoveAll(p => string.Equals(p, normalized, StringComparison.OrdinalIgnoreCase));
+            Settings.RecentFiles.Insert(0, normalized);
+            if (Settings.RecentFiles.Count > 10)
+            {
+                Settings.RecentFiles.RemoveRange(10, Settings.RecentFiles.Count - 10);
+            }
+
+            SaveInternal();
+        }
+    }
+
+    /// <inheritdoc/>
+    public void RemoveRecentFile(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return;
+        }
+
+        lock (_syncLock)
+        {
+            int removed = Settings.RecentFiles.RemoveAll(p => string.Equals(p, filePath, StringComparison.OrdinalIgnoreCase));
+            if (removed > 0)
+            {
+                SaveInternal();
+            }
+        }
+    }
+
+    private static void WriteRecentFilesJson(Utf8JsonWriter writer, List<string>? recentFiles)
+    {
+        writer.WritePropertyName("recentFiles");
+        writer.WriteStartArray();
+        if (recentFiles is not null)
+        {
+            foreach (string path in recentFiles.Where(p => !string.IsNullOrWhiteSpace(p)).Take(10))
+            {
+                writer.WriteStringValue(path);
+            }
+        }
+
+        writer.WriteEndArray();
     }
 
     private static void WriteDocumentBookmarksJson(Utf8JsonWriter writer, Dictionary<string, List<SavedBookmarkItem>>? documentBookmarks)

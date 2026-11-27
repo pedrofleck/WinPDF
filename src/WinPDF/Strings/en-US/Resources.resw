@@ -462,4 +462,6 @@
   <data name="SignatureDialog_ColorBlue" xml:space="preserve"><value>Blue ink</value></data>
   <data name="SignatureDialog_ColorRed" xml:space="preserve"><value>Red ink</value></data>
   <data name="SignatureDialog_OpaqueBadgeToolTip" xml:space="preserve"><value>No transparent background — this signature may cover part of the document behind it.</value></data>
+  <data name="JumpList_RecentCategory" xml:space="preserve"><value>Recent</value></data>
+  <data name="JumpList_NewWindowTask" xml:space="preserve"><value>New window</value></data>
 </root>

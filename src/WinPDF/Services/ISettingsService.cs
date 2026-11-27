@@ -50,4 +50,21 @@ public interface ISettingsService
     /// <param name="viewMode">Optional view mode (continuous or paged) to update.</param>
     /// <param name="hasCustomViewSettings">Optional flag indicating whether custom view settings are explicitly saved.</param>
     void UpdateDocumentState(string filePath, int? pageIndex, double? zoomFactor, ViewMode? viewMode = null, bool? hasCustomViewSettings = null);
+
+    /// <summary>
+    /// Returns a snapshot of recently opened PDF file paths ordered newest first.
+    /// </summary>
+    IReadOnlyList<string> GetRecentFiles();
+
+    /// <summary>
+    /// Records a PDF file path as most recently opened and persists the updated list.
+    /// </summary>
+    /// <param name="filePath">Full file system path of the opened PDF.</param>
+    void AddRecentFile(string filePath);
+
+    /// <summary>
+    /// Removes a PDF file path from the recent-files list and persists the change.
+    /// </summary>
+    /// <param name="filePath">Full file system path to remove.</param>
+    void RemoveRecentFile(string filePath);
 }

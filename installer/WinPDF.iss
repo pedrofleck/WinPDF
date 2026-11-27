@@ -120,19 +120,24 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-; Start Menu shortcut (optional via checkbox)
-Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: startmenuicon
-; Desktop shortcut (optional via checkbox)
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+; Start Menu shortcut (optional via checkbox) with explicit AppUserModelID matching WinPDF.exe
+Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; AppUserModelID: "PedroFleck.WinPDF"; Tasks: startmenuicon
+; Desktop shortcut (optional via checkbox) with explicit AppUserModelID matching WinPDF.exe
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; AppUserModelID: "PedroFleck.WinPDF"; Tasks: desktopicon
 
 [Registry]
 ; 1. ProgId for .pdf file association in Windows 10/11
 Root: HKLM; Subkey: "Software\Classes\{#MyAppAssocKey}"; ValueType: string; ValueName: ""; ValueData: "{#MyAppAssocName}"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "Software\Classes\{#MyAppAssocKey}"; ValueType: string; ValueName: "AppUserModelID"; ValueData: "PedroFleck.WinPDF"
 Root: HKLM; Subkey: "Software\Classes\{#MyAppAssocKey}\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\Assets\pdf-document.ico,0"
 Root: HKLM; Subkey: "Software\Classes\{#MyAppAssocKey}\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#MyAppExeName}"" ""%1"""
 
 ; 2. Register in OpenWithProgids to appear in "Open with" and be selectable as default PDF reader
 Root: HKLM; Subkey: "Software\Classes\{#MyAppAssocExt}\OpenWithProgids"; ValueType: string; ValueName: "{#MyAppAssocKey}"; ValueData: ""; Flags: uninsdeletevalue
+
+; 2b. Associate WinPDF.exe Application entry with PedroFleck.WinPDF AppUserModelID so Shell recent docs map to the taskbar icon
+Root: HKLM; Subkey: "Software\Classes\Applications\{#MyAppExeName}"; ValueType: string; ValueName: "AppUserModelID"; ValueData: "PedroFleck.WinPDF"; Flags: uninsdeletekey
+Root: HKLM; Subkey: "Software\Classes\Applications\{#MyAppExeName}\SupportedTypes"; ValueType: string; ValueName: ".pdf"; ValueData: ""
 
 ; 3. Register application in Windows Default Apps (RegisteredApplications / Capabilities)
 Root: HKLM; Subkey: "Software\Fluentify\WinPDF\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "{#MyAppName}"; Flags: uninsdeletekey
