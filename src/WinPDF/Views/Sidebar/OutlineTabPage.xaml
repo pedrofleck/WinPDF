@@ -39,6 +39,9 @@
             ItemsSource="{x:Bind ViewModel.CurrentDocument.Outline, Mode=OneWay}"
             ItemInvoked="OnOutlineItemInvoked"
             Visibility="{x:Bind converters:UiHelpers.HasItems(ViewModel.CurrentDocument.Outline.Count), Mode=OneWay}">
+            <TreeView.ItemContainerTransitions>
+                <TransitionCollection />
+            </TreeView.ItemContainerTransitions>
             <TreeView.ItemTemplate>
                 <DataTemplate x:DataType="vm:OutlineItemViewModel">
                     <Grid>

@@ -119,6 +119,17 @@ public sealed partial class ThumbnailsTabPage : Page
         _userScrollDebounceTimer.Stop();
     }
 
+    /// <summary>
+    /// Stops active scroll loops and timers immediately when leaving the Thumbnails tab during a slide transition.
+    /// </summary>
+    internal void PauseForTabSwitch()
+    {
+        _springVelocity = 0.0;
+        _isCatchingUp = false;
+        StopSmoothScrollLoop();
+        _userScrollDebounceTimer.Stop();
+    }
+
     private void OnViewModelPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(ShellViewModel.CurrentDocument))

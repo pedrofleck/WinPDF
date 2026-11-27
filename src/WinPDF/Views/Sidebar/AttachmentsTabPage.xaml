@@ -37,6 +37,9 @@
             Padding="4"
             ItemsSource="{x:Bind ViewModel.CurrentDocument.Attachments, Mode=OneWay}"
             Visibility="{x:Bind converters:UiHelpers.HasItems(ViewModel.CurrentDocument.Attachments.Count), Mode=OneWay}">
+            <ListView.ItemContainerTransitions>
+                <TransitionCollection />
+            </ListView.ItemContainerTransitions>
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="vm:AttachmentItemViewModel">
                     <Border

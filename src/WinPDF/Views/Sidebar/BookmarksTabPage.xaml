@@ -59,6 +59,12 @@
             ItemClick="OnBookmarkItemClick"
             ItemsSource="{x:Bind ViewModel.CurrentDocument.Bookmarks, Mode=OneWay}"
             Visibility="{x:Bind converters:UiHelpers.HasItems(ViewModel.CurrentDocument.Bookmarks.Count), Mode=OneWay}">
+            <ListView.ItemContainerTransitions>
+                <TransitionCollection>
+                    <AddDeleteThemeTransition />
+                    <RepositionThemeTransition />
+                </TransitionCollection>
+            </ListView.ItemContainerTransitions>
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="vm:BookmarkItemViewModel">
                     <Border

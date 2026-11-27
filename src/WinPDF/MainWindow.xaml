@@ -627,12 +627,12 @@
                         Grid.Column="0"
                         Background="Transparent"
                         RowDefinitions="*,Auto">
-                        <!-- Sidebar Tabs Content Frame (Directional Navigation) -->
-                        <Frame
-                            x:Name="SidebarContentFrame"
+                        <!-- Sidebar Tabs Content Host (keeps outgoing tab visible during slide transition) -->
+                        <Grid
+                            x:Name="SidebarTabHost"
                             Grid.Row="0"
                             Background="Transparent"
-                            IsNavigationStackEnabled="False" />
+                            SizeChanged="OnSidebarTabHostSizeChanged" />
 
                         <!-- Sidebar Tab Buttons Footer (20px icons with large touch target) -->
                         <Border

@@ -55,6 +55,9 @@
                         ItemClick="OnSignatureItemClick"
                         SelectionMode="None"
                         ItemsSource="{x:Bind ViewModel.CurrentDocument.Signatures, Mode=OneWay}">
+                        <ListView.ItemContainerTransitions>
+                            <TransitionCollection />
+                        </ListView.ItemContainerTransitions>
                         <ListView.ItemContainerStyle>
                             <Style TargetType="ListViewItem">
                                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />

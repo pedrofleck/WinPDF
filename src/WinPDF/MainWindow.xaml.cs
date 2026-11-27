@@ -824,7 +824,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            var frameVisual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(SidebarContentFrame);
+            var frameVisual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(SidebarTabHost);
             frameVisual.Clip = frameVisual.Compositor.CreateInsetClip();
 
             var paneVisual = Microsoft.UI.Xaml.Hosting.ElementCompositionPreview.GetElementVisual(SidebarPaneContainer);
@@ -838,7 +838,7 @@ public sealed partial class MainWindow : Window
             // Ignore in environments where composition is unavailable
         }
 
-        SidebarContentFrame.SizeChanged += (_, _) => UpdateSidebarClipGeometries();
+        SidebarTabHost.SizeChanged += (_, _) => UpdateSidebarClipGeometries();
         SidebarContentGrid.SizeChanged += (_, _) => UpdateSidebarClipGeometries();
         SidebarPaneContainer.SizeChanged += (_, _) => UpdateSidebarClipGeometries();
         UpdateSidebarClipGeometries();
@@ -856,11 +856,11 @@ public sealed partial class MainWindow : Window
             };
         }
 
-        double frameW = SidebarContentFrame.ActualWidth;
-        double frameH = SidebarContentFrame.ActualHeight;
+        double frameW = SidebarTabHost.ActualWidth;
+        double frameH = SidebarTabHost.ActualHeight;
         if (frameW > 0 && frameH > 0)
         {
-            SidebarContentFrame.Clip = new RectangleGeometry
+            SidebarTabHost.Clip = new RectangleGeometry
             {
                 Rect = new Rect(0, 0, frameW, frameH)
             };
@@ -1714,7 +1714,7 @@ public sealed partial class MainWindow : Window
                 docView.OnReturnedFromSettings();
             }
 
-            if (SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage)
+            if (_activeSidebarPage is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage && ViewModel.SidebarTab == SidebarTab.Thumbnails)
             {
                 thumbPage.RefreshAfterVisibilityRestored();
             }
@@ -2037,7 +2037,7 @@ public sealed partial class MainWindow : Window
                 docViewImmediate.SetSidebarStateImmediate(shouldOpenPane, paneWidth);
             }
 
-            if (shouldOpenPane && SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage)
+            if (shouldOpenPane && _activeSidebarPage is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage && ViewModel.SidebarTab == SidebarTab.Thumbnails)
             {
                 DispatcherQueue.TryEnqueue(thumbPage.RefreshAfterVisibilityRestored);
             }
@@ -2112,7 +2112,7 @@ public sealed partial class MainWindow : Window
             Storyboard.SetTargetProperty(clipTranslate, "TranslateX");
             sb.Children.Add(clipTranslate);
 
-            if (SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage)
+            if (_activeSidebarPage is WinPDF.Views.Sidebar.ThumbnailsTabPage thumbPage && ViewModel.SidebarTab == SidebarTab.Thumbnails)
             {
                 DispatcherQueue.TryEnqueue(thumbPage.RefreshAfterVisibilityRestored);
             }
@@ -2133,7 +2133,7 @@ public sealed partial class MainWindow : Window
                     {
                         dv.SetSidebarStateImmediate(true, latestWidth);
                     }
-                    if (SidebarContentFrame.Content is WinPDF.Views.Sidebar.ThumbnailsTabPage tp)
+                    if (_activeSidebarPage is WinPDF.Views.Sidebar.ThumbnailsTabPage tp && ViewModel.SidebarTab == SidebarTab.Thumbnails)
                     {
                         DispatcherQueue.TryEnqueue(tp.RefreshAfterVisibilityRestored);
                     }
@@ -2906,37 +2906,166 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private Storyboard? _sidebarTabTransitionStoryboard;
+    private Page? _activeSidebarPage;
+
+    private void OnSidebarTabHostSizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (SidebarTabHost is not null)
+        {
+            SidebarTabHost.Clip = new RectangleGeometry
+            {
+                Rect = new Windows.Foundation.Rect(0, 0, Math.Max(0, e.NewSize.Width), Math.Max(0, e.NewSize.Height))
+            };
+        }
+    }
+
+    private static Page CreateSidebarTabPage(SidebarTab tab)
+    {
+        Page created = tab switch
+        {
+            SidebarTab.Thumbnails => new ThumbnailsTabPage(),
+            SidebarTab.Outline => new OutlineTabPage(),
+            SidebarTab.Annotations => new AnnotationsTabPage(),
+            SidebarTab.Bookmarks => new BookmarksTabPage(),
+            SidebarTab.Attachments => new AttachmentsTabPage(),
+            _ => new ThumbnailsTabPage()
+        };
+
+        created.RenderTransform = new CompositeTransform();
+        return created;
+    }
+
+    private void RemoveOtherSidebarPages(Page? keepA, Page? keepB = null)
+    {
+        if (SidebarTabHost is null)
+        {
+            return;
+        }
+
+        for (int i = SidebarTabHost.Children.Count - 1; i >= 0; i--)
+        {
+            UIElement child = SidebarTabHost.Children[i];
+            if (!ReferenceEquals(child, keepA) && !ReferenceEquals(child, keepB))
+            {
+                SidebarTabHost.Children.RemoveAt(i);
+            }
+        }
+    }
+
     private void SelectSidebarTab(SidebarTab targetTab)
     {
         int targetIndex = (int)targetTab;
-        Type pageType = targetTab switch
-        {
-            SidebarTab.Thumbnails => typeof(ThumbnailsTabPage),
-            SidebarTab.Outline => typeof(OutlineTabPage),
-            SidebarTab.Annotations => typeof(AnnotationsTabPage),
-            SidebarTab.Bookmarks => typeof(BookmarksTabPage),
-            SidebarTab.Attachments => typeof(AttachmentsTabPage),
-            _ => typeof(ThumbnailsTabPage)
-        };
-
         if (ViewModel.SidebarTab != targetTab)
         {
             ViewModel.SetSidebarTab(targetTab);
         }
 
-        if (_previousSidebarIndex == -1 || SidebarContentFrame.Content is null)
+        if (_activeSidebarPage is not null && targetIndex == _previousSidebarIndex)
         {
-            SidebarContentFrame.Navigate(pageType, ViewModel);
-        }
-        else if (targetIndex != _previousSidebarIndex)
-        {
-            var effect = targetIndex - _previousSidebarIndex > 0
-                ? SlideNavigationTransitionEffect.FromRight
-                : SlideNavigationTransitionEffect.FromLeft;
-            SidebarContentFrame.Navigate(pageType, ViewModel, new SlideNavigationTransitionInfo { Effect = effect });
+            return;
         }
 
+        _sidebarTabTransitionStoryboard?.Stop();
+        _sidebarTabTransitionStoryboard = null;
+
+        Page? outgoing = _activeSidebarPage;
+
+        if (outgoing is null || _previousSidebarIndex == -1)
+        {
+            Page incoming = CreateSidebarTabPage(targetTab);
+            RemoveOtherSidebarPages(null);
+            SidebarTabHost?.Children.Add(incoming);
+
+            _activeSidebarPage = incoming;
+            _previousSidebarIndex = targetIndex;
+            return;
+        }
+
+        if (outgoing is ThumbnailsTabPage outgoingThumbs)
+        {
+            outgoingThumbs.PauseForTabSwitch();
+        }
+
+        outgoing.IsHitTestVisible = false;
+        RemoveOtherSidebarPages(outgoing);
+
+        Page incomingPage = CreateSidebarTabPage(targetTab);
+        SidebarTabHost?.Children.Add(incomingPage);
+
+        double direction = targetIndex > _previousSidebarIndex ? 1.0 : -1.0;
+        const double slideDistance = 36.0;
+
+        if (incomingPage.RenderTransform is not CompositeTransform inCt)
+        {
+            inCt = new CompositeTransform();
+            incomingPage.RenderTransform = inCt;
+        }
+
+        if (outgoing.RenderTransform is not CompositeTransform outCt)
+        {
+            outCt = new CompositeTransform();
+            outgoing.RenderTransform = outCt;
+        }
+
+        inCt.TranslateX = direction * slideDistance;
+        incomingPage.Opacity = 0.0;
+        incomingPage.IsHitTestVisible = true;
+
+        outCt.TranslateX = 0.0;
+        outgoing.Opacity = 1.0;
+
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var duration = new Duration(TimeSpan.FromMilliseconds(180));
+
+        var sb = new Storyboard();
+
+        var inSlide = new DoubleAnimation { From = direction * slideDistance, To = 0.0, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(inSlide, inCt);
+        Storyboard.SetTargetProperty(inSlide, "TranslateX");
+        sb.Children.Add(inSlide);
+
+        var inFade = new DoubleAnimation { From = 0.0, To = 1.0, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(inFade, incomingPage);
+        Storyboard.SetTargetProperty(inFade, "Opacity");
+        sb.Children.Add(inFade);
+
+        var outSlide = new DoubleAnimation { From = 0.0, To = -direction * slideDistance, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(outSlide, outCt);
+        Storyboard.SetTargetProperty(outSlide, "TranslateX");
+        sb.Children.Add(outSlide);
+
+        var outFade = new DoubleAnimation { From = 1.0, To = 0.0, Duration = duration, EasingFunction = ease };
+        Storyboard.SetTarget(outFade, outgoing);
+        Storyboard.SetTargetProperty(outFade, "Opacity");
+        sb.Children.Add(outFade);
+
+        Page capturedOutgoing = outgoing;
+        Page capturedIncoming = incomingPage;
+        sb.Completed += (_, _) =>
+        {
+            if (!ReferenceEquals(_activeSidebarPage, capturedOutgoing))
+            {
+                SidebarTabHost?.Children.Remove(capturedOutgoing);
+            }
+
+            capturedIncoming.Opacity = 1.0;
+            capturedIncoming.IsHitTestVisible = true;
+            if (capturedIncoming.RenderTransform is CompositeTransform ict)
+            {
+                ict.TranslateX = 0.0;
+            }
+
+            if (ReferenceEquals(_sidebarTabTransitionStoryboard, sb))
+            {
+                _sidebarTabTransitionStoryboard = null;
+            }
+        };
+
+        _activeSidebarPage = incomingPage;
         _previousSidebarIndex = targetIndex;
+        _sidebarTabTransitionStoryboard = sb;
+        sb.Begin();
     }
 
     private void OnPrintClick(object sender, RoutedEventArgs e)
