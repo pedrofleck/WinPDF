@@ -26,6 +26,16 @@ public sealed class AppSettings
     public bool DefaultTouchDrawing { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether a stylus/pen draws directly in reading mode without selecting the Pen tool.
+    /// </summary>
+    public bool StylusAsPen { get; set; }
+
+    /// <summary>
+    /// Gets or sets the interval in milliseconds within which consecutive pen strokes are grouped into one ink annotation (0 = disabled).
+    /// </summary>
+    public int InkStrokeGroupingTimeoutMs { get; set; }
+
+    /// <summary>
     /// Gets or sets the last geometric shape kind selected by the user on the annotation toolbar.
     /// </summary>
     public PdfAnnotationShapeKind LastUsedShape { get; set; } = PdfAnnotationShapeKind.Line;

@@ -415,4 +415,14 @@
   <data name="EraserModePointMenuItem.Text" xml:space="preserve"><value>Borracha parcial</value></data>
   <data name="Tool_Eraser_StrokeToolTip" xml:space="preserve"><value>Apagar objeto</value></data>
   <data name="Tool_Eraser_PointToolTip" xml:space="preserve"><value>Borracha parcial</value></data>
+  <data name="StylusAsPenToggle.[using:Microsoft.UI.Xaml.Controls]ToolTipService.ToolTip" xml:space="preserve"><value>Caneta risca direto no modo de leitura</value></data>
+  <data name="StylusAsPenToggle.[using:Microsoft.UI.Xaml.Automation]AutomationProperties.Name" xml:space="preserve"><value>Caneta direta</value></data>
+  <data name="Settings_Annotations_StrokeTimeoutHeader.Text" xml:space="preserve"><value>Tempo entre traços de caneta</value></data>
+  <data name="Settings_Annotations_StrokeTimeoutDescription.Text" xml:space="preserve"><value>Agrupa traços consecutivos de caneta feitos dentro deste intervalo em uma única anotação de tinta.</value></data>
+  <data name="Settings_Annotations_StrokeTimeout_Off.Content" xml:space="preserve"><value>Desativado (traços separados)</value></data>
+  <data name="Settings_Annotations_StrokeTimeout_05s.Content" xml:space="preserve"><value>0,5 segundo</value></data>
+  <data name="Settings_Annotations_StrokeTimeout_10s.Content" xml:space="preserve"><value>1 segundo</value></data>
+  <data name="Settings_Annotations_StrokeTimeout_15s.Content" xml:space="preserve"><value>1,5 segundo</value></data>
+  <data name="Settings_Annotations_StrokeTimeout_20s.Content" xml:space="preserve"><value>2 segundos</value></data>
+  <data name="Settings_Annotations_StrokeTimeout_30s.Content" xml:space="preserve"><value>3 segundos</value></data>
 </root>

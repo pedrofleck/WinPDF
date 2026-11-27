@@ -234,12 +234,71 @@ public sealed partial class ShellViewModel : ObservableObject
     public partial bool IsTouchDrawingEnabled { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether a pen/stylus digitizer is present on this device.
-    /// Controls visibility of the <c>TouchDrawingToggle</c> toolbar button; when <see langword="false"/>,
-    /// touch automatically draws whenever a drawing/erasing tool is active.
+    /// Gets or sets a value indicating whether a touch digitizer is present on this device.
+    /// Controls visibility of the <c>TouchDrawingToggle</c> toolbar button.
     /// </summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasTouchOrPenDigitizer))]
+    public partial bool HasTouchDigitizer { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether a pen/stylus digitizer is present on this device.
+    /// Controls visibility of the <c>StylusAsPenToggle</c> toolbar button.
+    /// </summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasTouchOrPenDigitizer))]
     public partial bool HasPenDigitizer { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether either a touch or pen digitizer is present on this device.
+    /// </summary>
+    public bool HasTouchOrPenDigitizer => HasTouchDigitizer || HasPenDigitizer;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether a stylus/pen draws ink directly in reading (<see cref="AnnotationTool.Select"/>) mode.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool IsStylusAsPenEnabled { get; set; }
+
+    partial void OnIsStylusAsPenEnabledChanged(bool value)
+    {
+        if (!_isInitializingSettings)
+        {
+            _settingsService.Update(s => s.StylusAsPen = value);
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the interval in milliseconds within which consecutive pen strokes are grouped into one ink annotation (0 = disabled).
+    /// </summary>
+    [ObservableProperty]
+    public partial int InkStrokeGroupingTimeoutMs { get; set; }
+
+    partial void OnInkStrokeGroupingTimeoutMsChanged(int value)
+    {
+        int clamped = Math.Clamp(value, 0, 5000);
+        if (clamped != value)
+        {
+            InkStrokeGroupingTimeoutMs = clamped;
+            return;
+        }
+
+        if (!_isInitializingSettings)
+        {
+            _settingsService.Update(s => s.InkStrokeGroupingTimeoutMs = clamped);
+        }
+    }
+
+    /// <summary>
+    /// Marks that a touch digitizer has been detected dynamically.
+    /// </summary>
+    public void NotifyTouchDetected()
+    {
+        if (!HasTouchDigitizer)
+        {
+            HasTouchDigitizer = true;
+        }
+    }
 
     /// <summary>
     /// Marks that a stylus/pen digitizer has been detected dynamically (e.g. an external tablet plugged in mid-session).
@@ -250,6 +309,26 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             HasPenDigitizer = true;
         }
+    }
+
+    private static bool DetectTouchDigitizer()
+    {
+        try
+        {
+            IReadOnlyList<Windows.Devices.Input.PointerDevice> devices = Windows.Devices.Input.PointerDevice.GetPointerDevices();
+            for (int i = 0; i < devices.Count; i++)
+            {
+                if (devices[i].PointerDeviceType == Windows.Devices.Input.PointerDeviceType.Touch)
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+        }
+
+        return false;
     }
 
     private static bool DetectPenDigitizer()
@@ -575,6 +654,9 @@ public sealed partial class ShellViewModel : ObservableObject
         CurrentTheme = _settingsService.Settings.Theme;
         ViewMode = _settingsService.Settings.DefaultViewMode;
         IsTouchDrawingEnabled = _settingsService.Settings.DefaultTouchDrawing;
+        IsStylusAsPenEnabled = _settingsService.Settings.StylusAsPen;
+        InkStrokeGroupingTimeoutMs = Math.Clamp(_settingsService.Settings.InkStrokeGroupingTimeoutMs, 0, 5000);
+        HasTouchDigitizer = DetectTouchDigitizer();
         HasPenDigitizer = DetectPenDigitizer();
         ActiveShapeKind = Enum.IsDefined(_settingsService.Settings.LastUsedShape)
             ? _settingsService.Settings.LastUsedShape

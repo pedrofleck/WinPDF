@@ -293,33 +293,66 @@
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1"
                         CornerRadius="4">
-                        <Grid
-                            ColumnDefinitions="Auto,*,Auto"
-                            ColumnSpacing="16"
-                            IsHitTestVisible="False"
-                            Opacity="0.5">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
                             <FontIcon
                                 Grid.Column="0"
                                 VerticalAlignment="Center"
                                 FontSize="20"
-                                Foreground="{ThemeResource TextFillColorDisabledBrush}"
-                                Glyph="&#xE70F;" />
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Glyph="&#xED5F;" />
                             <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
                                 <TextBlock
                                     x:Uid="Settings_Annotations_TouchHeader"
-                                    Foreground="{ThemeResource TextFillColorDisabledBrush}"
                                     Style="{StaticResource BodyTextBlockStyle}" />
                                 <TextBlock
                                     x:Uid="Settings_Annotations_TouchDescription"
-                                    Foreground="{ThemeResource TextFillColorDisabledBrush}"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                     Style="{StaticResource CaptionTextBlockStyle}"
                                     TextWrapping="Wrap" />
                             </StackPanel>
                             <ToggleSwitch
                                 Grid.Column="2"
                                 VerticalAlignment="Center"
-                                IsEnabled="False"
                                 IsOn="{x:Bind ViewModel.DefaultTouchDrawing, Mode=TwoWay}" />
+                        </Grid>
+                    </Border>
+
+                    <!-- Card: Consecutive pen stroke grouping time -->
+                    <Border
+                        Padding="16"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
+                            <FontIcon
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                FontSize="20"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Glyph="&#xE916;" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                                <TextBlock
+                                    x:Uid="Settings_Annotations_StrokeTimeoutHeader"
+                                    Style="{StaticResource BodyTextBlockStyle}" />
+                                <TextBlock
+                                    x:Uid="Settings_Annotations_StrokeTimeoutDescription"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ComboBox
+                                Grid.Column="2"
+                                Width="210"
+                                VerticalAlignment="Center"
+                                SelectedIndex="{x:Bind ViewModel.InkStrokeGroupingIndex, Mode=TwoWay}">
+                                <ComboBoxItem x:Uid="Settings_Annotations_StrokeTimeout_Off" />
+                                <ComboBoxItem x:Uid="Settings_Annotations_StrokeTimeout_05s" />
+                                <ComboBoxItem x:Uid="Settings_Annotations_StrokeTimeout_10s" />
+                                <ComboBoxItem x:Uid="Settings_Annotations_StrokeTimeout_15s" />
+                                <ComboBoxItem x:Uid="Settings_Annotations_StrokeTimeout_20s" />
+                                <ComboBoxItem x:Uid="Settings_Annotations_StrokeTimeout_30s" />
+                            </ComboBox>
                         </Grid>
                     </Border>
                 </StackPanel>

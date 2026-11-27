@@ -262,6 +262,8 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.TouchShapeDrawEnded += OnCanvasTouchShapeDrawEnded;
         PdfPageCanvas.AnnotationMoved += OnCanvasAnnotationMoved;
         PdfPageCanvas.AnnotationResized += OnCanvasAnnotationResized;
+        PdfPageCanvas.DirectStylusStrokeCompleted += OnCanvasDirectStylusStrokeCompleted;
+        PdfPageCanvas.DirectStylusEraseSegment += OnCanvasDirectStylusEraseSegment;
         PdfPageCanvas.MouseClickedOnPage -= OnCanvasMouseClickedOnPage;
         PdfPageCanvas.MouseClickedOnPage += OnCanvasMouseClickedOnPage;
         AddHandler(UIElement.KeyUpEvent, new KeyEventHandler(OnDocumentViewKeyUp), true);
@@ -336,6 +338,8 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.AnnotationMoved += OnCanvasAnnotationMoved;
         PdfPageCanvas.AnnotationResized -= OnCanvasAnnotationResized;
         PdfPageCanvas.AnnotationResized += OnCanvasAnnotationResized;
+        PdfPageCanvas.DirectStylusStrokeCompleted += OnCanvasDirectStylusStrokeCompleted;
+        PdfPageCanvas.DirectStylusEraseSegment += OnCanvasDirectStylusEraseSegment;
         PdfPageCanvas.MouseClickedOnPage -= OnCanvasMouseClickedOnPage;
         PdfPageCanvas.MouseClickedOnPage += OnCanvasMouseClickedOnPage;
         PdfPageCanvas.IsSingleTouchViewerManipulating = () => _isManipulatingSlideSwipe && _activeTouchPointers.Count <= 1;
@@ -474,7 +478,10 @@ public sealed partial class DocumentView : Page
         PdfPageCanvas.TouchShapeDrawEnded -= OnCanvasTouchShapeDrawEnded;
         PdfPageCanvas.AnnotationMoved -= OnCanvasAnnotationMoved;
         PdfPageCanvas.AnnotationResized -= OnCanvasAnnotationResized;
+        PdfPageCanvas.DirectStylusStrokeCompleted -= OnCanvasDirectStylusStrokeCompleted;
+        PdfPageCanvas.DirectStylusEraseSegment -= OnCanvasDirectStylusEraseSegment;
         PdfPageCanvas.MouseClickedOnPage -= OnCanvasMouseClickedOnPage;
+        FlushPendingInkGroup();
 
         ViewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ViewModel.SearchFocusRequested -= OnSearchFocusRequested;

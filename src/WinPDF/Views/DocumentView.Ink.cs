@@ -110,6 +110,7 @@ public sealed partial class DocumentView
         _inkOverlayTouchPressOrigins.Clear();
         _inkOverlayRejectedPalms.Clear();
         _eraserSegmentQueue.Clear();
+        FlushPendingInkGroup();
     }
 
     private void ClearPenHoverCursorOnAllCanvases()
@@ -275,6 +276,7 @@ public sealed partial class DocumentView
 
         if (devType == PointerDeviceType.Touch)
         {
+            ViewModel.NotifyTouchDetected();
             _isLastPointerInputTouch = true;
 
             if (IsPalmTouchContact(pt))
@@ -287,7 +289,7 @@ public sealed partial class DocumentView
             // Reject resting palm near the active pen tip while still allowing the opposite hand (>150 DIPs away) to pan/zoom.
             bool nearPen = IsTouchNearActivePen(pt.Position, nowTick);
             bool penRecentlyActive = _isPenInContact || (nowTick - _lastPenActivityTick) < 350;
-            bool allowTouchDraw = (!ViewModel.HasPenDigitizer || ViewModel.IsTouchDrawingEnabled) && !penRecentlyActive && !nearPen;
+            bool allowTouchDraw = ViewModel.IsTouchDrawingEnabled && !penRecentlyActive && !nearPen;
 
             if (nearPen && !_isInkOverlayTwoFingerNavigating && _inkOverlayTouchPointers.Count == 0)
             {
@@ -450,6 +452,7 @@ public sealed partial class DocumentView
 
         if (isEraser)
         {
+            FlushPendingInkGroup();
             _isInkOverlayErasing = true;
             _isInkOverlayDrawing = false;
             _currentEraserSessionId++;
@@ -468,6 +471,13 @@ public sealed partial class DocumentView
         }
         else
         {
+            if (targetCanvas.PageInfo is { } pageInfo &&
+                _inkGroupPageIndex == pageInfo.Index &&
+                ReferenceEquals(_inkGroupCanvas, targetCanvas))
+            {
+                _inkGroupFlushTimer?.Stop();
+            }
+
             _isInkOverlayDrawing = true;
             _isInkOverlayErasing = false;
             _hasInkOverlayLastEraserDip = false;
@@ -886,10 +896,37 @@ public sealed partial class DocumentView
 
         PdfAnnotationColor color = doc.ActiveAnnotationColor;
         double widthPt = ViewModel.StrokeThicknessPt;
-        _ = CommitInkStrokeAsync(doc, canvas, pageInfo.Index, pdfStroke, color, widthPt, pendingToken);
+        EnqueueOrCommitInkStroke(doc, canvas, pageInfo.Index, pdfStroke, color, widthPt, pendingToken);
     }
 
-    private async Task CommitInkStrokeAsync(
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _inkGroupFlushTimer;
+    private DocumentViewModel? _inkGroupDoc;
+    private PdfPageCanvas? _inkGroupCanvas;
+    private int _inkGroupPageIndex = -1;
+    private PdfAnnotationColor _inkGroupColor;
+    private double _inkGroupWidthPt;
+    private readonly List<PdfInkStrokeData> _inkGroupStrokes = new(8);
+    private readonly List<int> _inkGroupPendingTokens = new(8);
+
+    private void OnCanvasDirectStylusStrokeCompleted(PdfPageCanvas canvas, PdfInkStrokeData pdfStroke, int pendingToken)
+    {
+        if (canvas.PageInfo is not { } pageInfo || ViewModel?.CurrentDocument is not { } doc)
+        {
+            canvas.ReleasePendingInkStroke(pendingToken);
+            return;
+        }
+
+        EnqueueOrCommitInkStroke(doc, canvas, pageInfo.Index, pdfStroke, doc.ActiveAnnotationColor, ViewModel.StrokeThicknessPt, pendingToken);
+    }
+
+    private void OnCanvasDirectStylusEraseSegment(PdfPageCanvas canvas, Point dipA, Point dipB, long sessionId)
+    {
+        FlushPendingInkGroup();
+        _currentEraserSessionId = sessionId;
+        EnqueueEraserSegment(canvas, dipA, dipB);
+    }
+
+    private void EnqueueOrCommitInkStroke(
         DocumentViewModel doc,
         PdfPageCanvas canvas,
         int pageIndex,
@@ -898,9 +935,88 @@ public sealed partial class DocumentView
         double widthPt,
         int pendingToken)
     {
+        int timeoutMs = ViewModel?.InkStrokeGroupingTimeoutMs ?? 0;
+        if (timeoutMs <= 0)
+        {
+            FlushPendingInkGroup();
+            _ = CommitInkStrokesAsync(doc, canvas, pageIndex, [stroke], color, widthPt, [pendingToken]);
+            return;
+        }
+
+        bool canAppendToGroup = _inkGroupStrokes.Count > 0 &&
+                                ReferenceEquals(_inkGroupDoc, doc) &&
+                                ReferenceEquals(_inkGroupCanvas, canvas) &&
+                                _inkGroupPageIndex == pageIndex &&
+                                _inkGroupColor.Equals(color) &&
+                                Math.Abs(_inkGroupWidthPt - widthPt) < 0.01;
+
+        if (!canAppendToGroup)
+        {
+            FlushPendingInkGroup();
+            _inkGroupDoc = doc;
+            _inkGroupCanvas = canvas;
+            _inkGroupPageIndex = pageIndex;
+            _inkGroupColor = color;
+            _inkGroupWidthPt = widthPt;
+        }
+
+        _inkGroupStrokes.Add(stroke);
+        _inkGroupPendingTokens.Add(pendingToken);
+
+        _inkGroupFlushTimer ??= CreateInkGroupFlushTimer();
+        _inkGroupFlushTimer.Stop();
+        _inkGroupFlushTimer.Interval = TimeSpan.FromMilliseconds(timeoutMs);
+        _inkGroupFlushTimer.Start();
+    }
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer CreateInkGroupFlushTimer()
+    {
+        var timer = DispatcherQueue.CreateTimer();
+        timer.IsRepeating = false;
+        timer.Tick += (_, _) => FlushPendingInkGroup();
+        return timer;
+    }
+
+    private void FlushPendingInkGroup()
+    {
+        _inkGroupFlushTimer?.Stop();
+        if (_inkGroupStrokes.Count == 0 || _inkGroupDoc is not { } doc || _inkGroupCanvas is not { } canvas || _inkGroupPageIndex < 0)
+        {
+            _inkGroupStrokes.Clear();
+            _inkGroupPendingTokens.Clear();
+            _inkGroupDoc = null;
+            _inkGroupCanvas = null;
+            _inkGroupPageIndex = -1;
+            return;
+        }
+
+        int pageIndex = _inkGroupPageIndex;
+        PdfAnnotationColor color = _inkGroupColor;
+        double widthPt = _inkGroupWidthPt;
+        List<PdfInkStrokeData> strokes = new(_inkGroupStrokes);
+        List<int> tokens = new(_inkGroupPendingTokens);
+
+        _inkGroupStrokes.Clear();
+        _inkGroupPendingTokens.Clear();
+        _inkGroupDoc = null;
+        _inkGroupCanvas = null;
+        _inkGroupPageIndex = -1;
+
+        _ = CommitInkStrokesAsync(doc, canvas, pageIndex, strokes, color, widthPt, tokens);
+    }
+
+    private async Task CommitInkStrokesAsync(
+        DocumentViewModel doc,
+        PdfPageCanvas canvas,
+        int pageIndex,
+        IReadOnlyList<PdfInkStrokeData> strokes,
+        PdfAnnotationColor color,
+        double widthPt,
+        IReadOnlyList<int> pendingTokens)
+    {
         try
         {
-            _ = await doc.AddInkAsync(pageIndex, [stroke], color, widthPt);
+            _ = await doc.AddInkAsync(pageIndex, strokes, color, widthPt);
             // Keep the Win2D wet-ink preview visible briefly while PDFium uploads the refreshed page bitmap.
             await Task.Delay(95);
         }
@@ -909,7 +1025,10 @@ public sealed partial class DocumentView
         }
         finally
         {
-            canvas.ReleasePendingInkStroke(pendingToken);
+            for (int i = 0; i < pendingTokens.Count; i++)
+            {
+                canvas.ReleasePendingInkStroke(pendingTokens[i]);
+            }
         }
     }
 

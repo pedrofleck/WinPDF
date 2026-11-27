@@ -1,7 +1,11 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Graphics.Canvas;
+using Microsoft.UI.Input;
+using Microsoft.UI.Xaml.Input;
 using Windows.Foundation;
 using WinPDF.Models;
 using WinPDF.Rendering;
+using WinPDF.ViewModels;
 
 namespace WinPDF.Controls;
 
@@ -349,6 +353,276 @@ public sealed partial class PdfPageCanvas
                 ds.FillCircle(cx, cy, r, dotFill);
                 ds.DrawCircle(cx, cy, r + (haloStroke * 0.75f), contrastHalo, haloStroke);
             }
+        }
+    }
+
+    // =========================================================================
+    // Direct Stylus-as-Pen mode (draw/erase directly in Select reading mode)
+    // =========================================================================
+
+    /// <summary>
+    /// Raised when a direct stylus-as-pen stroke completes on a page canvas in <see cref="AnnotationTool.Select"/> mode.
+    /// Arguments: canvas, PDF-space stroke data, pending wet-ink preview token.
+    /// </summary>
+    public static event Action<PdfPageCanvas, PdfInkStrokeData, int>? DirectStylusStrokeCompleted;
+
+    /// <summary>
+    /// Raised when a direct stylus-as-pen eraser segment (barrel button or eraser tip) moves on a page canvas.
+    /// Arguments: canvas, segment start in page DIPs, segment end in page DIPs, eraser session id.
+    /// </summary>
+    public static event Action<PdfPageCanvas, Point, Point, long>? DirectStylusEraseSegment;
+
+    private static long s_nextDirectStylusEraseSessionId;
+    private bool _isDirectStylusDrawing;
+    private bool _isDirectStylusErasing;
+    private uint _directStylusPointerId;
+    private Point _directStylusLastEraseDip;
+    private bool _hasDirectStylusLastEraseDip;
+    private long _directStylusEraseSessionId;
+
+    private bool IsDirectStylusAsPenActive(out ShellViewModel? shell)
+    {
+        shell = _shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>();
+        return shell is not null &&
+               !IsSwipePreview &&
+               PageInfo is not null &&
+               !shell.IsPresentationMode &&
+               shell.ActiveTool == AnnotationTool.Select &&
+               shell.IsStylusAsPenEnabled;
+    }
+
+    private bool TryHandleDirectStylusPressed(PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerDeviceType != PointerDeviceType.Pen || !IsDirectStylusAsPenActive(out ShellViewModel? shell) || shell is null)
+        {
+            return false;
+        }
+
+        shell.NotifyPenDetected();
+        SubscribeToActiveDocument();
+        DocumentViewModel? doc = _observedDocument ?? shell.CurrentDocument;
+        if (doc is null)
+        {
+            return false;
+        }
+
+        PointerPoint pt = e.GetCurrentPoint(this);
+        _directStylusPointerId = e.Pointer.PointerId;
+        try
+        {
+            _ = CapturePointer(e.Pointer);
+        }
+        catch
+        {
+        }
+
+        bool isEraser = pt.Properties.IsEraser || pt.Properties.IsBarrelButtonPressed;
+        if (isEraser)
+        {
+            _isDirectStylusErasing = true;
+            _isDirectStylusDrawing = false;
+            _directStylusEraseSessionId = ++s_nextDirectStylusEraseSessionId;
+            _directStylusLastEraseDip = pt.Position;
+            _hasDirectStylusLastEraseDip = true;
+            UpdatePenHoverCursor(
+                pt.Position,
+                isEraser: true,
+                shell.StrokeThicknessPt,
+                doc.ActiveAnnotationColor,
+                shell.ActiveEraserMode,
+                doc.ZoomFactor);
+            DirectStylusEraseSegment?.Invoke(this, pt.Position, pt.Position, _directStylusEraseSessionId);
+        }
+        else
+        {
+            _isDirectStylusDrawing = true;
+            _isDirectStylusErasing = false;
+            _hasDirectStylusLastEraseDip = false;
+            BeginExternalInkStroke(
+                pt.Position,
+                pt.Properties.Pressure,
+                hasPressureVariation: true,
+                doc.ActiveAnnotationColor,
+                (float)shell.StrokeThicknessPt);
+        }
+
+        e.Handled = true;
+        return true;
+    }
+
+    private bool TryHandleDirectStylusMoved(PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerDeviceType != PointerDeviceType.Pen)
+        {
+            return false;
+        }
+
+        if (!IsDirectStylusAsPenActive(out ShellViewModel? shell) || shell is null)
+        {
+            if (_isDirectStylusDrawing || _isDirectStylusErasing)
+            {
+                _ = TryHandleDirectStylusReleasedOrCanceled(e, commit: false);
+            }
+
+            return false;
+        }
+
+        shell.NotifyPenDetected();
+        DocumentViewModel? doc = _observedDocument ?? shell.CurrentDocument;
+        if (doc is null)
+        {
+            return false;
+        }
+
+        PointerPoint pt = e.GetCurrentPoint(this);
+        uint pid = e.Pointer.PointerId;
+
+        if (_isDirectStylusErasing && pid == _directStylusPointerId)
+        {
+            IList<PointerPoint>? intermediates = null;
+            try
+            {
+                intermediates = e.GetIntermediatePoints(this);
+            }
+            catch
+            {
+            }
+
+            if (intermediates is { Count: > 0 })
+            {
+                for (int i = intermediates.Count - 1; i >= 0; i--)
+                {
+                    Point dip = intermediates[i].Position;
+                    Point prev = _hasDirectStylusLastEraseDip ? _directStylusLastEraseDip : dip;
+                    DirectStylusEraseSegment?.Invoke(this, prev, dip, _directStylusEraseSessionId);
+                    _directStylusLastEraseDip = dip;
+                    _hasDirectStylusLastEraseDip = true;
+                }
+            }
+            else
+            {
+                Point prev = _hasDirectStylusLastEraseDip ? _directStylusLastEraseDip : pt.Position;
+                DirectStylusEraseSegment?.Invoke(this, prev, pt.Position, _directStylusEraseSessionId);
+                _directStylusLastEraseDip = pt.Position;
+                _hasDirectStylusLastEraseDip = true;
+            }
+
+            UpdatePenHoverCursor(
+                _directStylusLastEraseDip,
+                isEraser: true,
+                shell.StrokeThicknessPt,
+                doc.ActiveAnnotationColor,
+                shell.ActiveEraserMode,
+                doc.ZoomFactor);
+            e.Handled = true;
+            return true;
+        }
+
+        if (_isDirectStylusDrawing && pid == _directStylusPointerId)
+        {
+            IList<PointerPoint>? intermediates = null;
+            try
+            {
+                intermediates = e.GetIntermediatePoints(this);
+            }
+            catch
+            {
+            }
+
+            List<PdfInkSample> batch;
+            if (intermediates is { Count: > 0 })
+            {
+                batch = new List<PdfInkSample>(intermediates.Count);
+                for (int i = intermediates.Count - 1; i >= 0; i--)
+                {
+                    PointerPoint samplePt = intermediates[i];
+                    batch.Add(new PdfInkSample((float)samplePt.Position.X, (float)samplePt.Position.Y, samplePt.Properties.Pressure));
+                }
+            }
+            else
+            {
+                batch = [new PdfInkSample((float)pt.Position.X, (float)pt.Position.Y, pt.Properties.Pressure)];
+            }
+
+            AppendExternalInkSamples(batch);
+            e.Handled = true;
+            return true;
+        }
+
+        if (!pt.IsInContact)
+        {
+            bool isEraser = pt.Properties.IsEraser || pt.Properties.IsBarrelButtonPressed;
+            UpdatePenHoverCursor(
+                pt.Position,
+                isEraser,
+                shell.StrokeThicknessPt,
+                doc.ActiveAnnotationColor,
+                shell.ActiveEraserMode,
+                doc.ZoomFactor);
+            e.Handled = true;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryHandleDirectStylusReleasedOrCanceled(PointerRoutedEventArgs e, bool commit)
+    {
+        if (e.Pointer.PointerDeviceType != PointerDeviceType.Pen)
+        {
+            return false;
+        }
+
+        if (!_isDirectStylusDrawing && !_isDirectStylusErasing)
+        {
+            return false;
+        }
+
+        if (e.Pointer.PointerId != _directStylusPointerId)
+        {
+            return false;
+        }
+
+        bool wasDrawing = _isDirectStylusDrawing;
+        _isDirectStylusDrawing = false;
+        _isDirectStylusErasing = false;
+        _directStylusPointerId = 0;
+        _hasDirectStylusLastEraseDip = false;
+
+        _isReleasingCapture = true;
+        try
+        {
+            ReleasePointerCapture(e.Pointer);
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _isReleasingCapture = false;
+        }
+
+        if (wasDrawing)
+        {
+            if (commit && CompleteExternalInkStrokeToPending(out PdfInkStrokeData? pdfStroke, out int pendingToken) && pdfStroke is not null)
+            {
+                DirectStylusStrokeCompleted?.Invoke(this, pdfStroke, pendingToken);
+            }
+            else
+            {
+                CancelExternalInkStroke();
+            }
+        }
+
+        e.Handled = true;
+        return true;
+    }
+
+    private void HandleDirectStylusExited(PointerRoutedEventArgs e)
+    {
+        if (e.Pointer.PointerDeviceType == PointerDeviceType.Pen && !_isDirectStylusDrawing && !_isDirectStylusErasing)
+        {
+            ClearPenHoverCursor();
         }
     }
 }

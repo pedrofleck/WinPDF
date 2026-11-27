@@ -260,6 +260,38 @@ public sealed partial class SettingsViewModel : ObservableObject
         }
     }
 
+    private static readonly int[] InkGroupingTimeoutOptionsMs = [0, 500, 1000, 1500, 2000, 3000];
+
+    /// <summary>
+    /// Gets or sets the selected ComboBox index for the consecutive pen stroke grouping timeout.
+    /// </summary>
+    public int InkStrokeGroupingIndex
+    {
+        get
+        {
+            int ms = _shellViewModel.InkStrokeGroupingTimeoutMs;
+            for (int i = 0; i < InkGroupingTimeoutOptionsMs.Length; i++)
+            {
+                if (InkGroupingTimeoutOptionsMs[i] == ms)
+                {
+                    return i;
+                }
+            }
+
+            return 0;
+        }
+        set
+        {
+            int idx = Math.Clamp(value, 0, InkGroupingTimeoutOptionsMs.Length - 1);
+            int targetMs = InkGroupingTimeoutOptionsMs[idx];
+            if (_shellViewModel.InkStrokeGroupingTimeoutMs != targetMs)
+            {
+                _shellViewModel.InkStrokeGroupingTimeoutMs = targetMs;
+                OnPropertyChanged();
+            }
+        }
+    }
+
     /// <summary>
     /// Gets the application display version string.
     /// </summary>
@@ -305,6 +337,10 @@ public sealed partial class SettingsViewModel : ObservableObject
             else if (e.PropertyName == nameof(ShellViewModel.IsTouchDrawingEnabled))
             {
                 OnPropertyChanged(nameof(DefaultTouchDrawing));
+            }
+            else if (e.PropertyName == nameof(ShellViewModel.InkStrokeGroupingTimeoutMs))
+            {
+                OnPropertyChanged(nameof(InkStrokeGroupingIndex));
             }
         };
     }

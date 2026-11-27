@@ -314,6 +314,11 @@ public sealed partial class PdfPageCanvas
 
     private void OnCanvasPointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        if (TryHandleDirectStylusPressed(e))
+        {
+            return;
+        }
+
         if (PageInfo is not null)
         {
             PointerPoint rawPt = e.GetCurrentPoint(this);
@@ -327,14 +332,18 @@ public sealed partial class PdfPageCanvas
             }
             else if (devType == PointerDeviceType.Pen)
             {
+                (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.NotifyPenDetected();
                 MouseClickedOnPage?.Invoke(this, ToPdfPoint(rawPt.Position));
             }
-            else if (devType == PointerDeviceType.Touch &&
-                     !_isTouchDraggingAnnotation &&
-                     !_isTouchResizingAnnotation &&
-                     _activeCanvasTouchPointerTicks.Count == 0)
+            else if (devType == PointerDeviceType.Touch)
             {
-                MouseClickedOnPage?.Invoke(this, ToPdfPoint(rawPt.Position));
+                (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.NotifyTouchDetected();
+                if (!_isTouchDraggingAnnotation &&
+                    !_isTouchResizingAnnotation &&
+                    _activeCanvasTouchPointerTicks.Count == 0)
+                {
+                    MouseClickedOnPage?.Invoke(this, ToPdfPoint(rawPt.Position));
+                }
             }
         }
 
@@ -831,6 +840,11 @@ public sealed partial class PdfPageCanvas
 
     private void OnCanvasPointerMoved(object sender, PointerRoutedEventArgs e)
     {
+        if (TryHandleDirectStylusMoved(e))
+        {
+            return;
+        }
+
         if (!IsSelectInteractionAllowed())
         {
             SetCursorShape(InputSystemCursorShape.Arrow);
@@ -966,6 +980,11 @@ public sealed partial class PdfPageCanvas
 
     private void OnCanvasPointerReleased(object sender, PointerRoutedEventArgs e)
     {
+        if (TryHandleDirectStylusReleasedOrCanceled(e, commit: true))
+        {
+            return;
+        }
+
         if (e.Pointer.PointerDeviceType == PointerDeviceType.Touch)
         {
             _activeCanvasTouchPointerTicks.Remove(e.Pointer.PointerId);
@@ -1186,6 +1205,11 @@ public sealed partial class PdfPageCanvas
 
     private void OnCanvasPointerCanceled(object sender, PointerRoutedEventArgs e)
     {
+        if (TryHandleDirectStylusReleasedOrCanceled(e, commit: true))
+        {
+            return;
+        }
+
         if (e.Pointer.PointerDeviceType == PointerDeviceType.Touch)
         {
             uint canceledId = e.Pointer.PointerId;
@@ -1314,6 +1338,11 @@ public sealed partial class PdfPageCanvas
             return;
         }
 
+        if (TryHandleDirectStylusReleasedOrCanceled(e, commit: true))
+        {
+            return;
+        }
+
         if (e.Pointer.PointerDeviceType == PointerDeviceType.Touch)
         {
             // Do NOT remove the touch pointer on PointerCaptureLost while the finger is still pressed down
@@ -1340,6 +1369,7 @@ public sealed partial class PdfPageCanvas
 
     private void OnCanvasPointerExited(object sender, PointerRoutedEventArgs e)
     {
+        HandleDirectStylusExited(e);
         if (!_isPointerDown)
         {
             SetCursorShape(InputSystemCursorShape.Arrow);

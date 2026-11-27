@@ -2605,14 +2605,21 @@
 
                             <AppBarSeparator
                                 Margin="4,4,4,4"
-                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasPenDigitizer), Mode=OneWay}" />
+                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasTouchOrPenDigitizer), Mode=OneWay}" />
 
                             <ToggleButton
                                 x:Uid="TouchDrawingToggle"
                                 IsTabStop="False"
                                 IsChecked="{x:Bind ViewModel.IsTouchDrawingEnabled, Mode=TwoWay}"
-                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasPenDigitizer), Mode=OneWay}">
+                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasTouchDigitizer), Mode=OneWay}">
                                 <FontIcon FontSize="14" Glyph="&#xED5F;" />
+                            </ToggleButton>
+                            <ToggleButton
+                                x:Uid="StylusAsPenToggle"
+                                IsTabStop="False"
+                                IsChecked="{x:Bind ViewModel.IsStylusAsPenEnabled, Mode=TwoWay}"
+                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasPenDigitizer), Mode=OneWay}">
+                                <FontIcon FontSize="14" Glyph="&#xEE56;" />
                             </ToggleButton>
                         </StackPanel>
                     </Border>
