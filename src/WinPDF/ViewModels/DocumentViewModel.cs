@@ -2074,6 +2074,15 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
                 return true;
 
+            case UndoRotationEntry rotationEntry:
+                Rotation = rotationEntry.PreviousRotation;
+                if (!rotationEntry.PreviousHasUnsavedChanges && _annotationUndoStack.Count == 0)
+                {
+                    HasUnsavedChanges = false;
+                }
+
+                return true;
+
             case UndoDeletedAnnotationEntry deleted:
                 PdfAnnotationInfo snapshot = deleted.Snapshot;
                 PdfAnnotationInfo? restored = null;
@@ -2317,6 +2326,20 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
         public override void OnAnnotationDeleted(int pageIndex, int removedAnnotIndex) => Location.OnDeleted(pageIndex, removedAnnotIndex);
         public override void OnAnnotationRestored(int pageIndex, int originalAnnotIndex, int restoredAnnotIndex) => Location.OnRestored(pageIndex, originalAnnotIndex, restoredAnnotIndex);
+    }
+
+    private sealed class UndoRotationEntry(int previousRotation, bool previousHasUnsavedChanges) : AnnotationUndoEntry
+    {
+        public int PreviousRotation { get; } = previousRotation;
+        public bool PreviousHasUnsavedChanges { get; } = previousHasUnsavedChanges;
+
+        public override void OnAnnotationDeleted(int pageIndex, int removedAnnotIndex)
+        {
+        }
+
+        public override void OnAnnotationRestored(int pageIndex, int originalAnnotIndex, int restoredAnnotIndex)
+        {
+        }
     }
 
     private PdfAnnotationInfo? FindAnnotationByIndex(int pageIndex, int annotIndex)
@@ -2912,19 +2935,27 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
-    /// Rotates the document view 90 degrees clockwise.
+    /// Rotates the document view 90 degrees clockwise and records an undo entry.
     /// </summary>
     public void RotateClockwise()
     {
+        int prevRot = Rotation;
+        bool prevUnsaved = HasUnsavedChanges;
         Rotation = (Rotation + 90) % 360;
+        HasUnsavedChanges = true;
+        PushUndoEntry(new UndoRotationEntry(prevRot, prevUnsaved));
     }
 
     /// <summary>
-    /// Rotates the document view 90 degrees counter-clockwise.
+    /// Rotates the document view 90 degrees counter-clockwise and records an undo entry.
     /// </summary>
     public void RotateCounterClockwise()
     {
+        int prevRot = Rotation;
+        bool prevUnsaved = HasUnsavedChanges;
         Rotation = (Rotation + 270) % 360;
+        HasUnsavedChanges = true;
+        PushUndoEntry(new UndoRotationEntry(prevRot, prevUnsaved));
     }
 
     /// <summary>

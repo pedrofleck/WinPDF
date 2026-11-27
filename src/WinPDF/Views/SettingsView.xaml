@@ -292,7 +292,8 @@
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1"
-                        CornerRadius="4">
+                        CornerRadius="4"
+                        Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.HasTouchDigitizer), Mode=OneWay}">
                         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
                             <FontIcon
                                 Grid.Column="0"
@@ -354,6 +355,64 @@
                                 <ComboBoxItem x:Uid="Settings_Annotations_StrokeTimeout_30s" />
                             </ComboBox>
                         </Grid>
+                    </Border>
+
+                    <!-- Card: Auto-save edits -->
+                    <Border
+                        Padding="16"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <StackPanel Spacing="12">
+                            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
+                                <FontIcon
+                                    Grid.Column="0"
+                                    VerticalAlignment="Center"
+                                    FontSize="20"
+                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                    Glyph="&#xE74E;" />
+                                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                                    <TextBlock
+                                        x:Uid="Settings_Annotations_AutoSaveHeader"
+                                        Style="{StaticResource BodyTextBlockStyle}" />
+                                    <TextBlock
+                                        x:Uid="Settings_Annotations_AutoSaveDescription"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Style="{StaticResource CaptionTextBlockStyle}"
+                                        TextWrapping="Wrap" />
+                                </StackPanel>
+                                <ToggleSwitch
+                                    Grid.Column="2"
+                                    VerticalAlignment="Center"
+                                    IsOn="{x:Bind ViewModel.AutoSaveEnabled, Mode=TwoWay}" />
+                            </Grid>
+
+                            <StackPanel
+                                Spacing="12"
+                                Visibility="{x:Bind converters:UiHelpers.VisibleIf(ViewModel.AutoSaveEnabled), Mode=OneWay}">
+                                <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                                    <TextBlock
+                                        Grid.Column="0"
+                                        x:Uid="Settings_Annotations_AutoSaveIntervalHeader"
+                                        VerticalAlignment="Center"
+                                        Style="{StaticResource BodyTextBlockStyle}" />
+                                    <ComboBox
+                                        Grid.Column="1"
+                                        Width="210"
+                                        VerticalAlignment="Center"
+                                        SelectedIndex="{x:Bind ViewModel.AutoSaveIntervalIndex, Mode=TwoWay}">
+                                        <ComboBoxItem x:Uid="Settings_Annotations_AutoSaveInterval_5s" />
+                                        <ComboBoxItem x:Uid="Settings_Annotations_AutoSaveInterval_15s" />
+                                        <ComboBoxItem x:Uid="Settings_Annotations_AutoSaveInterval_30s" />
+                                        <ComboBoxItem x:Uid="Settings_Annotations_AutoSaveInterval_1m" />
+                                        <ComboBoxItem x:Uid="Settings_Annotations_AutoSaveInterval_2m" />
+                                        <ComboBoxItem x:Uid="Settings_Annotations_AutoSaveInterval_5m" />
+                                    </ComboBox>
+                                </Grid>
+                            </StackPanel>
+                        </StackPanel>
                     </Border>
                 </StackPanel>
 

@@ -289,6 +289,48 @@ public sealed partial class ShellViewModel : ObservableObject
         }
     }
 
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _autoSaveTimer;
+    private bool _isAutoSaveInFlight;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether edits are automatically saved to the active PDF file.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool AutoSaveEnabled { get; set; }
+
+    partial void OnAutoSaveEnabledChanged(bool value)
+    {
+        if (!_isInitializingSettings)
+        {
+            _settingsService.Update(s => s.AutoSaveEnabled = value);
+        }
+
+        SyncAutoSaveTimer();
+    }
+
+    /// <summary>
+    /// Gets or sets the auto-save delay interval in seconds when <see cref="AutoSaveEnabled"/> is enabled.
+    /// </summary>
+    [ObservableProperty]
+    public partial int AutoSaveIntervalSeconds { get; set; } = 30;
+
+    partial void OnAutoSaveIntervalSecondsChanged(int value)
+    {
+        int clamped = Math.Clamp(value, 5, 3600);
+        if (clamped != value)
+        {
+            AutoSaveIntervalSeconds = clamped;
+            return;
+        }
+
+        if (!_isInitializingSettings)
+        {
+            _settingsService.Update(s => s.AutoSaveIntervalSeconds = clamped);
+        }
+
+        SyncAutoSaveTimer(restartIfRunning: true);
+    }
+
     /// <summary>
     /// Marks that a touch digitizer has been detected dynamically.
     /// </summary>
@@ -656,6 +698,8 @@ public sealed partial class ShellViewModel : ObservableObject
         IsTouchDrawingEnabled = _settingsService.Settings.DefaultTouchDrawing;
         IsStylusAsPenEnabled = _settingsService.Settings.StylusAsPen;
         InkStrokeGroupingTimeoutMs = Math.Clamp(_settingsService.Settings.InkStrokeGroupingTimeoutMs, 0, 5000);
+        AutoSaveEnabled = _settingsService.Settings.AutoSaveEnabled;
+        AutoSaveIntervalSeconds = Math.Clamp(_settingsService.Settings.AutoSaveIntervalSeconds, 5, 3600);
         HasTouchDigitizer = DetectTouchDigitizer();
         HasPenDigitizer = DetectPenDigitizer();
         ActiveShapeKind = Enum.IsDefined(_settingsService.Settings.LastUsedShape)
@@ -945,6 +989,7 @@ public sealed partial class ShellViewModel : ObservableObject
         OnPropertyChanged(nameof(SearchStatusText));
         CopySelectedTextCommand.NotifyCanExecuteChanged();
         UndoAnnotationCommand.NotifyCanExecuteChanged();
+        SyncAutoSaveTimer();
     }
 
     private void OnDocumentPropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -952,6 +997,10 @@ public sealed partial class ShellViewModel : ObservableObject
         if (e.PropertyName is nameof(DocumentViewModel.FileName) or nameof(DocumentViewModel.HasUnsavedChanges))
         {
             UpdateTitle();
+            if (e.PropertyName == nameof(DocumentViewModel.HasUnsavedChanges))
+            {
+                SyncAutoSaveTimer();
+            }
         }
         else if (e.PropertyName is nameof(DocumentViewModel.PageCount) or nameof(DocumentViewModel.ZoomFactor))
         {
@@ -1351,6 +1400,7 @@ public sealed partial class ShellViewModel : ObservableObject
                 cancellationToken);
 
             CurrentDocument.HasUnsavedChanges = false;
+            _autoSaveTimer?.Stop();
             CurrentDocument.RefreshFileInfo();
             UpdateTitle();
             UpdateFormattedStrings();
@@ -1371,6 +1421,88 @@ public sealed partial class ShellViewModel : ObservableObject
             string content = ResourceStrings.Format(ResourceKeys.DialogSaveErrorContent, CurrentDocument.FileName, ex.Message);
             string close = ResourceStrings.Get(ResourceKeys.DialogClose);
             await _dialogService.ShowMessageAsync(title, content, close, cancellationToken);
+        }
+    }
+
+    private void SyncAutoSaveTimer(bool restartIfRunning = false)
+    {
+        if (!AutoSaveEnabled ||
+            CurrentDocument is not { HasUnsavedChanges: true } doc ||
+            string.IsNullOrWhiteSpace(doc.FilePath))
+        {
+            _autoSaveTimer?.Stop();
+            return;
+        }
+
+        if (_autoSaveTimer is null)
+        {
+            var dispatcher = _windowContext.DispatcherQueue ?? _uiDispatcherQueue;
+            if (dispatcher is null)
+            {
+                return;
+            }
+
+            _autoSaveTimer = dispatcher.CreateTimer();
+            _autoSaveTimer.IsRepeating = false;
+            _autoSaveTimer.Tick += (_, _) => _ = TryAutoSaveAsync();
+        }
+
+        if (!_autoSaveTimer.IsRunning || restartIfRunning)
+        {
+            _autoSaveTimer.Stop();
+            _autoSaveTimer.Interval = TimeSpan.FromSeconds(Math.Clamp(AutoSaveIntervalSeconds, 5, 3600));
+            _autoSaveTimer.Start();
+        }
+    }
+
+    private async Task TryAutoSaveAsync()
+    {
+        if (!AutoSaveEnabled ||
+            _isAutoSaveInFlight ||
+            CurrentDocument is not { HasUnsavedChanges: true } doc ||
+            string.IsNullOrWhiteSpace(doc.FilePath) ||
+            !System.IO.File.Exists(doc.FilePath))
+        {
+            return;
+        }
+
+        _isAutoSaveInFlight = true;
+        try
+        {
+            uint saveFlags = doc.HasSignatures ? 1u : 0u;
+            PdfSaveOptions options = new(
+                UserRotationDegrees: doc.Rotation,
+                PageEditCommitters: null,
+                SaveFlags: saveFlags);
+
+            await _pdfService.SaveDocumentAsync(
+                doc.DocumentId,
+                doc.FilePath,
+                options,
+                CancellationToken.None);
+
+            if (ReferenceEquals(CurrentDocument, doc))
+            {
+                doc.HasUnsavedChanges = false;
+                doc.RefreshFileInfo();
+                UpdateTitle();
+                UpdateFormattedStrings();
+                if (doc.HasSignatures)
+                {
+                    _ = doc.LoadAnnotationsAndSignaturesAsync();
+                }
+            }
+        }
+        catch
+        {
+        }
+        finally
+        {
+            _isAutoSaveInFlight = false;
+            if (AutoSaveEnabled && CurrentDocument is { HasUnsavedChanges: true })
+            {
+                SyncAutoSaveTimer();
+            }
         }
     }
 
@@ -1410,6 +1542,7 @@ public sealed partial class ShellViewModel : ObservableObject
             CurrentDocument.FilePath = targetPath;
             CurrentDocument.FileName = System.IO.Path.GetFileName(targetPath);
             CurrentDocument.HasUnsavedChanges = false;
+            _autoSaveTimer?.Stop();
             CurrentDocument.RefreshFileInfo();
             UpdateTitle();
             UpdateFormattedStrings();

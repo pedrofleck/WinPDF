@@ -429,4 +429,13 @@
   <data name="Settings_Annotations_StrokeTimeout_15s.Content" xml:space="preserve"><value>1.5 seconds</value></data>
   <data name="Settings_Annotations_StrokeTimeout_20s.Content" xml:space="preserve"><value>2 seconds</value></data>
   <data name="Settings_Annotations_StrokeTimeout_30s.Content" xml:space="preserve"><value>3 seconds</value></data>
+  <data name="Settings_Annotations_AutoSaveHeader.Text" xml:space="preserve"><value>Auto-save edits</value></data>
+  <data name="Settings_Annotations_AutoSaveDescription.Text" xml:space="preserve"><value>Automatically save annotation and rotation changes to the open PDF file.</value></data>
+  <data name="Settings_Annotations_AutoSaveIntervalHeader.Text" xml:space="preserve"><value>Auto-save interval</value></data>
+  <data name="Settings_Annotations_AutoSaveInterval_5s.Content" xml:space="preserve"><value>5 seconds</value></data>
+  <data name="Settings_Annotations_AutoSaveInterval_15s.Content" xml:space="preserve"><value>15 seconds</value></data>
+  <data name="Settings_Annotations_AutoSaveInterval_30s.Content" xml:space="preserve"><value>30 seconds</value></data>
+  <data name="Settings_Annotations_AutoSaveInterval_1m.Content" xml:space="preserve"><value>1 minute</value></data>
+  <data name="Settings_Annotations_AutoSaveInterval_2m.Content" xml:space="preserve"><value>2 minutes</value></data>
+  <data name="Settings_Annotations_AutoSaveInterval_5m.Content" xml:space="preserve"><value>5 minutes</value></data>
 </root>

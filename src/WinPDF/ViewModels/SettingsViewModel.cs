@@ -245,6 +245,11 @@ public sealed partial class SettingsViewModel : ObservableObject
         !string.Equals(_initialLanguage, SelectedLanguage, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Gets a value indicating whether a touch digitizer is present on this device.
+    /// </summary>
+    public bool HasTouchDigitizer => _shellViewModel.HasTouchDigitizer;
+
+    /// <summary>
     /// Gets or sets a value indicating whether touch drawing is active by default.
     /// </summary>
     public bool DefaultTouchDrawing
@@ -255,6 +260,54 @@ public sealed partial class SettingsViewModel : ObservableObject
             if (_shellViewModel.IsTouchDrawingEnabled != value)
             {
                 _shellViewModel.IsTouchDrawingEnabled = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether edits are automatically saved to the active PDF file.
+    /// </summary>
+    public bool AutoSaveEnabled
+    {
+        get => _shellViewModel.AutoSaveEnabled;
+        set
+        {
+            if (_shellViewModel.AutoSaveEnabled != value)
+            {
+                _shellViewModel.AutoSaveEnabled = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    private static readonly int[] AutoSaveIntervalOptionsSec = [5, 15, 30, 60, 120, 300];
+
+    /// <summary>
+    /// Gets or sets the selected ComboBox index for the auto-save interval.
+    /// </summary>
+    public int AutoSaveIntervalIndex
+    {
+        get
+        {
+            int sec = _shellViewModel.AutoSaveIntervalSeconds;
+            for (int i = 0; i < AutoSaveIntervalOptionsSec.Length; i++)
+            {
+                if (AutoSaveIntervalOptionsSec[i] == sec)
+                {
+                    return i;
+                }
+            }
+
+            return 2;
+        }
+        set
+        {
+            int idx = Math.Clamp(value, 0, AutoSaveIntervalOptionsSec.Length - 1);
+            int targetSec = AutoSaveIntervalOptionsSec[idx];
+            if (_shellViewModel.AutoSaveIntervalSeconds != targetSec)
+            {
+                _shellViewModel.AutoSaveIntervalSeconds = targetSec;
                 OnPropertyChanged();
             }
         }
@@ -337,6 +390,18 @@ public sealed partial class SettingsViewModel : ObservableObject
             else if (e.PropertyName == nameof(ShellViewModel.IsTouchDrawingEnabled))
             {
                 OnPropertyChanged(nameof(DefaultTouchDrawing));
+            }
+            else if (e.PropertyName == nameof(ShellViewModel.HasTouchDigitizer))
+            {
+                OnPropertyChanged(nameof(HasTouchDigitizer));
+            }
+            else if (e.PropertyName == nameof(ShellViewModel.AutoSaveEnabled))
+            {
+                OnPropertyChanged(nameof(AutoSaveEnabled));
+            }
+            else if (e.PropertyName == nameof(ShellViewModel.AutoSaveIntervalSeconds))
+            {
+                OnPropertyChanged(nameof(AutoSaveIntervalIndex));
             }
             else if (e.PropertyName == nameof(ShellViewModel.InkStrokeGroupingTimeoutMs))
             {

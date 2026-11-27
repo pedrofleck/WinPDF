@@ -36,6 +36,16 @@ public sealed class AppSettings
     public int InkStrokeGroupingTimeoutMs { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether edits are automatically saved to disk.
+    /// </summary>
+    public bool AutoSaveEnabled { get; set; }
+
+    /// <summary>
+    /// Gets or sets the auto-save delay interval in seconds when <see cref="AutoSaveEnabled"/> is active.
+    /// </summary>
+    public int AutoSaveIntervalSeconds { get; set; } = 30;
+
+    /// <summary>
     /// Gets or sets the last geometric shape kind selected by the user on the annotation toolbar.
     /// </summary>
     public PdfAnnotationShapeKind LastUsedShape { get; set; } = PdfAnnotationShapeKind.Line;
