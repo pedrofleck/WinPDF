@@ -15,7 +15,7 @@ internal static partial class TaskbarShellIntegration
     /// Unified explicit Application User Model ID shared by the process, window property store,
     /// installer shortcuts, and file-type registration.
     /// </summary>
-    public const string AppUserModelId = "PedroFleck.WinPDF";
+    public const string AppUserModelId = "Fluentify.WinPDF";
 
     /// <summary>
     /// CLI argument passed when middle-clicking the taskbar icon or choosing "New window"
