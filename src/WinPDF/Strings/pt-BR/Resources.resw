@@ -460,4 +460,6 @@
   <data name="SignatureDialog_OpaqueBadgeToolTip" xml:space="preserve"><value>Sem fundo transparente — esta assinatura pode encobrir parte do documento atrás dela.</value></data>
   <data name="JumpList_RecentCategory" xml:space="preserve"><value>Recentes</value></data>
   <data name="JumpList_NewWindowTask" xml:space="preserve"><value>Nova janela</value></data>
+  <data name="Settings_Viewing_RememberWindowSizeHeader.Text" xml:space="preserve"><value>Lembrar tamanho da janela por documento</value></data>
+  <data name="Settings_Viewing_RememberWindowSizeDescription.Text" xml:space="preserve"><value>Salva e restaura o tamanho da janela e o estado maximizado separadamente para cada PDF</value></data>
 </root>

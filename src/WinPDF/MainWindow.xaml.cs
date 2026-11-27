@@ -110,6 +110,7 @@ public sealed partial class MainWindow : Window
     private int _previousSidebarIndex = -1;
     private bool _isClosingConfirmed;
     private bool _isPromptingUnsavedClose;
+    private Models.DocumentWindowBounds? _closingCapturedWindowBounds;
     private IntPtr _hwnd;
     private SubclassProc? _subclassDelegate;
     private IntPtr _subclassPtr;
@@ -503,6 +504,8 @@ public sealed partial class MainWindow : Window
         SizeChanged += OnMainWindowSizeChanged;
         ViewModel.FullScreenTransitionRunner = ExecuteFullScreenTransition;
         ViewModel.PropertyChanged += OnViewModelPropertyChanged;
+        ViewModel.CaptureWindowBounds = CaptureCurrentWindowBounds;
+        ViewModel.DocumentWindowBoundsRestoreRequested += ApplyDocumentWindowBounds;
         RegisterTitleBarAnimatedIconPointerHandlers();
 
         InstallMinSizeWindowSubclass();
@@ -617,16 +620,19 @@ public sealed partial class MainWindow : Window
 
         var displayArea = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(AppWindow.Id, Microsoft.UI.Windowing.DisplayAreaFallback.Primary);
 
-        int targetWidthDip = 1280;
-        int targetHeightDip = 800;
+        Models.DocumentWindowBounds? startupBounds = ViewModel.InitialStartupWindowBounds;
+        double targetWidthDip = startupBounds is { } sb && sb.WidthDip >= MinWindowWidthDip ? sb.WidthDip : 1280.0;
+        double targetHeightDip = startupBounds is { } sb2 && sb2.HeightDip >= MinWindowHeightDip ? sb2.HeightDip : 800.0;
 
         int targetWidthPx = (int)Math.Round(targetWidthDip * scale);
         int targetHeightPx = (int)Math.Round(targetHeightDip * scale);
 
         if (displayArea is not null)
         {
-            targetWidthPx = Math.Min(targetWidthPx, (int)(displayArea.WorkArea.Width * 0.90));
-            targetHeightPx = Math.Min(targetHeightPx, (int)(displayArea.WorkArea.Height * 0.90));
+            int maxW = startupBounds.HasValue ? displayArea.WorkArea.Width : (int)(displayArea.WorkArea.Width * 0.90);
+            int maxH = startupBounds.HasValue ? displayArea.WorkArea.Height : (int)(displayArea.WorkArea.Height * 0.90);
+            targetWidthPx = Math.Clamp(targetWidthPx, (int)Math.Round(MinWindowWidthDip * scale), maxW);
+            targetHeightPx = Math.Clamp(targetHeightPx, (int)Math.Round(MinWindowHeightDip * scale), maxH);
             int x = displayArea.WorkArea.X + ((displayArea.WorkArea.Width - targetWidthPx) / 2);
             int y = displayArea.WorkArea.Y + ((displayArea.WorkArea.Height - targetHeightPx) / 2);
             AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(x, y, targetWidthPx, targetHeightPx));
@@ -636,7 +642,152 @@ public sealed partial class MainWindow : Window
             AppWindow.Resize(new Windows.Graphics.SizeInt32(targetWidthPx, targetHeightPx));
         }
 
+        if (startupBounds is { IsMaximized: true } && AppWindow.Presenter is OverlappedPresenter overlapped)
+        {
+            overlapped.Maximize();
+        }
+
         UpdateWindowMinimumSize(scale);
+    }
+
+    private double GetWindowScaleFactor()
+    {
+        double scale = Content?.XamlRoot?.RasterizationScale ?? 0.0;
+        if (scale > 0.0)
+        {
+            return scale;
+        }
+
+        try
+        {
+            IntPtr hwnd = _hwnd != IntPtr.Zero ? _hwnd : WinRT.Interop.WindowNative.GetWindowHandle(this);
+            uint dpi = hwnd != IntPtr.Zero ? GetDpiForWindow(hwnd) : 96u;
+            return dpi > 0 ? dpi / 96.0 : 1.0;
+        }
+        catch
+        {
+            return 1.0;
+        }
+    }
+
+    private Models.DocumentWindowBounds? CaptureCurrentWindowBounds()
+    {
+        if (ViewModel.IsPresentationMode || ViewModel.IsFullScreen)
+        {
+            return null;
+        }
+
+        try
+        {
+            IntPtr hwnd = _hwnd != IntPtr.Zero ? _hwnd : WinRT.Interop.WindowNative.GetWindowHandle(this);
+            if (hwnd == IntPtr.Zero)
+            {
+                return null;
+            }
+
+            double scale = GetWindowScaleFactor();
+            WINDOWPLACEMENT placement = new() { length = (uint)Marshal.SizeOf<WINDOWPLACEMENT>() };
+            if (GetWindowPlacement(hwnd, ref placement))
+            {
+                bool isMaximized = placement.showCmd == SW_SHOWMAXIMIZED ||
+                                   (AppWindow.Presenter is OverlappedPresenter ov && ov.State == OverlappedPresenterState.Maximized);
+                double wDip = (placement.rcNormalPosition.Right - placement.rcNormalPosition.Left) / scale;
+                double hDip = (placement.rcNormalPosition.Bottom - placement.rcNormalPosition.Top) / scale;
+                if (wDip >= MinWindowWidthDip && hDip >= MinWindowHeightDip)
+                {
+                    return new Models.DocumentWindowBounds(Math.Round(wDip, 1), Math.Round(hDip, 1), isMaximized);
+                }
+            }
+
+            double fallbackW = AppWindow.Size.Width / scale;
+            double fallbackH = AppWindow.Size.Height / scale;
+            if (fallbackW >= MinWindowWidthDip && fallbackH >= MinWindowHeightDip)
+            {
+                bool isMax = AppWindow.Presenter is OverlappedPresenter ov && ov.State == OverlappedPresenterState.Maximized;
+                return new Models.DocumentWindowBounds(Math.Round(fallbackW, 1), Math.Round(fallbackH, 1), isMax);
+            }
+        }
+        catch
+        {
+        }
+
+        return null;
+    }
+
+    private void ApplyDocumentWindowBounds(Models.DocumentWindowBounds bounds)
+    {
+        if (ViewModel.IsPresentationMode || ViewModel.IsFullScreen)
+        {
+            return;
+        }
+
+        try
+        {
+            double scale = GetWindowScaleFactor();
+            double widthDip = Math.Max(MinWindowWidthDip, bounds.WidthDip);
+            double heightDip = Math.Max(MinWindowHeightDip, bounds.HeightDip);
+
+            var displayArea = Microsoft.UI.Windowing.DisplayArea.GetFromWindowId(
+                AppWindow.Id,
+                Microsoft.UI.Windowing.DisplayAreaFallback.Primary);
+
+            int targetW = (int)Math.Round(widthDip * scale);
+            int targetH = (int)Math.Round(heightDip * scale);
+            int minW = (int)Math.Round(MinWindowWidthDip * scale);
+            int minH = (int)Math.Round(MinWindowHeightDip * scale);
+
+            int targetX = AppWindow.Position.X;
+            int targetY = AppWindow.Position.Y;
+
+            IntPtr hwnd = _hwnd != IntPtr.Zero ? _hwnd : WinRT.Interop.WindowNative.GetWindowHandle(this);
+            WINDOWPLACEMENT currentPlacement = new() { length = (uint)Marshal.SizeOf<WINDOWPLACEMENT>() };
+            if (hwnd != IntPtr.Zero && GetWindowPlacement(hwnd, ref currentPlacement))
+            {
+                targetX = currentPlacement.rcNormalPosition.Left;
+                targetY = currentPlacement.rcNormalPosition.Top;
+            }
+
+            if (displayArea is not null)
+            {
+                var work = displayArea.WorkArea;
+                targetW = Math.Clamp(targetW, minW, work.Width);
+                targetH = Math.Clamp(targetH, minH, work.Height);
+                targetX = Math.Clamp(targetX, work.X, Math.Max(work.X, work.X + work.Width - targetW));
+                targetY = Math.Clamp(targetY, work.Y, Math.Max(work.Y, work.Y + work.Height - targetH));
+            }
+
+            if (bounds.IsMaximized)
+            {
+                if (hwnd != IntPtr.Zero && GetWindowPlacement(hwnd, ref currentPlacement))
+                {
+                    currentPlacement.showCmd = SW_SHOWMAXIMIZED;
+                    currentPlacement.rcNormalPosition = new RECT
+                    {
+                        Left = targetX,
+                        Top = targetY,
+                        Right = targetX + targetW,
+                        Bottom = targetY + targetH,
+                    };
+                    _ = SetWindowPlacement(hwnd, in currentPlacement);
+                }
+                else if (AppWindow.Presenter is OverlappedPresenter ovMax)
+                {
+                    ovMax.Maximize();
+                }
+            }
+            else
+            {
+                if (AppWindow.Presenter is OverlappedPresenter ov && ov.State == OverlappedPresenterState.Maximized)
+                {
+                    ov.Restore();
+                }
+
+                AppWindow.MoveAndResize(new Windows.Graphics.RectInt32(targetX, targetY, targetW, targetH));
+            }
+        }
+        catch
+        {
+        }
     }
 
     private void InstallMinSizeWindowSubclass()
@@ -1863,6 +2014,8 @@ public sealed partial class MainWindow : Window
 
     private async void OnAppWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
     {
+        _closingCapturedWindowBounds = CaptureCurrentWindowBounds();
+
         if (_isClosingConfirmed || ViewModel.CurrentDocument is not { HasUnsavedChanges: true })
         {
             return;
@@ -1880,6 +2033,7 @@ public sealed partial class MainWindow : Window
             bool canClose = await ViewModel.ConfirmUnsavedChangesIfNeededAsync();
             if (canClose)
             {
+                _closingCapturedWindowBounds = CaptureCurrentWindowBounds() ?? _closingCapturedWindowBounds;
                 _isClosingConfirmed = true;
                 Close();
             }
@@ -1892,6 +2046,9 @@ public sealed partial class MainWindow : Window
 
     private void OnMainWindowClosed(object sender, WindowEventArgs args)
     {
+        ViewModel.DocumentWindowBoundsRestoreRequested -= ApplyDocumentWindowBounds;
+        ViewModel.CaptureWindowBounds = null;
+
         if (_hwnd != IntPtr.Zero && _subclassPtr != IntPtr.Zero)
         {
             try { _ = RemoveWindowSubclass(_hwnd, _subclassPtr, WindowSubclassId); } catch { }
@@ -1910,8 +2067,11 @@ public sealed partial class MainWindow : Window
                 bool saveView = s.SaveDocumentViewSettings;
                 double? zoomToSave = saveView ? doc.ZoomFactor : null;
                 ViewMode? viewModeToSave = saveView ? ViewModel.ViewMode : null;
+                Models.DocumentWindowBounds? closingBounds = s.RememberDocumentWindowBounds
+                    ? _closingCapturedWindowBounds
+                    : null;
 
-                if (pageToSave.HasValue || saveView)
+                if (pageToSave.HasValue || saveView || closingBounds.HasValue)
                 {
                     if (!s.DocumentStates.TryGetValue(doc.FilePath, out var docState) || docState is null)
                     {
@@ -1938,7 +2098,15 @@ public sealed partial class MainWindow : Window
                         }
                     }
 
+                    if (closingBounds is { } cb)
+                    {
+                        docState.WindowWidthDip = cb.WidthDip;
+                        docState.WindowHeightDip = cb.HeightDip;
+                        docState.IsWindowMaximized = cb.IsMaximized;
+                    }
+
                     docState.LastOpenedUtc = DateTime.UtcNow;
+                    Services.SettingsService.PruneDocumentStates(s.DocumentStates);
                 }
             }
             else

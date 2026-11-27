@@ -27,6 +27,22 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly bool _isInitializingSettings;
     private string? _pendingNotificationTitle;
     private string? _pendingNotificationMessage;
+    private string? _startupBoundsConsumedPath;
+
+    /// <summary>
+    /// Gets or sets a callback invoked before closing or switching documents to capture current window bounds.
+    /// </summary>
+    public Func<DocumentWindowBounds?>? CaptureWindowBounds { get; set; }
+
+    /// <summary>
+    /// Gets or sets the saved window bounds to apply immediately before showing the window on startup.
+    /// </summary>
+    public DocumentWindowBounds? InitialStartupWindowBounds { get; set; }
+
+    /// <summary>
+    /// Event raised when a newly opened document in an existing window has saved bounds to restore.
+    /// </summary>
+    public event Action<DocumentWindowBounds>? DocumentWindowBoundsRestoreRequested;
 
     /// <summary>
     /// Gets or sets the decoded image waiting to be positioned on a PDF page via <see cref="AnnotationTool.InsertImage"/>.
@@ -947,15 +963,21 @@ public sealed partial class ShellViewModel : ObservableObject
                 double? zoomToSave = saveView ? oldValue.ZoomFactor : null;
                 ViewMode? viewModeToSave = saveView ? ViewMode : null;
                 bool? hasCustom = saveView ? true : (bool?)null;
+                DocumentWindowBounds? bounds = _settingsService.Settings.RememberDocumentWindowBounds
+                    ? CaptureWindowBounds?.Invoke()
+                    : null;
 
-                if (pageToSave.HasValue || saveView)
+                if (pageToSave.HasValue || saveView || bounds.HasValue)
                 {
                     _settingsService.UpdateDocumentState(
                         oldValue.FilePath,
                         pageToSave,
                         zoomToSave,
                         viewModeToSave,
-                        hasCustomViewSettings: hasCustom);
+                        hasCustomViewSettings: hasCustom,
+                        windowWidthDip: bounds?.WidthDip,
+                        windowHeightDip: bounds?.HeightDip,
+                        isWindowMaximized: bounds?.IsMaximized);
                 }
             }
 
@@ -1243,6 +1265,7 @@ public sealed partial class ShellViewModel : ObservableObject
             {
                 ViewMode = targetViewMode;
                 CurrentDocument = doc;
+                RestoreDocumentWindowBoundsIfNeeded(doc.FilePath);
                 _ = doc.LoadAnnotationsAndSignaturesAsync();
             }
             else
@@ -1251,6 +1274,7 @@ public sealed partial class ShellViewModel : ObservableObject
                 {
                     ViewMode = targetViewMode;
                     CurrentDocument = doc;
+                    RestoreDocumentWindowBoundsIfNeeded(doc.FilePath);
                     _ = doc.LoadAnnotationsAndSignaturesAsync();
                 });
             }
@@ -2010,6 +2034,67 @@ public sealed partial class ShellViewModel : ObservableObject
         {
             NotificationRequested?.Invoke(string.Empty, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Reads and marks the saved window bounds for the startup PDF so <see cref="MainWindow"/> applies them before activation
+    /// without redundantly resizing again once the PDF finishes loading.
+    /// </summary>
+    /// <param name="filePath">Startup PDF file path, if any.</param>
+    /// <returns>Saved window bounds, or <see langword="null"/> if none are recorded.</returns>
+    public DocumentWindowBounds? ConsumeStartupWindowBounds(string? filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            _startupBoundsConsumedPath = null;
+            return null;
+        }
+
+        _startupBoundsConsumedPath = filePath;
+        return TryGetSavedWindowBounds(filePath);
+    }
+
+    private DocumentWindowBounds? TryGetSavedWindowBounds(string filePath)
+    {
+        if (!_settingsService.Settings.RememberDocumentWindowBounds)
+        {
+            return null;
+        }
+
+        if (_settingsService.TryGetDocumentState(filePath, out SavedDocumentState? state) && state is not null)
+        {
+            bool hasSize = state.WindowWidthDip is >= 300.0 && state.WindowHeightDip is >= 200.0;
+            bool hasMax = state.IsWindowMaximized.HasValue;
+            if (hasSize || hasMax)
+            {
+                return new DocumentWindowBounds(
+                    state.WindowWidthDip ?? 1280.0,
+                    state.WindowHeightDip ?? 800.0,
+                    state.IsWindowMaximized ?? false);
+            }
+        }
+
+        return null;
+    }
+
+    private void RestoreDocumentWindowBoundsIfNeeded(string filePath)
+    {
+        if (!string.IsNullOrWhiteSpace(_startupBoundsConsumedPath) &&
+            string.Equals(_startupBoundsConsumedPath, filePath, StringComparison.OrdinalIgnoreCase))
+        {
+            _startupBoundsConsumedPath = null;
+            return;
+        }
+
+        _startupBoundsConsumedPath = null;
+        if (!_settingsService.Settings.RememberDocumentWindowBounds)
+        {
+            return;
+        }
+
+        DocumentWindowBounds targetBounds = TryGetSavedWindowBounds(filePath)
+            ?? new DocumentWindowBounds(1280.0, 800.0, IsMaximized: false);
+        DocumentWindowBoundsRestoreRequested?.Invoke(targetBounds);
     }
 
     /// <summary>

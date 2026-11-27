@@ -152,6 +152,12 @@ public sealed class SettingsService : ISettingsService
                     loaded.SaveDocumentViewSettings = keepZoomEl.GetBoolean();
                 }
 
+                if (TryGetPropertyIgnoreCase(root, "rememberDocumentWindowBounds", out JsonElement remWinEl) &&
+                    (remWinEl.ValueKind == JsonValueKind.True || remWinEl.ValueKind == JsonValueKind.False))
+                {
+                    loaded.RememberDocumentWindowBounds = remWinEl.GetBoolean();
+                }
+
                 if (TryGetPropertyIgnoreCase(root, "documentBookmarks", out JsonElement bookmarksEl) &&
                     bookmarksEl.ValueKind == JsonValueKind.Object)
                 {
@@ -240,13 +246,39 @@ public sealed class SettingsService : ISettingsService
                             hasCustomView = hcvEl.GetBoolean();
                         }
 
+                        double? winWidth = null;
+                        if (TryGetPropertyIgnoreCase(docProp.Value, "windowWidthDip", out JsonElement wwEl) &&
+                            wwEl.ValueKind == JsonValueKind.Number && wwEl.TryGetDouble(out double parsedWw) &&
+                            double.IsFinite(parsedWw) && parsedWw >= 300.0)
+                        {
+                            winWidth = parsedWw;
+                        }
+
+                        double? winHeight = null;
+                        if (TryGetPropertyIgnoreCase(docProp.Value, "windowHeightDip", out JsonElement whEl) &&
+                            whEl.ValueKind == JsonValueKind.Number && whEl.TryGetDouble(out double parsedWh) &&
+                            double.IsFinite(parsedWh) && parsedWh >= 200.0)
+                        {
+                            winHeight = parsedWh;
+                        }
+
+                        bool? isWinMax = null;
+                        if (TryGetPropertyIgnoreCase(docProp.Value, "isWindowMaximized", out JsonElement wmEl) &&
+                            (wmEl.ValueKind == JsonValueKind.True || wmEl.ValueKind == JsonValueKind.False))
+                        {
+                            isWinMax = wmEl.GetBoolean();
+                        }
+
                         loaded.DocumentStates[docProp.Name] = new SavedDocumentState
                         {
                             PageIndex = pIdx,
                             ZoomFactor = hasCustomView ? zoomFactor : null,
                             ViewMode = hasCustomView ? viewMode : null,
                             HasCustomViewSettings = hasCustomView,
-                            LastOpenedUtc = lastOpened
+                            LastOpenedUtc = lastOpened,
+                            WindowWidthDip = winWidth,
+                            WindowHeightDip = winHeight,
+                            IsWindowMaximized = isWinMax
                         };
                     }
                 }
@@ -357,6 +389,7 @@ public sealed class SettingsService : ISettingsService
                 writer.WriteString("appLanguage", Settings.AppLanguage ?? string.Empty);
                 writer.WriteBoolean("rememberDocumentPage", Settings.RememberDocumentPage);
                 writer.WriteBoolean("saveDocumentViewSettings", Settings.SaveDocumentViewSettings);
+                writer.WriteBoolean("rememberDocumentWindowBounds", Settings.RememberDocumentWindowBounds);
                 WriteDocumentBookmarksJson(writer, Settings.DocumentBookmarks);
                 WriteDocumentStatesJson(writer, Settings.DocumentStates);
                 WriteRecentFilesJson(writer, Settings.RecentFiles);
@@ -396,6 +429,7 @@ public sealed class SettingsService : ISettingsService
                     writer.WriteString("appLanguage", Settings.AppLanguage ?? string.Empty);
                     writer.WriteBoolean("rememberDocumentPage", Settings.RememberDocumentPage);
                     writer.WriteBoolean("saveDocumentViewSettings", Settings.SaveDocumentViewSettings);
+                    writer.WriteBoolean("rememberDocumentWindowBounds", Settings.RememberDocumentWindowBounds);
                     WriteDocumentBookmarksJson(writer, Settings.DocumentBookmarks);
                     WriteDocumentStatesJson(writer, Settings.DocumentStates);
                     WriteRecentFilesJson(writer, Settings.RecentFiles);
@@ -432,7 +466,10 @@ public sealed class SettingsService : ISettingsService
         int? pageIndex,
         double? zoomFactor,
         ViewMode? viewMode = null,
-        bool? hasCustomViewSettings = null)
+        bool? hasCustomViewSettings = null,
+        double? windowWidthDip = null,
+        double? windowHeightDip = null,
+        bool? isWindowMaximized = null)
     {
         if (string.IsNullOrWhiteSpace(filePath))
         {
@@ -467,8 +504,49 @@ public sealed class SettingsService : ISettingsService
                 state.ViewMode = viewMode.Value;
             }
 
+            if (windowWidthDip.HasValue && double.IsFinite(windowWidthDip.Value) && windowWidthDip.Value >= 300.0)
+            {
+                state.WindowWidthDip = Math.Round(windowWidthDip.Value, 1);
+            }
+
+            if (windowHeightDip.HasValue && double.IsFinite(windowHeightDip.Value) && windowHeightDip.Value >= 200.0)
+            {
+                state.WindowHeightDip = Math.Round(windowHeightDip.Value, 1);
+            }
+
+            if (isWindowMaximized.HasValue)
+            {
+                state.IsWindowMaximized = isWindowMaximized.Value;
+            }
+
             state.LastOpenedUtc = DateTime.UtcNow;
+            PruneDocumentStates(Settings.DocumentStates);
             SaveInternal();
+        }
+    }
+
+    /// <summary>
+    /// Trims the in-memory per-document state dictionary to the most recently opened entries
+    /// so memory usage and <c>settings.json</c> stay bounded even after opening thousands of PDFs.
+    /// </summary>
+    /// <param name="documentStates">Document states dictionary to prune in place.</param>
+    /// <param name="maxEntries">Maximum entries to retain.</param>
+    internal static void PruneDocumentStates(Dictionary<string, SavedDocumentState> documentStates, int maxEntries = 200)
+    {
+        if (documentStates.Count <= maxEntries)
+        {
+            return;
+        }
+
+        List<string> keysToRemove = documentStates
+            .OrderByDescending(kvp => kvp.Value.LastOpenedUtc)
+            .Skip(maxEntries)
+            .Select(kvp => kvp.Key)
+            .ToList();
+
+        foreach (string key in keysToRemove)
+        {
+            documentStates.Remove(key);
         }
     }
 
@@ -608,6 +686,21 @@ public sealed class SettingsService : ISettingsService
                 else
                 {
                     writer.WriteNull("viewMode");
+                }
+
+                if (kvp.Value.WindowWidthDip is { } ww && double.IsFinite(ww))
+                {
+                    writer.WriteNumber("windowWidthDip", Math.Round(ww, 1));
+                }
+
+                if (kvp.Value.WindowHeightDip is { } wh && double.IsFinite(wh))
+                {
+                    writer.WriteNumber("windowHeightDip", Math.Round(wh, 1));
+                }
+
+                if (kvp.Value.IsWindowMaximized is { } wm)
+                {
+                    writer.WriteBoolean("isWindowMaximized", wm);
                 }
 
                 writer.WriteString("lastOpenedUtc", kvp.Value.LastOpenedUtc.ToString("o"));

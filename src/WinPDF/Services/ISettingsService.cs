@@ -42,14 +42,25 @@ public interface ISettingsService
     bool TryGetDocumentState(string filePath, out SavedDocumentState? state);
 
     /// <summary>
-    /// Updates or creates the persisted reading state (page index, zoom factor, view mode, and custom view status) for a document.
+    /// Updates or creates the persisted reading state and window bounds for a document.
     /// </summary>
     /// <param name="filePath">Full file system path of the PDF.</param>
     /// <param name="pageIndex">Optional zero-based page index to update.</param>
     /// <param name="zoomFactor">Optional zoom factor to update.</param>
     /// <param name="viewMode">Optional view mode (continuous or paged) to update.</param>
     /// <param name="hasCustomViewSettings">Optional flag indicating whether custom view settings are explicitly saved.</param>
-    void UpdateDocumentState(string filePath, int? pageIndex, double? zoomFactor, ViewMode? viewMode = null, bool? hasCustomViewSettings = null);
+    /// <param name="windowWidthDip">Optional restored window width in DIPs.</param>
+    /// <param name="windowHeightDip">Optional restored window height in DIPs.</param>
+    /// <param name="isWindowMaximized">Optional flag indicating whether the window is maximized.</param>
+    void UpdateDocumentState(
+        string filePath,
+        int? pageIndex,
+        double? zoomFactor,
+        ViewMode? viewMode = null,
+        bool? hasCustomViewSettings = null,
+        double? windowWidthDip = null,
+        double? windowHeightDip = null,
+        bool? isWindowMaximized = null);
 
     /// <summary>
     /// Returns a snapshot of recently opened PDF file paths ordered newest first.

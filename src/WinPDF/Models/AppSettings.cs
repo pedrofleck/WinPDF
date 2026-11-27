@@ -106,6 +106,11 @@ public sealed class AppSettings
     public bool SaveDocumentViewSettings { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether window size and maximized state should be remembered per document.
+    /// </summary>
+    public bool RememberDocumentWindowBounds { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets a value indicating whether each document's custom zoom level should be remembered and restored.
     /// </summary>
     [Obsolete("Use SaveDocumentViewSettings instead")]
@@ -155,7 +160,30 @@ public sealed class SavedDocumentState
     /// Gets or sets the UTC timestamp when this document was last opened.
     /// </summary>
     public DateTime LastOpenedUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// Gets or sets the restored (non-maximized) window width in DIPs when this document was last viewed.
+    /// </summary>
+    public double? WindowWidthDip { get; set; }
+
+    /// <summary>
+    /// Gets or sets the restored (non-maximized) window height in DIPs when this document was last viewed.
+    /// </summary>
+    public double? WindowHeightDip { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the window was maximized when this document was last viewed.
+    /// </summary>
+    public bool? IsWindowMaximized { get; set; }
 }
+
+/// <summary>
+/// Snapshot of the application window bounds (restored DIP size and maximized flag) for a document.
+/// </summary>
+/// <param name="WidthDip">Restored window width in DIPs.</param>
+/// <param name="HeightDip">Restored window height in DIPs.</param>
+/// <param name="IsMaximized">Whether the window is maximized.</param>
+public readonly record struct DocumentWindowBounds(double WidthDip, double HeightDip, bool IsMaximized);
 
 /// <summary>
 /// Represents a persisted page bookmark entry with an optional user-defined custom title.

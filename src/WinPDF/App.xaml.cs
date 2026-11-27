@@ -275,6 +275,7 @@ public partial class App : Application
         if (startupPdf is not null)
         {
             shellViewModel.IsInitialDocumentOpening = true;
+            shellViewModel.InitialStartupWindowBounds = shellViewModel.ConsumeStartupWindowBounds(startupPdf);
         }
 
         _mainWindow = new MainWindow();

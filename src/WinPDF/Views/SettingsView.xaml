@@ -272,6 +272,37 @@
                                 IsOn="{x:Bind ViewModel.SaveDocumentViewSettings, Mode=TwoWay}" />
                         </Grid>
                     </Border>
+
+                    <!-- Card: Remember window size per document -->
+                    <Border
+                        Padding="16"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="4">
+                        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="16">
+                            <FontIcon
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                FontSize="20"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                Glyph="&#xE737;" />
+                            <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="4">
+                                <TextBlock
+                                    x:Uid="Settings_Viewing_RememberWindowSizeHeader"
+                                    Style="{StaticResource BodyTextBlockStyle}" />
+                                <TextBlock
+                                    x:Uid="Settings_Viewing_RememberWindowSizeDescription"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Style="{StaticResource CaptionTextBlockStyle}"
+                                    TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ToggleSwitch
+                                Grid.Column="2"
+                                VerticalAlignment="Center"
+                                IsOn="{x:Bind ViewModel.RememberDocumentWindowBounds, Mode=TwoWay}" />
+                        </Grid>
+                    </Border>
                 </StackPanel>
 
                 <!-- ========================================================= -->

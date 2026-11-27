@@ -464,4 +464,6 @@
   <data name="SignatureDialog_OpaqueBadgeToolTip" xml:space="preserve"><value>No transparent background — this signature may cover part of the document behind it.</value></data>
   <data name="JumpList_RecentCategory" xml:space="preserve"><value>Recent</value></data>
   <data name="JumpList_NewWindowTask" xml:space="preserve"><value>New window</value></data>
+  <data name="Settings_Viewing_RememberWindowSizeHeader.Text" xml:space="preserve"><value>Remember window size per document</value></data>
+  <data name="Settings_Viewing_RememberWindowSizeDescription.Text" xml:space="preserve"><value>Save and restore the window size and maximized state separately for each PDF</value></data>
 </root>

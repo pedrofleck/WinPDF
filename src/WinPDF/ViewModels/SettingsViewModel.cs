@@ -187,6 +187,22 @@ public sealed partial class SettingsViewModel : ObservableObject
         _settingsService.Update(s => s.SaveDocumentViewSettings = value);
     }
 
+    /// <summary>
+    /// Gets or sets a value indicating whether window size and maximized state should be remembered per document.
+    /// </summary>
+    [ObservableProperty]
+    public partial bool RememberDocumentWindowBounds { get; set; }
+
+    partial void OnRememberDocumentWindowBoundsChanged(bool value)
+    {
+        if (_isInitializing)
+        {
+            return;
+        }
+
+        _settingsService.Update(s => s.RememberDocumentWindowBounds = value);
+    }
+
     private readonly string _initialLanguage;
 
     /// <summary>
@@ -376,6 +392,7 @@ public sealed partial class SettingsViewModel : ObservableObject
         ReopenLastDocument = _settingsService.Settings.ReopenLastDocument;
         RememberDocumentPage = _settingsService.Settings.RememberDocumentPage;
         SaveDocumentViewSettings = _settingsService.Settings.SaveDocumentViewSettings;
+        RememberDocumentWindowBounds = _settingsService.Settings.RememberDocumentWindowBounds;
         SelectedLanguage = _settingsService.Settings.AppLanguage ?? string.Empty;
         _initialLanguage = SelectedLanguage;
         _isInitializing = false;
