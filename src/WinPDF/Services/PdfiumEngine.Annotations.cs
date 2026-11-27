@@ -681,7 +681,20 @@ internal sealed unsafe partial class PdfiumEngine
                         }
                     }
 
-                    if (strokes.Count > 0)
+                    bool hasFilledContour = existingPathsForRecolor is { Count: > 0 } &&
+                                            HasFilledCapturedPath(existingPathsForRecolor);
+                    if (hasFilledContour && existingPathsForRecolor is not null)
+                    {
+                        FsRectF rect = default;
+                        if (PdfiumNative.FPDFAnnot_GetRect(annot, &rect) != 0)
+                        {
+                            PdfRect bounds = PdfRect.FromCorners(rect.Left, rect.Bottom, rect.Right, rect.Top);
+                            FsRectF normRect = new() { Left = bounds.Left, Bottom = bounds.Bottom, Right = bounds.Right, Top = bounds.Top };
+                            string apStream = BuildCapturedPathsAppearanceStream(existingPathsForRecolor, bounds, normRect, bw, inkColor, overrideColor: inkColor);
+                            SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
+                        }
+                    }
+                    else if (strokes.Count > 0)
                     {
                         string apStream = BuildInkAppearanceStream(strokes, inkColor, bw);
                         SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
@@ -728,6 +741,9 @@ internal sealed unsafe partial class PdfiumEngine
 
             PdfAnnotationSubtype subtype = (PdfAnnotationSubtype)PdfiumNative.FPDFAnnot_GetSubtype(annot);
             PdfAnnotationColor existingColor = ReadAnnotColor(annot, subtype);
+            IReadOnlyList<PdfCapturedPath>? preMoveInkPaths = subtype == PdfAnnotationSubtype.Ink
+                ? ReadAnnotCapturedPaths(annot)
+                : null;
             FsRectF rawRect = default;
             if (PdfiumNative.FPDFAnnot_GetRect(annot, &rawRect) == 0)
             {
@@ -810,7 +826,17 @@ internal sealed unsafe partial class PdfiumEngine
                         float bw = PdfiumNative.FPDFAnnot_GetBorder(annot, out _, out _, out float borderVal) != 0 && borderVal > 0.1f
                             ? Math.Clamp(borderVal, 0.5f, 32f)
                             : 2.0f;
-                        string apStream = BuildInkAppearanceStream(translatedStrokes, existingColor, bw);
+                        string apStream;
+                        if (preMoveInkPaths is { Count: > 0 } && HasFilledCapturedPath(preMoveInkPaths))
+                        {
+                            PdfRect oldBounds = new(rLeft, rBottom, rRight, rTop);
+                            apStream = BuildCapturedPathsAppearanceStream(preMoveInkPaths, oldBounds, newRect, bw, existingColor);
+                        }
+                        else
+                        {
+                            apStream = BuildInkAppearanceStream(translatedStrokes, existingColor, bw);
+                        }
+
                         SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
                     }
                 }
@@ -1026,6 +1052,156 @@ internal sealed unsafe partial class PdfiumEngine
 
         IReadOnlyList<PdfAnnotationInfo> refreshed = ReadPageAnnotations(documentId, request.PageIndex, cancellationToken);
         return new PdfPageAnnotationMutationResult(request.PageIndex, createdIndex, refreshed);
+    }
+
+    /// <summary>
+    /// Creates a freehand ink annotation (<c>/Ink</c>) on <paramref name="request"/> page,
+    /// preserving stylus pressure calligraphy in the normal appearance stream (<c>/AP /N</c>)
+    /// while storing simplified center polylines in <c>/InkList</c> for full PDF interoperability.
+    /// </summary>
+    internal PdfPageAnnotationMutationResult AddInkAnnotation(
+        long documentId,
+        PdfCreateInkRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        PdfiumDocumentHandle document = GetDocument(documentId);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        PdfiumPageHandle page = _pageCache.GetOrLoad(document, documentId, request.PageIndex)
+            ?? throw new PdfiumException(PdfiumErrorCode.Page, $"Page {request.PageIndex} could not be loaded.");
+
+        Box pageBox = ReadVisiblePageBox(document, page, request.PageIndex);
+        float borderW = Math.Clamp(request.BaseWidthPt, 0.5f, 32f);
+        string author = string.IsNullOrWhiteSpace(request.Author) ? Environment.UserName : request.Author;
+
+        List<PdfInkStrokeData> preparedStrokes = new(request.Strokes.Count);
+        float minX = float.MaxValue;
+        float minY = float.MaxValue;
+        float maxX = float.MinValue;
+        float maxY = float.MinValue;
+        float maxHalfW = borderW * 0.5f;
+
+        for (int s = 0; s < request.Strokes.Count; s++)
+        {
+            PdfInkStrokeData raw = request.Strokes[s];
+            if (raw.Samples.Count == 0)
+            {
+                continue;
+            }
+
+            List<PdfInkSample> clamped = new(raw.Samples.Count);
+            for (int i = 0; i < raw.Samples.Count; i++)
+            {
+                PdfInkSample pt = raw.Samples[i];
+                float cx = Math.Clamp(pt.X, pageBox.Left + 0.5f, pageBox.Right - 0.5f);
+                float cy = Math.Clamp(pt.Y, pageBox.Bottom + 0.5f, pageBox.Top - 0.5f);
+                float cp = Math.Clamp(pt.Pressure, 0.04f, 1.0f);
+                clamped.Add(new PdfInkSample(cx, cy, cp));
+                minX = Math.Min(minX, cx);
+                minY = Math.Min(minY, cy);
+                maxX = Math.Max(maxX, cx);
+                maxY = Math.Max(maxY, cy);
+                float hw = WinPDF.Rendering.InkStrokeProcessor.ComputeHalfWidth(borderW, cp, raw.HasPressureVariation);
+                if (hw > maxHalfW)
+                {
+                    maxHalfW = hw;
+                }
+            }
+
+            List<PdfInkSample> smoothed = clamped.Count >= 3
+                ? WinPDF.Rendering.InkStrokeProcessor.SmoothSamples(clamped)
+                : clamped;
+            List<PdfInkSample> simplified = smoothed.Count > 2
+                ? WinPDF.Rendering.InkStrokeProcessor.SimplifySamples(smoothed, epsilon: 0.35f, preservePressure: raw.HasPressureVariation)
+                : smoothed;
+            preparedStrokes.Add(new PdfInkStrokeData(simplified, raw.HasPressureVariation));
+        }
+
+        if (preparedStrokes.Count == 0)
+        {
+            IReadOnlyList<PdfAnnotationInfo> unchanged = ReadPageAnnotations(documentId, request.PageIndex, cancellationToken);
+            return new PdfPageAnnotationMutationResult(request.PageIndex, -1, unchanged);
+        }
+
+        float pad = Math.Max(2.5f, maxHalfW + 1.5f);
+        FsRectF rect = new()
+        {
+            Left = Math.Max(pageBox.Left, minX - pad),
+            Bottom = Math.Max(pageBox.Bottom, minY - pad),
+            Right = Math.Min(pageBox.Right, maxX + pad),
+            Top = Math.Min(pageBox.Top, maxY + pad),
+        };
+
+        string apStream = WinPDF.Rendering.InkStrokeProcessor.BuildPdfAppearanceStream(preparedStrokes, request.Color, borderW);
+
+        int createdIndex;
+        using (PdfiumAnnotationHandle annot = PdfiumNative.FPDFPage_CreateAnnot(page, (int)PdfAnnotationSubtype.Ink))
+        {
+            if (annot.IsInvalid)
+            {
+                throw new PdfiumException(PdfiumErrorCode.Page, "Failed to create Ink annotation.");
+            }
+
+            _ = PdfiumNative.FPDFAnnot_SetRect(annot, &rect);
+            for (int s = 0; s < preparedStrokes.Count; s++)
+            {
+                IReadOnlyList<PdfInkSample> samples = preparedStrokes[s].Samples;
+                FsPointF[] pts;
+                if (samples.Count == 1)
+                {
+                    pts =
+                    [
+                        new FsPointF { X = samples[0].X, Y = samples[0].Y },
+                        new FsPointF { X = Math.Min(pageBox.Right - 0.5f, samples[0].X + 0.1f), Y = samples[0].Y },
+                    ];
+                }
+                else
+                {
+                    pts = new FsPointF[samples.Count];
+                    for (int i = 0; i < samples.Count; i++)
+                    {
+                        pts[i] = new FsPointF { X = samples[i].X, Y = samples[i].Y };
+                    }
+                }
+
+                fixed (FsPointF* ptr = pts)
+                {
+                    _ = PdfiumNative.FPDFAnnot_AddInkStroke(annot, ptr, (nuint)pts.Length);
+                }
+            }
+
+            _ = PdfiumNative.FPDFAnnot_SetColor(
+                annot,
+                PdfiumConstants.AnnotColorTypeColor,
+                request.Color.R,
+                request.Color.G,
+                request.Color.B,
+                255);
+            _ = PdfiumNative.FPDFAnnot_SetBorder(annot, 0f, 0f, borderW);
+            _ = PdfiumNative.FPDFAnnot_SetFlags(annot, PdfiumConstants.AnnotFlagPrint);
+            SetAnnotString(annot, "T", author);
+            SetAnnotString(annot, "M", PdfSignatureInspector.FormatPdfDate(DateTimeOffset.Now));
+            SetAnnotString(annot, "Subj", "Ink");
+            SetAnnotApStream(annot, PdfiumConstants.AnnotAppearanceNormal, apStream);
+            createdIndex = PdfiumNative.FPDFPage_GetAnnotIndex(page, annot);
+        }
+
+        IReadOnlyList<PdfAnnotationInfo> refreshed = ReadPageAnnotations(documentId, request.PageIndex, cancellationToken);
+        return new PdfPageAnnotationMutationResult(request.PageIndex, createdIndex, refreshed);
+    }
+
+    private static bool HasFilledCapturedPath(IReadOnlyList<PdfCapturedPath> paths)
+    {
+        for (int i = 0; i < paths.Count; i++)
+        {
+            if (paths[i].FillMode != 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

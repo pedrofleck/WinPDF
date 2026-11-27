@@ -1136,6 +1136,46 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
     }
 
     /// <summary>
+    /// Finds all erasable annotations on <paramref name="pageIndex"/> whose stroke geometry or bounds
+    /// intersect the eraser segment <c>(segStartPdf, segEndPdf)</c>, ordered by descending <c>AnnotIndex</c>
+    /// so sequential deletion keeps remaining indices valid.
+    /// </summary>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="segStartPdf">Eraser segment start in PDF points.</param>
+    /// <param name="segEndPdf">Eraser segment end in PDF points.</param>
+    /// <param name="eraserRadiusPt">Eraser tip radius in PDF points.</param>
+    /// <returns>Matching annotations in descending <c>AnnotIndex</c> order.</returns>
+    public IReadOnlyList<PdfAnnotationInfo> FindAnnotationsHitByEraser(
+        int pageIndex,
+        System.Numerics.Vector2 segStartPdf,
+        System.Numerics.Vector2 segEndPdf,
+        float eraserRadiusPt)
+    {
+        if (!_annotationsByPage.TryGetValue(pageIndex, out List<PdfAnnotationInfo>? list) || list.Count == 0)
+        {
+            return Array.Empty<PdfAnnotationInfo>();
+        }
+
+        List<PdfAnnotationInfo>? hits = null;
+        for (int i = list.Count - 1; i >= 0; i--)
+        {
+            PdfAnnotationInfo candidate = list[i];
+            if (WinPDF.Rendering.InkStrokeProcessor.IntersectsAnnotation(candidate, segStartPdf, segEndPdf, eraserRadiusPt))
+            {
+                (hits ??= new List<PdfAnnotationInfo>(4)).Add(candidate);
+            }
+        }
+
+        if (hits is null)
+        {
+            return Array.Empty<PdfAnnotationInfo>();
+        }
+
+        hits.Sort((a, b) => b.AnnotIndex.CompareTo(a.AnnotIndex));
+        return hits;
+    }
+
+    /// <summary>
     /// Returns the inspected <see cref="PdfSignatureInfo"/> at <paramref name="signatureIndex"/>, if available.
     /// </summary>
     /// <param name="signatureIndex">Zero-based signature index.</param>
@@ -1571,6 +1611,53 @@ public sealed partial class DocumentViewModel : ObservableObject, IDisposable
 
         PdfPageAnnotationMutationResult result = await _pdfService.AddShapeAnnotationAsync(DocumentId, req, _lifetime.Token);
         if (_isDisposed)
+        {
+            return null;
+        }
+
+        ApplyPageAnnotationMutation(result.PageIndex, result.Annotations);
+        PdfAnnotationInfo? created = FindAnnotationByIndex(result.PageIndex, result.TargetAnnotIndex);
+        if (recordUndo && created is not null)
+        {
+            PushUndoEntry(new UndoCreatedAnnotationsEntry([new AnnotationLocation(created.PageIndex, created.AnnotIndex)]));
+        }
+
+        HasUnsavedChanges = true;
+        return created;
+    }
+
+    /// <summary>
+    /// Creates a freehand ink annotation (<c>/Ink</c>) on <paramref name="pageIndex"/> from one or more pressure-aware strokes.
+    /// </summary>
+    /// <param name="pageIndex">Zero-based page index.</param>
+    /// <param name="strokes">Stroke samples in PDF user space (points).</param>
+    /// <param name="color">Ink RGBA color.</param>
+    /// <param name="baseWidthPt">Nominal brush width in PDF points.</param>
+    /// <param name="author">Optional author display name.</param>
+    /// <param name="recordUndo">Whether to push an entry onto the annotation undo stack.</param>
+    /// <returns>The newly created <see cref="PdfAnnotationInfo"/>, or <see langword="null"/> if empty or disposed.</returns>
+    public async Task<PdfAnnotationInfo?> AddInkAsync(
+        int pageIndex,
+        IReadOnlyList<PdfInkStrokeData> strokes,
+        PdfAnnotationColor color,
+        double baseWidthPt,
+        string author = "",
+        bool recordUndo = true)
+    {
+        if (_isDisposed || strokes is null || strokes.Count == 0)
+        {
+            return null;
+        }
+
+        PdfCreateInkRequest req = new(
+            PageIndex: pageIndex,
+            Strokes: strokes,
+            Color: color,
+            BaseWidthPt: (float)Math.Clamp(baseWidthPt, 0.5, 32.0),
+            Author: string.IsNullOrWhiteSpace(author) ? Environment.UserName : author);
+
+        PdfPageAnnotationMutationResult result = await _pdfService.AddInkAnnotationAsync(DocumentId, req, _lifetime.Token);
+        if (_isDisposed || result.TargetAnnotIndex < 0)
         {
             return null;
         }

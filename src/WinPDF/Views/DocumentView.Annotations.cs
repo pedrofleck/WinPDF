@@ -2290,6 +2290,7 @@ public sealed partial class DocumentView
         _isInlineTextEditorOpen = true;
         _isCommittingInlineText = false;
         SyncTouchShapeDrawOverlayVisibility();
+        SyncTouchInkDrawOverlayVisibility();
         ApplyInlineTextStyleToUi();
         InlineTextEditorOverlay.Visibility = Visibility.Visible;
         RepositionInlineTextEditor();
@@ -2334,6 +2335,7 @@ public sealed partial class DocumentView
         }
 
         SyncTouchShapeDrawOverlayVisibility();
+        SyncTouchInkDrawOverlayVisibility();
         UpdateTouchAnnotationResizeHandlesLayout();
     }
 

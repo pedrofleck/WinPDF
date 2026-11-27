@@ -1267,6 +1267,25 @@
                     PointerCanceled="OnShapeOverlayPointerCanceled"
                     PointerCaptureLost="OnShapeOverlayPointerCaptureLost" />
 
+                <!-- Dedicated Pen/Ink & Eraser Overlay (above ScrollViewer with ManipulationMode="None" for pressure-sensitive S Pen, hover cursor, palm rejection, and hand pan/zoom) -->
+                <Grid
+                    x:Name="TouchInkDrawOverlay"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    Background="Transparent"
+                    Canvas.ZIndex="88"
+                    ManipulationMode="None"
+                    IsHoldingEnabled="False"
+                    IsRightTapEnabled="False"
+                    Visibility="Collapsed"
+                    PointerEntered="OnInkOverlayPointerEntered"
+                    PointerExited="OnInkOverlayPointerExited"
+                    PointerPressed="OnInkOverlayPointerPressed"
+                    PointerMoved="OnInkOverlayPointerMoved"
+                    PointerReleased="OnInkOverlayPointerReleased"
+                    PointerCanceled="OnInkOverlayPointerCanceled"
+                    PointerCaptureLost="OnInkOverlayPointerCaptureLost" />
+
                 <!-- Touch Selected Annotation Overlay (Move body + Corner Resize handles + Non-modal QuickBar above ScrollViewer so DirectManipulation never steals touch drags) -->
                 <Canvas
                     x:Name="TouchAnnotationResizeHandlesCanvas"

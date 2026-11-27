@@ -227,6 +227,7 @@ public sealed partial class DocumentView : Page
         NextPageZone.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         ExitPresentationTopZone.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         TouchShapeDrawOverlay.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
+        TouchInkDrawOverlay.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         ContinuousScrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         ContinuousScrollViewer.SizeChanged += OnScrollViewerSizeChanged;
 
@@ -384,6 +385,7 @@ public sealed partial class DocumentView : Page
         SyncActiveShapeUi();
         SyncStrokeThicknessUi();
         SyncTouchShapeDrawOverlayVisibility();
+        SyncTouchInkDrawOverlayVisibility();
         if (FloatingSearchBar is not null)
         {
             FloatingSearchBar.Visibility = ViewModel.IsSearchOpen ? Visibility.Visible : Visibility.Collapsed;
@@ -483,6 +485,11 @@ public sealed partial class DocumentView : Page
         if (_wheelHandler is not null && TouchShapeDrawOverlay is not null)
         {
             TouchShapeDrawOverlay.RemoveHandler(UIElement.PointerWheelChangedEvent, _wheelHandler);
+        }
+
+        if (_wheelHandler is not null && TouchInkDrawOverlay is not null)
+        {
+            TouchInkDrawOverlay.RemoveHandler(UIElement.PointerWheelChangedEvent, _wheelHandler);
         }
         _transitionStoryboard?.Stop();
         _searchBarStoryboard?.Stop();
@@ -749,6 +756,7 @@ public sealed partial class DocumentView : Page
             }
 
             SyncTouchShapeDrawOverlayVisibility();
+            SyncTouchInkDrawOverlayVisibility();
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsSearchOpen))
         {
@@ -795,6 +803,7 @@ public sealed partial class DocumentView : Page
             }
 
             SyncTouchShapeDrawOverlayVisibility();
+            SyncTouchInkDrawOverlayVisibility();
             SyncPagedScrollViewerModes();
             UpdateTouchAnnotationResizeHandlesLayout();
         }
@@ -825,6 +834,7 @@ public sealed partial class DocumentView : Page
         else if (e.PropertyName == nameof(ShellViewModel.IsPresentationMode))
         {
             SyncTouchShapeDrawOverlayVisibility();
+            SyncTouchInkDrawOverlayVisibility();
             CloseInlineTextEditorImmediate();
             HideTouchScrollScrubberImmediate();
             CancelInteractiveSlideSwipeImmediate();
@@ -2273,7 +2283,8 @@ public sealed partial class DocumentView : Page
                 return;
             }
 
-            if (TouchShapeDrawOverlay?.Visibility == Visibility.Visible)
+            if (TouchShapeDrawOverlay?.Visibility == Visibility.Visible ||
+                TouchInkDrawOverlay?.Visibility == Visibility.Visible)
             {
                 e.Handled = true;
                 int zoomDelta = props.MouseWheelDelta;
@@ -2421,7 +2432,9 @@ public sealed partial class DocumentView : Page
                 }
             }
         }
-        else if (TouchShapeDrawOverlay?.Visibility == Visibility.Visible && props.MouseWheelDelta != 0)
+        else if ((TouchShapeDrawOverlay?.Visibility == Visibility.Visible ||
+                  TouchInkDrawOverlay?.Visibility == Visibility.Visible) &&
+                 props.MouseWheelDelta != 0)
         {
             e.Handled = true;
             PanPagedScrollViewerBy(0.0, props.MouseWheelDelta * 0.85);

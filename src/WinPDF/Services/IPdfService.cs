@@ -498,6 +498,18 @@ public interface IPdfService : IDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Creates a freehand ink drawing annotation (<c>/Ink</c>) on a page.
+    /// </summary>
+    /// <param name="documentId">Document identifier.</param>
+    /// <param name="request">Freehand ink stroke creation parameters.</param>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The created annotation index and refreshed annotations for the page.</returns>
+    Task<PdfPageAnnotationMutationResult> AddInkAnnotationAsync(
+        long documentId,
+        PdfCreateInkRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Captures the embedded raster image payload from an existing <c>/Stamp</c> annotation for copy/cut/undo.
     /// </summary>
     /// <param name="documentId">Document identifier.</param>

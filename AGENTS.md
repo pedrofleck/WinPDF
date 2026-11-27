@@ -90,10 +90,10 @@ WinPDF/
    ├─ Helpers/                  ← ResourceStrings, ResourceKeys, small utilities
    ├─ Models/            (S2+)  ← plain records: PdfPageInfo, OutlineItem, PdfTextModels, Annotation models
    ├─ ViewModels/        (S2+)  ← ShellViewModel, DocumentViewModel, PageViewModel, ThumbnailViewModel
-   ├─ Views/             (S2+)  ← XAML pages / user controls (`DocumentView.xaml(.cs)`, `DocumentView.Touch.cs`, `DocumentView.TouchSwipe.cs`, `DocumentView.Annotations.cs`, `DocumentView.Printing.cs`)
-   ├─ Controls/          (S3+)  ← `PdfPageCanvas(.Input/.Touch).cs`, `SplitterContainer`, `ThumbnailPresenter`
+   ├─ Views/             (S2+)  ← XAML pages / user controls (`DocumentView.xaml(.cs)`, `DocumentView.Touch.cs`, `DocumentView.TouchSwipe.cs`, `DocumentView.Annotations.cs`, `DocumentView.Ink.cs`, `DocumentView.Printing.cs`)
+   ├─ Controls/          (S3+)  ← `PdfPageCanvas(.Input/.Touch/.Ink).cs`, `SplitterContainer`, `ThumbnailPresenter`
    ├─ Services/          (S3+)  ← IPdfService, PdfiumService, `PdfiumEngine(.Annotations).cs`, IFilePickerService, IDialogService
-   ├─ Rendering/         (S3+)  ← TileCache, PdfiumPageCache, ZoomQuantizer, PageCoordinateTransform
+   ├─ Rendering/         (S3+)  ← TileCache, PdfiumPageCache, ZoomQuantizer, PageCoordinateTransform, `InkStrokeProcessor`
    └─ Interop/Pdfium/    (S3+)  ← [LibraryImport] declarations, SafeHandles, PDFium enums/structs
 ```
 
@@ -240,14 +240,18 @@ priority channels. Every public `IPdfService` method enqueues a job and returns 
 4. **Digital Signatures (`PdfSignatureInspector.cs`, `DocumentPropertiesDialog.xaml(.cs)`):**
    - Inspects all signature fields via `FPDF_GetSignatureCount` and `FPDFSigObj_*`, verifying CMS/PKCS#7 byte ranges and X.509 chains in a provider-agnostic manner.
    - Signatures with intact cryptographic integrity whose root CA is not installed in the local Windows trust store are treated as valid integrity (`IsTrusted = true`, green checkmark in the status bar badge) with an explanatory note in the unified **Document Properties** dialog (`Alt+Enter` or clicking the status bar file size / signature button).
+5. **Freehand Pen/Ink, Eraser, S Pen Hover, Pressure & Palm Rejection (`InkStrokeProcessor.cs`, `PdfPageCanvas.Ink.cs`, `DocumentView.Ink.cs` — implemented in `v0.6.2-alpha.6`):**
+   - **Geometry & Persistence (`InkStrokeProcessor.cs`, `PdfiumEngine.Annotations.cs`):** 3-point weighted coordinate/pressure smoothing, pressure-aware Ramer-Douglas-Peucker simplification, variable-width ribbon contour polygon with rounded start/end caps, `FPDF_ANNOT_INK` persistence (`/InkList` center polylines + filled variable-width `/AP` contours for pressure-sensitive stylus strokes and round-cap vector polylines for uniform mouse/touch strokes). `MoveAnnotation`, `UpdateAnnotation`, and `CloneExternalAnnotation` preserve filled variable-width `/AP` paths across moves, recolors, copy/cut/paste, and undo.
+   - **Zero-Flicker Win2D Wet Ink & Hover (`PdfPageCanvas.Ink.cs`):** Live wet-ink rendering with a pending-commit queue bridging PDFium bitmap upload (`ReleasePendingInkStroke`), plus live hover nib / pixel-accurate eraser ring cursor (`UpdatePenHoverCursor`, 0.0% idle CPU/GPU when stationary).
+   - **Dedicated `TouchInkDrawOverlay` (`DocumentView.Ink.cs`, `Canvas.ZIndex="88"`, `ManipulationMode="None"`):** Consumes chronological `GetIntermediatePoints` (120–240 Hz) with real `Pressure`, supports `IsEraser` tip and `IsBarrelButtonPressed` instant eraser switch, queued sequential segment-level eraser hit-testing (`FindAnnotationsHitByEraser`), `IsTouchDrawingEnabled` toggle (OFF = fingers pan/zoom while S Pen draws; ON = 1 finger draws/erases and 2 fingers pan/zoom), and dual palm rejection (`ContactRect > 28 DIPs` and pen-proximity exclusion `< 150 DIPs`) that still lets the opposite hand (`> 150 DIPs` away) pan/zoom the viewport simultaneously.
+   - **Full S Pen Parity:** S Pen supports press-drag-release shape drawing on `TouchShapeDrawOverlay` (with palm rejection), enlarged pen hit tolerances on resize handles (`14 DIPs`) and annotations (`8 pt`), and full text selection / links / comment / text-box / image insertion across all tools.
 
 ### 4.6 Remaining Roadmap for `v0.6.x` and `v0.7.x` **(design)**
 
-#### Remaining for `v0.6.x` (`v0.6.1+` — Freehand Ink, Eraser & Annotation Settings)
-- **Interactive Freehand Pen / Ink (`AnnotationTool.Pen`) & Eraser (`AnnotationTool.Eraser`):**
-  - Zero-latency Win2D wet-ink preview stroke on `PdfPageCanvas` during `PointerMoved` (respecting `IsTouchDrawingEnabled` to separate finger pan/zoom from stylus/mouse drawing), committing `FPDF_ANNOT_INK` (`FPDFAnnot_AddInkStroke` + `/AP` stream) on `PointerReleased`.
-  - Interactive `AnnotationTool.Eraser` to delete ink strokes or annotations on click/scrub.
+#### Remaining for `v0.6.x` (`v0.6.2+` — Redo, In-Place Save & Annotation Settings)
+- **Undo/Redo & Pen Polish:**
   - Redo stack (`Ctrl+Y`) + Undo/Redo toolbar buttons.
+  - Optional multi-stroke pen grouping timeout, ink smoothing toggle, and Stylus mode preference in Settings.
 - **In-Place Save & Annotation Preferences (`local-todo.md`):**
   - Direct save (`Ctrl+S`) + unsaved-changes confirmation prompt (`HasUnsavedChanges`) on close, plus optional auto-save setting.
   - Settings toggles: *"Keep annotation tool active after creation"*, pen multi-stroke grouping timeout, ink smoothing, and Stylus mode (Pen vs. Hand).

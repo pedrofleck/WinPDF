@@ -246,13 +246,7 @@ public sealed partial class PdfPageCanvas
 
     private bool IsTouchSelectInteractionAllowed()
     {
-        if (!IsSelectInteractionAllowed() || IsSwipePreview)
-        {
-            return false;
-        }
-
-        ShellViewModel? shell = _shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>();
-        return shell is not null && !shell.IsTouchDrawingEnabled;
+        return IsSelectInteractionAllowed() && !IsSwipePreview;
     }
 
     private void PruneStaleCanvasTouchPointers(long nowTick)

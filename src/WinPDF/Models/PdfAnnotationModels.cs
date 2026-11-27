@@ -597,6 +597,41 @@ public sealed record PdfPasteAnnotationRequest(
     double TargetPdfY);
 
 /// <summary>
+/// Single coordinate + normalized stylus pressure sample belonging to a freehand ink stroke.
+/// </summary>
+/// <param name="X">Horizontal coordinate (PDF points or page DIPs depending on context).</param>
+/// <param name="Y">Vertical coordinate (PDF points or page DIPs depending on context).</param>
+/// <param name="Pressure">Normalized stylus pressure in <c>[0, 1]</c> (defaults to <c>0.5</c> for mouse/touch).</param>
+public readonly record struct PdfInkSample(
+    float X,
+    float Y,
+    float Pressure = 0.5f);
+
+/// <summary>
+/// Single freehand ink stroke payload with optional stylus pressure variation.
+/// </summary>
+/// <param name="Samples">Ordered stroke samples in PDF user space (points).</param>
+/// <param name="HasPressureVariation">Whether stylus pressure modulates the stroke thickness.</param>
+public sealed record PdfInkStrokeData(
+    IReadOnlyList<PdfInkSample> Samples,
+    bool HasPressureVariation);
+
+/// <summary>
+/// Request to create a freehand ink annotation (<c>/Ink</c>) on a PDF page.
+/// </summary>
+/// <param name="PageIndex">Zero-based page index.</param>
+/// <param name="Strokes">One or more freehand strokes in PDF user space (points).</param>
+/// <param name="Color">Ink RGBA color.</param>
+/// <param name="BaseWidthPt">Nominal brush width in PDF points.</param>
+/// <param name="Author">Optional author display name.</param>
+public sealed record PdfCreateInkRequest(
+    int PageIndex,
+    IReadOnlyList<PdfInkStrokeData> Strokes,
+    PdfAnnotationColor Color,
+    float BaseWidthPt,
+    string Author = "");
+
+/// <summary>
 /// Result returned after creating or updating an annotation, carrying refreshed page annotations and target index.
 /// </summary>
 /// <param name="PageIndex">Zero-based page index.</param>

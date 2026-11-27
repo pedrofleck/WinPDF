@@ -545,10 +545,12 @@ public sealed partial class PdfPageCanvas
             (_shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>())?.ActiveTool == AnnotationTool.Select &&
             _observedDocument is not null)
         {
+            bool isPenInput = e.Pointer.PointerDeviceType == PointerDeviceType.Pen;
             if (_observedDocument.SelectedAnnotation is { IsResizable: true } selectedResizable &&
                 selectedResizable.PageIndex == PageInfo.Index)
             {
-                AnnotationResizeHandle handle = HitTestResizeHandle(selectedResizable, pt.Position, out Rect origRectDip);
+                double handleRadiusDip = isPenInput ? 14.0 : 10.0;
+                AnnotationResizeHandle handle = HitTestResizeHandle(selectedResizable, pt.Position, out Rect origRectDip, hitRadiusDip: handleRadiusDip);
                 if (handle != AnnotationResizeHandle.None)
                 {
                     _resizingAnnotation = selectedResizable;
@@ -576,7 +578,8 @@ public sealed partial class PdfPageCanvas
             }
 
             Vector2 pressPdf = ToPdfPoint(pt.Position);
-            PdfAnnotationInfo? hitMovable = _observedDocument.HitTestAnnotation(PageInfo.Index, pressPdf.X, pressPdf.Y, tolerancePt: 4.0);
+            double annotTolerancePt = isPenInput ? 8.0 : 4.0;
+            PdfAnnotationInfo? hitMovable = _observedDocument.HitTestAnnotation(PageInfo.Index, pressPdf.X, pressPdf.Y, tolerancePt: annotTolerancePt);
             if (hitMovable is { IsMovable: true })
             {
                 _pressedMovableAnnotation = hitMovable;

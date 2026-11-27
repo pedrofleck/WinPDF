@@ -1562,14 +1562,9 @@ public sealed partial class ShellViewModel : ObservableObject
     [RelayCommand]
     public void SetTool(AnnotationTool tool)
     {
-        if (tool is AnnotationTool.Pen or AnnotationTool.Eraser)
+        if (IsAnnotationNoticeOpen)
         {
-            IsAnnotationNoticeOpen = true;
-            if (ActiveTool != AnnotationTool.Select)
-            {
-                ActiveTool = AnnotationTool.Select;
-            }
-            return;
+            IsAnnotationNoticeOpen = false;
         }
 
         if (ActiveTool != tool)

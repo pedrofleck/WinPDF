@@ -1142,7 +1142,13 @@ public sealed partial class PdfPageCanvas : Grid
         PdfAnnotationInfo? resizedAnnot = _isResizingAnnotation ? _resizingAnnotation : null;
         bool hasResizedAnnotOnPage = resizedAnnot is not null && resizedAnnot.PageIndex == pageIndex;
 
-        if (pageMatches.Count == 0 && !hasSelectionOnPage && !hasSelectedAnnotOnPage && !hasDraggedAnnotOnPage && !hasResizedAnnotOnPage && !_isDrawingShape)
+        if (pageMatches.Count == 0 &&
+            !hasSelectionOnPage &&
+            !hasSelectedAnnotOnPage &&
+            !hasDraggedAnnotOnPage &&
+            !hasResizedAnnotOnPage &&
+            !_isDrawingShape &&
+            !HasActiveInkOrHoverOverlay)
         {
             return;
         }
@@ -1373,6 +1379,12 @@ public sealed partial class PdfPageCanvas : Grid
                 float ry = Math.Max(0.5f, MathF.Abs(p2.Y - p1.Y) * 0.5f);
                 ds.DrawEllipse(cx, cy, rx, ry, strokeColor, strokeDip, s_roundShapeStrokeStyle);
             }
+        }
+
+        // 7. Live freehand wet-ink strokes & S Pen hover / eraser cursor
+        if (HasActiveInkOrHoverOverlay)
+        {
+            DrawInkAndHoverOverlays(ds, offsetX, offsetY);
         }
     }
 

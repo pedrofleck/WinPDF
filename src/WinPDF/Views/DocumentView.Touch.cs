@@ -327,11 +327,14 @@ public sealed partial class DocumentView
         }
     }
 
+    private bool _isShapeOverlayPenDrawing;
+
     private void ResetTouchShapeOverlayState()
     {
         _shapeOverlayDrawCanvas?.CancelShapeDrawing();
         _shapeOverlayMouseCanvas?.CancelShapeDrawing();
         _isShapeOverlayTouchDrawing = false;
+        _isShapeOverlayPenDrawing = false;
         _shapeOverlayDrawPointerId = 0;
         _shapeOverlayDrawCanvas = null;
         _shapeOverlayMouseCanvas = null;
@@ -341,12 +344,24 @@ public sealed partial class DocumentView
 
     private bool TryFindRealizedCanvasAtOverlayPoint(Point overlayPt, out PdfPageCanvas? targetCanvas, out Point localPt)
     {
-        targetCanvas = null;
-        localPt = default;
         if (TouchShapeDrawOverlay is null)
         {
+            targetCanvas = null;
+            localPt = default;
             return false;
         }
+
+        return TryFindRealizedCanvasAtVisualPoint(TouchShapeDrawOverlay, overlayPt, out targetCanvas, out localPt);
+    }
+
+    private bool TryFindRealizedCanvasAtVisualPoint(
+        UIElement overlayVisual,
+        Point overlayPt,
+        out PdfPageCanvas? targetCanvas,
+        out Point localPt)
+    {
+        targetCanvas = null;
+        localPt = default;
 
         PdfPageCanvas? bestNearest = null;
         Point bestLocal = default;
@@ -368,7 +383,7 @@ public sealed partial class DocumentView
 
             try
             {
-                Point pt = TouchShapeDrawOverlay.TransformToVisual(canvas).TransformPoint(overlayPt);
+                Point pt = overlayVisual.TransformToVisual(canvas).TransformPoint(overlayPt);
                 if (pt.X >= 0.0 && pt.X <= cw && pt.Y >= 0.0 && pt.Y <= ch)
                 {
                     targetCanvas = canvas;
@@ -456,6 +471,12 @@ public sealed partial class DocumentView
         PointerPoint pt = e.GetCurrentPoint(TouchShapeDrawOverlay);
         if (e.Pointer.PointerDeviceType == PointerDeviceType.Touch)
         {
+            if (IsPalmTouchContact(pt) || _isShapeOverlayPenDrawing)
+            {
+                e.Handled = true;
+                return;
+            }
+
             _isLastPointerInputTouch = true;
             HideAnnotationPopupsImmediate();
             if (_isSlideSwipeActive || _isSlideSwipeAnimating)
@@ -507,6 +528,46 @@ public sealed partial class DocumentView
                     _isShapeOverlayTwoFingerNavigating = true;
                     EnsureInteractiveViewportStateInitialized(doc);
                 }
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Pointer.PointerDeviceType == PointerDeviceType.Pen)
+        {
+            _isLastPointerInputTouch = false;
+            ProtectedCursor = s_shapeOverlayCrossCursor;
+            if (pt.Properties.IsRightButtonPressed || pt.Properties.IsBarrelButtonPressed)
+            {
+                if (_isShapeOverlayPenDrawing && _shapeOverlayDrawCanvas is not null)
+                {
+                    _shapeOverlayDrawCanvas.CancelShapeDrawing();
+                    _isShapeOverlayPenDrawing = false;
+                    _shapeOverlayDrawPointerId = 0;
+                    _shapeOverlayDrawCanvas = null;
+                }
+
+                e.Handled = true;
+                return;
+            }
+
+            HideAnnotationPopupsImmediate();
+            if (TryFindRealizedCanvasAtOverlayPoint(pt.Position, out PdfPageCanvas? penCanvas, out Point penLocalPt) &&
+                penCanvas is not null)
+            {
+                try
+                {
+                    _ = TouchShapeDrawOverlay.CapturePointer(e.Pointer);
+                }
+                catch
+                {
+                }
+
+                penCanvas.BeginExternalTouchShapeDraw(ViewModel.ActiveShapeKind, penLocalPt);
+                _isShapeOverlayPenDrawing = true;
+                _shapeOverlayDrawPointerId = e.Pointer.PointerId;
+                _shapeOverlayDrawCanvas = penCanvas;
             }
 
             e.Handled = true;
@@ -614,6 +675,24 @@ public sealed partial class DocumentView
             return;
         }
 
+        if (e.Pointer.PointerDeviceType == PointerDeviceType.Pen &&
+            _isShapeOverlayPenDrawing &&
+            e.Pointer.PointerId == _shapeOverlayDrawPointerId &&
+            _shapeOverlayDrawCanvas is { } penShapeCanvas)
+        {
+            try
+            {
+                Point ptInCanvas = TouchShapeDrawOverlay.TransformToVisual(penShapeCanvas).TransformPoint(pt.Position);
+                penShapeCanvas.UpdateTouchShapeDrawPoint(ptInCanvas);
+            }
+            catch
+            {
+            }
+
+            e.Handled = true;
+            return;
+        }
+
         if (_shapeOverlayMouseCanvas is { IsDrawingShape: true } activeCanvas)
         {
             try
@@ -681,11 +760,65 @@ public sealed partial class DocumentView
 
             e.Handled = true;
         }
+        else if (e.Pointer.PointerDeviceType == PointerDeviceType.Pen &&
+                 _isShapeOverlayPenDrawing &&
+                 e.Pointer.PointerId == _shapeOverlayDrawPointerId)
+        {
+            _isReleasingShapeOverlayCapture = true;
+            try
+            {
+                TouchShapeDrawOverlay.ReleasePointerCapture(e.Pointer);
+            }
+            catch
+            {
+            }
+            finally
+            {
+                _isReleasingShapeOverlayCapture = false;
+            }
+
+            PdfPageCanvas? canvas = _shapeOverlayDrawCanvas;
+            _isShapeOverlayPenDrawing = false;
+            _shapeOverlayDrawPointerId = 0;
+            _shapeOverlayDrawCanvas = null;
+
+            if (canvas is not null)
+            {
+                try
+                {
+                    Point ptInCanvas = e.GetCurrentPoint(canvas).Position;
+                    canvas.CompleteExternalTouchShapeDraw(ptInCanvas, commitIfValid: true);
+                }
+                catch
+                {
+                    canvas.CompleteExternalTouchShapeDraw(null, commitIfValid: true);
+                }
+            }
+
+            e.Handled = true;
+        }
     }
 
     private void OnShapeOverlayPointerCanceled(object sender, PointerRoutedEventArgs e)
     {
-        if (_isReleasingShapeOverlayCapture || e.Pointer.PointerDeviceType != PointerDeviceType.Touch)
+        if (_isReleasingShapeOverlayCapture)
+        {
+            return;
+        }
+
+        if (e.Pointer.PointerDeviceType == PointerDeviceType.Pen &&
+            _isShapeOverlayPenDrawing &&
+            e.Pointer.PointerId == _shapeOverlayDrawPointerId)
+        {
+            PdfPageCanvas? canvas = _shapeOverlayDrawCanvas;
+            _isShapeOverlayPenDrawing = false;
+            _shapeOverlayDrawPointerId = 0;
+            _shapeOverlayDrawCanvas = null;
+            canvas?.CompleteExternalTouchShapeDraw(null, commitIfValid: true);
+            return;
+        }
+
+        if (e.Pointer.PointerDeviceType != PointerDeviceType.Touch)
         {
             return;
         }
@@ -709,7 +842,24 @@ public sealed partial class DocumentView
 
     private void OnShapeOverlayPointerCaptureLost(object sender, PointerRoutedEventArgs e)
     {
-        if (_isReleasingShapeOverlayCapture || e.Pointer.PointerDeviceType != PointerDeviceType.Touch)
+        if (_isReleasingShapeOverlayCapture)
+        {
+            return;
+        }
+
+        if (e.Pointer.PointerDeviceType == PointerDeviceType.Pen &&
+            _isShapeOverlayPenDrawing &&
+            e.Pointer.PointerId == _shapeOverlayDrawPointerId)
+        {
+            PdfPageCanvas? canvas = _shapeOverlayDrawCanvas;
+            _isShapeOverlayPenDrawing = false;
+            _shapeOverlayDrawPointerId = 0;
+            _shapeOverlayDrawCanvas = null;
+            canvas?.CompleteExternalTouchShapeDraw(null, commitIfValid: true);
+            return;
+        }
+
+        if (e.Pointer.PointerDeviceType != PointerDeviceType.Touch)
         {
             return;
         }
