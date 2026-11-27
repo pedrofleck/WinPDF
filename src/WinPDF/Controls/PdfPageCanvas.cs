@@ -1485,15 +1485,17 @@ public sealed partial class PdfPageCanvas : Grid
         bool shiftDown = (Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Shift) &
                           Windows.UI.Core.CoreVirtualKeyStates.Down) != 0;
 
+        bool alwaysLockAspect = _resizingAnnotation?.IsSignatureStamp == true;
         bool lockAspectByDefault = _resizingAnnotation?.Subtype == PdfAnnotationSubtype.Stamp;
-        bool preserveAspect = lockAspectByDefault ? !shiftDown : shiftDown;
+        bool preserveAspect = alwaysLockAspect || (lockAspectByDefault ? !shiftDown : shiftDown);
 
         double w = rawW;
         double h = rawH;
         if (preserveAspect && _resizeOrigRectDip.Width > 1.0 && _resizeOrigRectDip.Height > 1.0)
         {
-            double refW = lockAspectByDefault ? _resizeOrigRectDip.Width : 1.0;
-            double refH = lockAspectByDefault ? _resizeOrigRectDip.Height : 1.0;
+            bool useOriginalAspect = alwaysLockAspect || lockAspectByDefault;
+            double refW = useOriginalAspect ? _resizeOrigRectDip.Width : 1.0;
+            double refH = useOriginalAspect ? _resizeOrigRectDip.Height : 1.0;
             double scale = Math.Max(rawW / refW, rawH / refH);
             double maxScale = Math.Min(maxW / refW, maxH / refH);
             scale = Math.Min(scale, maxScale);

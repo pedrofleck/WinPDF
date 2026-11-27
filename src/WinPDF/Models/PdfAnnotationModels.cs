@@ -337,6 +337,16 @@ public sealed record PdfAnnotationInfo(
     /// <summary>Gets a value indicating whether this annotation represents a direct-on-page text box.</summary>
     public bool IsTextBox => Subtype == PdfAnnotationSubtype.FreeText || TextStyle is not null;
 
+    /// <summary>Subject tag applied to non-digital signature image stamps.</summary>
+    public const string SignatureStampSubject = "Signature";
+
+    /// <summary>Gets a value indicating whether this annotation is a non-digital handwritten or image signature stamp.</summary>
+    public bool IsSignatureStamp =>
+        Subtype == PdfAnnotationSubtype.Stamp &&
+        !IsSignatureWidget &&
+        TextStyle is null &&
+        string.Equals(Subject, SignatureStampSubject, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>Gets a value indicating whether this annotation is a text markup type (highlight, underline, squiggly, strikeout).</summary>
     public bool IsTextMarkup => Subtype is PdfAnnotationSubtype.Highlight or PdfAnnotationSubtype.Underline or PdfAnnotationSubtype.Squiggly or PdfAnnotationSubtype.StrikeOut;
 

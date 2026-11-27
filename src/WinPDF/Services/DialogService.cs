@@ -9,14 +9,23 @@ namespace WinPDF.Services;
 public sealed class DialogService : IDialogService
 {
     private readonly IWindowContext _windowContext;
+    private readonly ISignatureStoreService _signatureStoreService;
+    private readonly IFilePickerService _filePickerService;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="DialogService"/> class.
     /// </summary>
     /// <param name="windowContext">Window context providing access to the XamlRoot and DispatcherQueue.</param>
-    public DialogService(IWindowContext windowContext)
+    /// <param name="signatureStoreService">Local signature persistence service.</param>
+    /// <param name="filePickerService">File picker service for signature image uploads.</param>
+    public DialogService(
+        IWindowContext windowContext,
+        ISignatureStoreService signatureStoreService,
+        IFilePickerService filePickerService)
     {
         _windowContext = windowContext;
+        _signatureStoreService = signatureStoreService;
+        _filePickerService = filePickerService;
     }
 
     /// <inheritdoc/>
@@ -160,6 +169,38 @@ public sealed class DialogService : IDialogService
 
                 await dialog.ShowAsync();
                 tcs.TrySetResult();
+            }
+            catch (Exception ex)
+            {
+                tcs.TrySetException(ex);
+            }
+        });
+
+        return tcs.Task;
+    }
+
+    /// <inheritdoc/>
+    public Task<Models.SavedSignatureItem?> ShowSignaturePickerAsync(CancellationToken cancellationToken = default)
+    {
+        TaskCompletionSource<Models.SavedSignatureItem?> tcs = new();
+
+        _windowContext.DispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                if (_windowContext.XamlRoot is null)
+                {
+                    tcs.TrySetResult(null);
+                    return;
+                }
+
+                Views.SignaturePickerDialog dialog = new(_signatureStoreService, _filePickerService)
+                {
+                    XamlRoot = _windowContext.XamlRoot
+                };
+
+                await dialog.ShowAsync();
+                tcs.TrySetResult(dialog.SelectedSignature);
             }
             catch (Exception ex)
             {

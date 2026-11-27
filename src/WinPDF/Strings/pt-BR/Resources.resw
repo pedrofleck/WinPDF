@@ -434,4 +434,28 @@
   <data name="Settings_Annotations_AutoSaveInterval_1m.Content" xml:space="preserve"><value>1 minuto</value></data>
   <data name="Settings_Annotations_AutoSaveInterval_2m.Content" xml:space="preserve"><value>2 minutos</value></data>
   <data name="Settings_Annotations_AutoSaveInterval_5m.Content" xml:space="preserve"><value>5 minutos</value></data>
+  <data name="Insert_SignatureHint" xml:space="preserve"><value>Clique ou toque em qualquer lugar da página para posicionar a assinatura</value></data>
+  <data name="SignatureDialog_Title" xml:space="preserve"><value>Assinaturas</value></data>
+  <data name="SignatureDialog_DrawButton" xml:space="preserve"><value>Desenhar assinatura</value></data>
+  <data name="SignatureDialog_AddImageButton" xml:space="preserve"><value>Adicionar imagem</value></data>
+  <data name="SignatureDialog_CloseButton" xml:space="preserve"><value>Fechar</value></data>
+  <data name="SignatureDialog_EmptyText" xml:space="preserve"><value>Nenhuma assinatura salva ainda. Desenhe uma assinatura ou adicione uma imagem abaixo.</value></data>
+  <data name="SignatureDialog_LimitReached" xml:space="preserve"><value>Limite máximo de {0} assinaturas atingido. Exclua uma para adicionar outra.</value></data>
+  <data name="SignatureDialog_CountFormat" xml:space="preserve"><value>{0} / {1}</value></data>
+  <data name="SignatureDialog_SelectHint" xml:space="preserve"><value>Clique em uma assinatura para posicioná-la no documento</value></data>
+  <data name="SignatureDialog_DeleteToolTip" xml:space="preserve"><value>Excluir assinatura</value></data>
+  <data name="SignatureDialog_DeleteConfirmText" xml:space="preserve"><value>Excluir esta assinatura?</value></data>
+  <data name="SignatureDialog_DeleteConfirmButton" xml:space="preserve"><value>Excluir</value></data>
+  <data name="SignatureDialog_CancelButton" xml:space="preserve"><value>Cancelar</value></data>
+  <data name="SignatureDialog_OpaqueWarningTitle" xml:space="preserve"><value>Fundo transparente não detectado</value></data>
+  <data name="SignatureDialog_OpaqueWarningMessage" xml:space="preserve"><value>Esta imagem não possui fundo transparente. Você ainda pode adicioná-la, mas ela pode acabar encobrindo parte do documento atrás.</value></data>
+  <data name="SignatureDialog_AddAnywayButton" xml:space="preserve"><value>Adicionar mesmo assim</value></data>
+  <data name="SignatureDialog_DrawHint" xml:space="preserve"><value>Desenhe sua assinatura sobre a linha abaixo</value></data>
+  <data name="SignatureDialog_ClearButton" xml:space="preserve"><value>Limpar</value></data>
+  <data name="SignatureDialog_BackButton" xml:space="preserve"><value>Voltar</value></data>
+  <data name="SignatureDialog_SaveButton" xml:space="preserve"><value>Salvar assinatura</value></data>
+  <data name="SignatureDialog_ColorBlack" xml:space="preserve"><value>Tinta preta</value></data>
+  <data name="SignatureDialog_ColorBlue" xml:space="preserve"><value>Tinta azul</value></data>
+  <data name="SignatureDialog_ColorRed" xml:space="preserve"><value>Tinta vermelha</value></data>
+  <data name="SignatureDialog_OpaqueBadgeToolTip" xml:space="preserve"><value>Sem fundo transparente — esta assinatura pode encobrir parte do documento atrás dela.</value></data>
 </root>

@@ -1360,6 +1360,8 @@ internal sealed unsafe partial class PdfiumEngine
         double pageW = Math.Max(48.0, pageBox.Right - pageBox.Left);
         double pageH = Math.Max(48.0, pageBox.Top - pageBox.Bottom);
 
+        bool isSignature = string.Equals(request.Subject, PdfAnnotationInfo.SignatureStampSubject, StringComparison.OrdinalIgnoreCase);
+
         double widthPt;
         double heightPt;
         if (request.ExplicitWidthPt is > 4.0 and double ew &&
@@ -1367,6 +1369,25 @@ internal sealed unsafe partial class PdfiumEngine
         {
             widthPt = Math.Clamp(ew, 12.0, pageW);
             heightPt = Math.Clamp(eh, 12.0, pageH);
+        }
+        else if (isSignature)
+        {
+            double aspect = (double)request.PixelWidth / Math.Max(1, request.PixelHeight);
+            double targetW = Math.Clamp(pageW * 0.24, 96.0, 180.0);
+            double maxH = Math.Clamp(pageH * 0.12, 42.0, 96.0);
+            widthPt = targetW;
+            heightPt = widthPt / Math.Max(0.05, aspect);
+            if (heightPt > maxH)
+            {
+                heightPt = maxH;
+                widthPt = heightPt * aspect;
+            }
+
+            if (widthPt < 36.0 && aspect > 0.05)
+            {
+                widthPt = 36.0;
+                heightPt = Math.Min(maxH, widthPt / aspect);
+            }
         }
         else
         {
@@ -1388,8 +1409,10 @@ internal sealed unsafe partial class PdfiumEngine
 
         float wPt = (float)widthPt;
         float hPt = (float)heightPt;
-        float left = Math.Clamp((float)request.PdfX, pageBox.Left, Math.Max(pageBox.Left, pageBox.Right - wPt));
-        float top = Math.Clamp((float)request.PdfY, Math.Min(pageBox.Top, pageBox.Bottom + hPt), pageBox.Top);
+        float anchorLeft = isSignature ? (float)(request.PdfX - (wPt * 0.5)) : (float)request.PdfX;
+        float anchorTop = isSignature ? (float)(request.PdfY + (hPt * 0.5)) : (float)request.PdfY;
+        float left = Math.Clamp(anchorLeft, pageBox.Left, Math.Max(pageBox.Left, pageBox.Right - wPt));
+        float top = Math.Clamp(anchorTop, Math.Min(pageBox.Top, pageBox.Bottom + hPt), pageBox.Top);
         FsRectF rect = new()
         {
             Left = left,

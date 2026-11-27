@@ -387,7 +387,7 @@
                             </MenuFlyoutItem>
                             <MenuFlyoutItem
                                 x:Uid="InsertMenu_Signature"
-                                IsEnabled="False">
+                                Command="{x:Bind ViewModel.StartInsertSignatureCommand}">
                                 <MenuFlyoutItem.Icon>
                                     <FontIcon Glyph="&#xEE56;" />
                                 </MenuFlyoutItem.Icon>

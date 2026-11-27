@@ -22,6 +22,7 @@ public sealed partial class ShellViewModel : ObservableObject
     private readonly TileCache _tileCache;
     private readonly IWindowContext _windowContext;
     private readonly ISettingsService _settingsService;
+    private readonly ISignatureStoreService _signatureStoreService;
     private readonly Microsoft.UI.Dispatching.DispatcherQueue? _uiDispatcherQueue;
     private readonly bool _isInitializingSettings;
     private string? _pendingNotificationTitle;
@@ -676,13 +677,15 @@ public sealed partial class ShellViewModel : ObservableObject
     /// <param name="tileCache">Bitmap and tile cache.</param>
     /// <param name="windowContext">Window context providing UI dispatcher queue access.</param>
     /// <param name="settingsService">Settings persistence service.</param>
+    /// <param name="signatureStoreService">Local non-digital signature persistence service.</param>
     public ShellViewModel(
         IFilePickerService filePickerService,
         IDialogService dialogService,
         IPdfService pdfService,
         TileCache tileCache,
         IWindowContext windowContext,
-        ISettingsService settingsService)
+        ISettingsService settingsService,
+        ISignatureStoreService signatureStoreService)
     {
         _filePickerService = filePickerService;
         _dialogService = dialogService;
@@ -690,6 +693,7 @@ public sealed partial class ShellViewModel : ObservableObject
         _tileCache = tileCache;
         _windowContext = windowContext;
         _settingsService = settingsService;
+        _signatureStoreService = signatureStoreService;
         _uiDispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 
         _isInitializingSettings = true;
@@ -1965,6 +1969,39 @@ public sealed partial class ShellViewModel : ObservableObject
             PendingImageToInsert = new PdfCapturedImage((int)dstW, (int)dstH, pixels, subject);
             ActiveTool = AnnotationTool.InsertImage;
             NotificationRequested?.Invoke(string.Empty, ResourceStrings.Get(ResourceKeys.InsertImageHint));
+        }
+        catch (Exception ex)
+        {
+            NotificationRequested?.Invoke(string.Empty, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Opens the non-digital signature picker/drawing/upload dialog and enters placement mode (<see cref="AnnotationTool.InsertImage"/>).
+    /// </summary>
+    [RelayCommand]
+    public async Task StartInsertSignatureAsync()
+    {
+        if (CurrentDocument is null)
+        {
+            return;
+        }
+
+        IsAnnotationToolbarOpen = false;
+        IsAnnotationNoticeOpen = false;
+
+        try
+        {
+            SavedSignatureItem? selected = await _dialogService.ShowSignaturePickerAsync();
+            if (selected is null || CurrentDocument is null)
+            {
+                return;
+            }
+
+            (PdfCapturedImage image, _) = await _signatureStoreService.DecodeImageForSignatureAsync(selected.FilePath);
+            PendingImageToInsert = image with { Subject = PdfAnnotationInfo.SignatureStampSubject };
+            ActiveTool = AnnotationTool.InsertImage;
+            NotificationRequested?.Invoke(string.Empty, ResourceStrings.Get(ResourceKeys.InsertSignatureHint));
         }
         catch (Exception ex)
         {

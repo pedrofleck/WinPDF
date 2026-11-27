@@ -60,4 +60,11 @@ public interface IDialogService
         ViewModels.DocumentViewModel document,
         bool focusSignatures = false,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Displays the modal non-digital signature picker, drawing, and upload dialog.
+    /// </summary>
+    /// <param name="cancellationToken">A token to monitor for cancellation requests.</param>
+    /// <returns>The selected <see cref="Models.SavedSignatureItem"/>, or <see langword="null"/> if cancelled.</returns>
+    Task<Models.SavedSignatureItem?> ShowSignaturePickerAsync(CancellationToken cancellationToken = default);
 }

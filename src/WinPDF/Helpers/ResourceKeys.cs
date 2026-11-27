@@ -477,4 +477,76 @@ public static class ResourceKeys
 
     /// <summary>Tooltip for the Eraser button when set to point/partial stroke mode.</summary>
     public const string ToolEraserPointToolTip = "Tool_Eraser_PointToolTip";
+
+    /// <summary>Toast hint shown after selecting a signature to place on the page.</summary>
+    public const string InsertSignatureHint = "Insert_SignatureHint";
+
+    /// <summary>Title of the signature picker dialog.</summary>
+    public const string SignatureDialogTitle = "SignatureDialog_Title";
+
+    /// <summary>Button label to open the signature drawing pad.</summary>
+    public const string SignatureDialogDrawButton = "SignatureDialog_DrawButton";
+
+    /// <summary>Button label to upload a signature image.</summary>
+    public const string SignatureDialogAddImageButton = "SignatureDialog_AddImageButton";
+
+    /// <summary>Close button label on the signature picker dialog.</summary>
+    public const string SignatureDialogCloseButton = "SignatureDialog_CloseButton";
+
+    /// <summary>Empty state message when no saved signatures exist.</summary>
+    public const string SignatureDialogEmptyText = "SignatureDialog_EmptyText";
+
+    /// <summary>Notice shown when the maximum number of saved signatures has been reached.</summary>
+    public const string SignatureDialogLimitReached = "SignatureDialog_LimitReached";
+
+    /// <summary>Format string for the signature count badge (e.g. "2 / 6").</summary>
+    public const string SignatureDialogCountFormat = "SignatureDialog_CountFormat";
+
+    /// <summary>Helper subtitle instructing the user to click a saved signature to place it.</summary>
+    public const string SignatureDialogSelectHint = "SignatureDialog_SelectHint";
+
+    /// <summary>Tooltip for the delete button on a saved signature card.</summary>
+    public const string SignatureDialogDeleteToolTip = "SignatureDialog_DeleteToolTip";
+
+    /// <summary>Confirmation prompt text before deleting a saved signature.</summary>
+    public const string SignatureDialogDeleteConfirmText = "SignatureDialog_DeleteConfirmText";
+
+    /// <summary>Confirm delete button text inside the signature delete flyout.</summary>
+    public const string SignatureDialogDeleteConfirmButton = "SignatureDialog_DeleteConfirmButton";
+
+    /// <summary>Cancel button text inside the signature delete flyout or opaque image warning.</summary>
+    public const string SignatureDialogCancelButton = "SignatureDialog_CancelButton";
+
+    /// <summary>Warning title when an uploaded signature image has no transparent background.</summary>
+    public const string SignatureDialogOpaqueWarningTitle = "SignatureDialog_OpaqueWarningTitle";
+
+    /// <summary>Warning message when an uploaded signature image has no transparent background.</summary>
+    public const string SignatureDialogOpaqueWarningMessage = "SignatureDialog_OpaqueWarningMessage";
+
+    /// <summary>Action button text to add an opaque signature image anyway.</summary>
+    public const string SignatureDialogAddAnywayButton = "SignatureDialog_AddAnywayButton";
+
+    /// <summary>Instructional subtitle above the signature drawing pad.</summary>
+    public const string SignatureDialogDrawHint = "SignatureDialog_DrawHint";
+
+    /// <summary>Button label to clear the signature drawing pad.</summary>
+    public const string SignatureDialogClearButton = "SignatureDialog_ClearButton";
+
+    /// <summary>Button label to return from drawing pad to signature gallery.</summary>
+    public const string SignatureDialogBackButton = "SignatureDialog_BackButton";
+
+    /// <summary>Primary button label to save a drawn signature.</summary>
+    public const string SignatureDialogSaveButton = "SignatureDialog_SaveButton";
+
+    /// <summary>Accessible tooltip/name for the black signature ink swatch.</summary>
+    public const string SignatureDialogColorBlack = "SignatureDialog_ColorBlack";
+
+    /// <summary>Accessible tooltip/name for the blue signature ink swatch.</summary>
+    public const string SignatureDialogColorBlue = "SignatureDialog_ColorBlue";
+
+    /// <summary>Accessible tooltip/name for the red signature ink swatch.</summary>
+    public const string SignatureDialogColorRed = "SignatureDialog_ColorRed";
+
+    /// <summary>Tooltip shown on the yellow warning badge of a saved signature without a transparent background.</summary>
+    public const string SignatureDialogOpaqueBadgeToolTip = "SignatureDialog_OpaqueBadgeToolTip";
 }

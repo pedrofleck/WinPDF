@@ -139,6 +139,7 @@ public partial class App : Application
 
         // UI, Configuration & Window Context Services
         services.AddSingleton<ISettingsService, SettingsService>();
+        services.AddSingleton<ISignatureStoreService, SignatureStoreService>();
         services.AddSingleton<IWindowContext, WindowContext>();
         services.AddSingleton<IFilePickerService, FilePickerService>();
         services.AddSingleton<IDialogService, DialogService>();
