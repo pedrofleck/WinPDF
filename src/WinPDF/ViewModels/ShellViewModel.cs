@@ -2375,6 +2375,11 @@ public sealed partial class ShellViewModel : ObservableObject
             _tileCache.RemoveDocument(oldId);
         }
 
+        if (_settingsService.Settings.RememberDocumentWindowBounds)
+        {
+            DocumentWindowBoundsRestoreRequested?.Invoke(new DocumentWindowBounds(1280.0, 800.0, IsMaximized: false));
+        }
+
         Controls.PdfPageCanvas.ClearSlideBuffer();
         Controls.PdfPageCanvas.ReleaseReusableBuffer();
         Controls.PdfPageCanvas.TrimSharedGpuDevice();
