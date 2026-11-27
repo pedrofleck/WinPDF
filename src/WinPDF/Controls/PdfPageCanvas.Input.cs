@@ -193,6 +193,61 @@ public sealed partial class PdfPageCanvas
         return new Point(startDip.X + (sx * side), startDip.Y + (sy * side));
     }
 
+    internal bool HandleExternalMouseShapeClick(PdfAnnotationShapeKind kind, Point posInCanvasDip)
+    {
+        if (_isUnloaded || PageInfo is null)
+        {
+            return false;
+        }
+
+        SubscribeToActiveDocument();
+        _observedDocument?.ClearSelection();
+        if (_observedDocument is not null)
+        {
+            _observedDocument.SelectedAnnotation = null;
+        }
+
+        Point clampedPt = ClampToCanvasDip(posInCanvasDip);
+        if (!_isDrawingShape || _shapeDrawIsTouch)
+        {
+            _isDrawingShape = true;
+            _shapeDrawIsTouch = false;
+            _shapeDrawKind = kind;
+            _shapeDrawStartDip = clampedPt;
+            _shapeDrawRawEndDip = clampedPt;
+            _shapeDrawEndDip = clampedPt;
+            InvalidateOverlays();
+            return true;
+        }
+
+        _shapeDrawRawEndDip = clampedPt;
+        Point finalEndDip = ConstrainShapeEndPointDip(_shapeDrawKind, _shapeDrawStartDip, clampedPt, IsShiftKeyDown());
+        PdfAnnotationShapeKind commitKind = _shapeDrawKind;
+        Point commitStart = _shapeDrawStartDip;
+        _isDrawingShape = false;
+        _shapeDrawIsTouch = false;
+        InvalidateOverlays();
+
+        if (double.Hypot(finalEndDip.X - commitStart.X, finalEndDip.Y - commitStart.Y) >= 4.0)
+        {
+            ShapeCompleted?.Invoke(this, commitKind, ToPdfPoint(commitStart), ToPdfPoint(finalEndDip));
+        }
+
+        return false;
+    }
+
+    internal void UpdateExternalMouseShapePreview(Point posInCanvasDip)
+    {
+        if (!_isDrawingShape || _shapeDrawIsTouch || _isUnloaded || PageInfo is null)
+        {
+            return;
+        }
+
+        _shapeDrawRawEndDip = ClampToCanvasDip(posInCanvasDip);
+        _shapeDrawEndDip = ConstrainShapeEndPointDip(_shapeDrawKind, _shapeDrawStartDip, _shapeDrawRawEndDip, IsShiftKeyDown());
+        InvalidateOverlays();
+    }
+
     internal void RefreshShapePreviewConstraint()
     {
         if (!_isDrawingShape || PageInfo is null)

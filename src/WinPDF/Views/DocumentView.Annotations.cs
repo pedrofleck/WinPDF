@@ -183,6 +183,17 @@ public sealed partial class DocumentView
     private bool CancelShapeDrawingOnAllCanvases()
     {
         bool canceledAny = false;
+        if (_isShapeOverlayTouchDrawing || _shapeOverlayDrawCanvas is not null || _shapeOverlayMouseCanvas is not null)
+        {
+            _shapeOverlayDrawCanvas?.CancelShapeDrawing();
+            _shapeOverlayMouseCanvas?.CancelShapeDrawing();
+            _isShapeOverlayTouchDrawing = false;
+            _shapeOverlayDrawPointerId = 0;
+            _shapeOverlayDrawCanvas = null;
+            _shapeOverlayMouseCanvas = null;
+            canceledAny = true;
+        }
+
         foreach (PdfPageCanvas canvas in _activeCanvases)
         {
             if (canvas.IsDrawingShape)
@@ -2278,6 +2289,7 @@ public sealed partial class DocumentView
 
         _isInlineTextEditorOpen = true;
         _isCommittingInlineText = false;
+        SyncTouchShapeDrawOverlayVisibility();
         ApplyInlineTextStyleToUi();
         InlineTextEditorOverlay.Visibility = Visibility.Visible;
         RepositionInlineTextEditor();
@@ -2321,6 +2333,7 @@ public sealed partial class DocumentView
             InlineTextEditorOverlay.Visibility = Visibility.Collapsed;
         }
 
+        SyncTouchShapeDrawOverlayVisibility();
         UpdateTouchAnnotationResizeHandlesLayout();
     }
 

@@ -210,8 +210,7 @@ public sealed partial class PdfPageCanvas
         {
             ShellViewModel? shell = _shellViewModel ??= App.CurrentApp.Services.GetService<ShellViewModel>();
             DocumentViewModel? doc = _observedDocument ?? shell?.CurrentDocument;
-            usePagedTouchManip = shell?.ActiveTool == AnnotationTool.Shape ||
-                                 shell?.IsPresentationMode == true ||
+            usePagedTouchManip = shell?.IsPresentationMode == true ||
                                  (doc is not null && !doc.IsContinuous);
         }
 
@@ -588,6 +587,61 @@ public sealed partial class PdfPageCanvas
         if (!preserveTapHistory)
         {
             _lastTouchTapTick = 0;
+        }
+    }
+
+    internal void BeginExternalTouchShapeDraw(PdfAnnotationShapeKind kind, Point startInCanvasDip)
+    {
+        if (_isUnloaded || PageInfo is null)
+        {
+            return;
+        }
+
+        SubscribeToActiveDocument();
+        TouchSelectionDismissRequested?.Invoke();
+        _observedDocument?.ClearSelection();
+        if (_observedDocument is not null)
+        {
+            _observedDocument.SelectedAnnotation = null;
+        }
+
+        Point clampedStart = ClampToCanvasDip(startInCanvasDip);
+        _isDrawingShape = true;
+        _shapeDrawIsTouch = true;
+        _shapeDrawKind = kind;
+        _shapeDrawStartDip = clampedStart;
+        _shapeDrawRawEndDip = clampedStart;
+        _shapeDrawEndDip = clampedStart;
+        _shapeTouchPointerId = 0;
+        InvalidateOverlays();
+    }
+
+    internal void CompleteExternalTouchShapeDraw(Point? finalInCanvasDip, bool commitIfValid = true)
+    {
+        if (!_isDrawingShape || !_shapeDrawIsTouch)
+        {
+            return;
+        }
+
+        if (finalInCanvasDip is { } finalPt && PageInfo is not null)
+        {
+            _shapeDrawRawEndDip = ClampToCanvasDip(finalPt);
+        }
+
+        Point finalEndDip = ConstrainShapeEndPointDip(_shapeDrawKind, _shapeDrawStartDip, _shapeDrawRawEndDip, IsShiftKeyDown());
+        PdfAnnotationShapeKind commitKind = _shapeDrawKind;
+        Point commitStart = _shapeDrawStartDip;
+
+        _isDrawingShape = false;
+        _shapeDrawIsTouch = false;
+        _shapeTouchPointerId = 0;
+        InvalidateOverlays();
+
+        if (commitIfValid &&
+            PageInfo is not null &&
+            double.Hypot(finalEndDip.X - commitStart.X, finalEndDip.Y - commitStart.Y) >= 5.0)
+        {
+            ShapeCompleted?.Invoke(this, commitKind, ToPdfPoint(commitStart), ToPdfPoint(finalEndDip));
         }
     }
 

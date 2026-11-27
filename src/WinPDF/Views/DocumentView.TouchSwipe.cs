@@ -397,7 +397,10 @@ public sealed partial class DocumentView
 
     private void OnSlideSwipePointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (_isDraggingSelectionHandle ||
+        if (ReferenceEquals(e.OriginalSource, TouchShapeDrawOverlay) ||
+            _isShapeOverlayTouchDrawing ||
+            _isShapeOverlayTwoFingerNavigating ||
+            _isDraggingSelectionHandle ||
             _isDraggingTouchScrollScrubber ||
             IsDescendantOfTouchSelectionHandle(e.OriginalSource as DependencyObject) ||
             IsDescendantOfTouchResizeHandle(e.OriginalSource as DependencyObject))
@@ -613,7 +616,10 @@ public sealed partial class DocumentView
 
     private void OnSlideSwipePointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if (_isDraggingSelectionHandle ||
+        if (ReferenceEquals(e.OriginalSource, TouchShapeDrawOverlay) ||
+            _isShapeOverlayTouchDrawing ||
+            _isShapeOverlayTwoFingerNavigating ||
+            _isDraggingSelectionHandle ||
             _isDraggingTouchScrollScrubber ||
             IsDescendantOfTouchScrubber(e.OriginalSource as DependencyObject))
         {
@@ -1043,7 +1049,10 @@ public sealed partial class DocumentView
 
     private void OnSlideSwipeManipulationStarting(object sender, ManipulationStartingRoutedEventArgs e)
     {
-        if (_isDraggingSelectionHandle ||
+        if (ReferenceEquals(e.OriginalSource, TouchShapeDrawOverlay) ||
+            _isShapeOverlayTouchDrawing ||
+            _isShapeOverlayTwoFingerNavigating ||
+            _isDraggingSelectionHandle ||
             _isDraggingAnnotationMoveHandle ||
             _isDraggingAnnotationResizeHandle ||
             _isDraggingTouchScrollScrubber)
@@ -1077,7 +1086,10 @@ public sealed partial class DocumentView
 
     private void OnSlideSwipeManipulationStarted(object sender, ManipulationStartedRoutedEventArgs e)
     {
-        if (_isMouseButtonDown ||
+        if (ReferenceEquals(e.OriginalSource, TouchShapeDrawOverlay) ||
+            _isShapeOverlayTouchDrawing ||
+            _isShapeOverlayTwoFingerNavigating ||
+            _isMouseButtonDown ||
             _isDraggingSelectionHandle ||
             _isDraggingAnnotationMoveHandle ||
             _isDraggingAnnotationResizeHandle ||
@@ -1137,6 +1149,9 @@ public sealed partial class DocumentView
     private void OnSlideSwipeManipulationDelta(object sender, ManipulationDeltaRoutedEventArgs e)
     {
         if (!_isManipulatingSlideSwipe ||
+            ReferenceEquals(e.OriginalSource, TouchShapeDrawOverlay) ||
+            _isShapeOverlayTouchDrawing ||
+            _isShapeOverlayTwoFingerNavigating ||
             _isDraggingSelectionHandle ||
             _isDraggingAnnotationMoveHandle ||
             _isDraggingAnnotationResizeHandle ||

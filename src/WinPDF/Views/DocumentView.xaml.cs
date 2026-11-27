@@ -226,6 +226,7 @@ public sealed partial class DocumentView : Page
         PrevPageZone.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         NextPageZone.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         ExitPresentationTopZone.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
+        TouchShapeDrawOverlay.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         ContinuousScrollViewer.AddHandler(UIElement.PointerWheelChangedEvent, _wheelHandler, true);
         ContinuousScrollViewer.SizeChanged += OnScrollViewerSizeChanged;
 
@@ -382,6 +383,7 @@ public sealed partial class DocumentView : Page
 
         SyncActiveShapeUi();
         SyncStrokeThicknessUi();
+        SyncTouchShapeDrawOverlayVisibility();
         if (FloatingSearchBar is not null)
         {
             FloatingSearchBar.Visibility = ViewModel.IsSearchOpen ? Visibility.Visible : Visibility.Collapsed;
@@ -437,6 +439,7 @@ public sealed partial class DocumentView : Page
         CancelTouchSelectionHandleDragImmediate();
         CancelTouchAnnotationMoveHandleDragImmediate();
         CancelTouchAnnotationResizeHandleDragImmediate();
+        ResetTouchShapeOverlayState();
         StopTouchAnnotPanPolling();
         _activeTouchSelectingCanvas = null;
         _activeTouchShapeCanvas = null;
@@ -477,6 +480,10 @@ public sealed partial class DocumentView : Page
         ViewModel.PrintRequested -= OnPrintRequestedAsync;
         ViewModel.BackgroundTrimRequested -= OnBackgroundTrimRequested;
         StopAutoScroll();
+        if (_wheelHandler is not null && TouchShapeDrawOverlay is not null)
+        {
+            TouchShapeDrawOverlay.RemoveHandler(UIElement.PointerWheelChangedEvent, _wheelHandler);
+        }
         _transitionStoryboard?.Stop();
         _searchBarStoryboard?.Stop();
         _annotationToolbarStoryboard?.Stop();
@@ -740,6 +747,8 @@ public sealed partial class DocumentView : Page
             {
                 PlayEmptyStateTransitionAnimation();
             }
+
+            SyncTouchShapeDrawOverlayVisibility();
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsSearchOpen))
         {
@@ -785,6 +794,7 @@ public sealed partial class DocumentView : Page
                 CancelShapeDrawingOnAllCanvases();
             }
 
+            SyncTouchShapeDrawOverlayVisibility();
             SyncPagedScrollViewerModes();
             UpdateTouchAnnotationResizeHandlesLayout();
         }
@@ -814,6 +824,7 @@ public sealed partial class DocumentView : Page
         }
         else if (e.PropertyName == nameof(ShellViewModel.IsPresentationMode))
         {
+            SyncTouchShapeDrawOverlayVisibility();
             CloseInlineTextEditorImmediate();
             HideTouchScrollScrubberImmediate();
             CancelInteractiveSlideSwipeImmediate();
@@ -2262,6 +2273,18 @@ public sealed partial class DocumentView : Page
                 return;
             }
 
+            if (TouchShapeDrawOverlay?.Visibility == Visibility.Visible)
+            {
+                e.Handled = true;
+                int zoomDelta = props.MouseWheelDelta;
+                if (zoomDelta != 0)
+                {
+                    StartOrUpdateSmoothWheelZoom(currentPt.Position, zoomDelta);
+                }
+
+                return;
+            }
+
             return;
         }
 
@@ -2397,6 +2420,11 @@ public sealed partial class DocumentView : Page
                     DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, SyncPagedScrollViewerModes);
                 }
             }
+        }
+        else if (TouchShapeDrawOverlay?.Visibility == Visibility.Visible && props.MouseWheelDelta != 0)
+        {
+            e.Handled = true;
+            PanPagedScrollViewerBy(0.0, props.MouseWheelDelta * 0.85);
         }
     }
 
@@ -4452,7 +4480,7 @@ public sealed partial class DocumentView : Page
             _isFittedVertically = true;
         }
 
-        bool useCustomSwipeManip = isPagedOrPres || ViewModel?.ActiveTool == AnnotationTool.Shape;
+        bool useCustomSwipeManip = isPagedOrPres;
         ApplyManipulationModeToViewerContent(useCustomSwipeManip);
     }
 

@@ -1248,6 +1248,25 @@
                     </Grid>
                 </Canvas>
 
+                <!-- Dedicated Shape Drawing Overlay (above ScrollViewer with ManipulationMode="None" so DirectManipulation never steals touch drags) -->
+                <Grid
+                    x:Name="TouchShapeDrawOverlay"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
+                    Background="Transparent"
+                    Canvas.ZIndex="88"
+                    ManipulationMode="None"
+                    IsHoldingEnabled="False"
+                    IsRightTapEnabled="False"
+                    Visibility="Collapsed"
+                    PointerEntered="OnShapeOverlayPointerEntered"
+                    PointerExited="OnShapeOverlayPointerExited"
+                    PointerPressed="OnShapeOverlayPointerPressed"
+                    PointerMoved="OnShapeOverlayPointerMoved"
+                    PointerReleased="OnShapeOverlayPointerReleased"
+                    PointerCanceled="OnShapeOverlayPointerCanceled"
+                    PointerCaptureLost="OnShapeOverlayPointerCaptureLost" />
+
                 <!-- Touch Selected Annotation Overlay (Move body + Corner Resize handles + Non-modal QuickBar above ScrollViewer so DirectManipulation never steals touch drags) -->
                 <Canvas
                     x:Name="TouchAnnotationResizeHandlesCanvas"
