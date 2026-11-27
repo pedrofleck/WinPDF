@@ -314,3 +314,17 @@ dotnet build WinPDF.sln -c Debug -p:Platform=x64
 # Resource key parity check
 pwsh .\tools\Check-Resources.ps1
 ```
+
+---
+
+## 8. Release Notes & Packaging Convention
+
+When preparing a release package (via `tools\Package-Release.ps1` for both `x64` and `ARM64`):
+
+1. **Draft a temporary editable Markdown file first** in the repository root (`RELEASE_NOTES_<version>.md`, gitignored via `RELEASE_NOTES_*.md`) so the user can review and edit the text before publishing the GitHub Release (and remove it once published).
+2. **Scope notes & binaries strictly to the target release:** If `main` has already moved on to the next version (e.g. `main` is `0.6.2-alpha.6` while releasing `0.6.1`), **never** change `Directory.Build.props` on `main` or package `main` for the older version — write the release notes strictly from commits up to that version's cut point and build its `x64` / `ARM64` packages from an isolated worktree of that frozen commit.
+3. **Match recent release style (`v0.5.5-alpha.5`, `v0.6.0-alpha.6`):**
+   - Write in English with a concise opening summary, grouped `###` sections, and short bullet points.
+   - **Focus on end-user impact:** Avoid granular implementation details (internal method names, line counts, file splits); briefly mention only major backend/architecture milestones relevant to performance, reliability, or compatibility.
+   - End with the standard `### Downloads` Markdown table listing the `Setup` `.exe` and portable `.zip` packages for both `x64` and `ARM64`.
+

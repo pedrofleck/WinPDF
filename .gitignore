@@ -41,6 +41,7 @@ artifacts/
 
 # local stuff
 local-todo.md
+RELEASE_NOTES_*.md
 ram_optimization_plan.md
 sample.pdf
 test_doc.pdf
